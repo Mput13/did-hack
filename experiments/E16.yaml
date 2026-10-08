@@ -1,44 +1,67 @@
-title: Способы оркестрации языковой модели
+title: Способы оркестрации языковой модели — проверка обвязки на имитаторе
 kind: orchestration
-question: Меняет ли способ обращения к одной и той же модели (оркестрация) качество планов?
+question: >-
+  Работает ли обвязка пяти способов обращения к модели (один запрос, автор и критик, голосование, выбор модели
+  по таблице последствий, выбор расчётом), и что она делает с ответами «плохой» модели?
 hypothesis: >-
-  Схема «scored» (модель предлагает варианты, расчёт оценивает последствия, модель выбирает лучший)
-  даёт счёт выше, чем один запрос («single»), при той же модели; схемы «critic» и «vote» дают
-  промежуточный результат.
+  Способ «scored» (модель предлагает планы, код считает последствия, модель выбирает по таблице) даёт счёт выше
+  одного запроса при той же модели; «critic» и «vote» — промежуточный результат.
 method: >-
-  Шесть вариантов агента (правило, single, critic, vote, scored, scored_calc) на четырёх характерах имитатора
-  модели (нормальный, робкий, случайный, беспечный) на уровнях medium и hard.
-expect: Схема scored превосходит single по среднему счёту и возвратам, особенно на робком и беспечном характерах.
-refute: Ни одна схема оркестрации не даёт значимого преимущества над single при одинаковом характере модели.
+  Правило и пять способов на четырёх характерах имитатора (обычный, робкий, случайный, беспечный), уровни medium и
+  hard, по 20 отложенных сценариев. Характер — одно искажение, одинаковое во всех ролях: робкий имитатор и как критик
+  зовёт домой, и из таблицы выбирает возврат. Имитатор отвечает правилом, поэтому опыт проверяет только обвязку:
+  число обращений, запасное правило, совпадение single с правилом. О способах на настоящей модели он ничего не
+  говорит — это сравнение делает did/orchestration_eval.py (см. research/findings/R3.md). Три варианта wait*
+  показывают цену одного только ожидания ответа: решения те же, что у правила, но робот стоит после каждого.
+expect: >-
+  На обычном характере все способы совпадают с правилом. На искажённых характерах critic, vote и scored не лучше
+  single (критик и выбор искажены так же), а scored_calc ближе к правилу: выбирает расчёт, а не модель.
+refute: Способ, в котором решение принимает сама модель (critic, vote, scored), даёт счёт выше single с интервалом выше нуля.
 arms:
   - id: rule
-    label: Базовое правило
+    label: Правило без модели
     agent: adaptive
   - id: single
-    label: Одиночный запрос (single)
+    label: Один запрос (single)
     agent: adaptive_llm
     llm: {kind: mock}
-    config: {llm_strategy: single}
   - id: critic
-    label: Автор и критик (critic)
+    label: Автор, критик, исправление (critic)
     agent: adaptive_llm
     llm: {kind: mock}
     config: {llm_strategy: critic}
   - id: vote
-    label: Голосование N=3 (vote)
+    label: Голосование трёх запросов (vote)
     agent: adaptive_llm
     llm: {kind: mock}
     config: {llm_strategy: vote}
   - id: scored
-    label: Таблица последствий (scored)
+    label: Модель выбирает по таблице (scored)
     agent: adaptive_llm
     llm: {kind: mock}
     config: {llm_strategy: scored}
   - id: scored_calc
-    label: Расчёт выбирает из предложений модели
+    label: Расчёт выбирает из планов модели (scored_calc)
     agent: adaptive_llm
     llm: {kind: mock}
     config: {llm_strategy: scored_calc}
+  # Плата за ожидание без настоящей модели: тот же один запрос к имитатору, но после каждого решения робот стоит
+  # столько секунд, сколько настоящая модель в среднем тратила на решение (single 15 с, critic 24 с, scored 29 с).
+  - id: wait15
+    label: Один запрос, ожидание 15 с на решение
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 15}
+  - id: wait24
+    label: Один запрос, ожидание 24 с на решение
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 24}
+  - id: wait29
+    label: Один запрос, ожидание 29 с на решение
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 29}
 levels: [medium, hard]
 seeds: 20
 seed_start: 1001
@@ -55,10 +78,12 @@ conditions:
   - id: careless
     label: Беспечный характер
     llm: {temperament: careless}
-metrics: [score, samples_share, returned, llm_calls]
+metrics: [score, samples_share, returned, llm_calls, time, penalties]
 claims:
-  - {metric: score, a: scored, b: single, text: "Схема scored даёт счёт выше single", better: higher}
-  - {metric: score, a: critic, b: single, text: "Схема critic даёт счёт выше single", better: higher}
-  - {metric: score, a: vote, b: single, text: "Схема vote даёт счёт выше single", better: higher}
-
-  - {metric: score, a: scored_calc, b: single, text: "Расчёт выбирает против single", better: higher}
+  - {metric: score, a: critic, b: single, text: "critic даёт счёт выше single", better: higher}
+  - {metric: score, a: vote, b: single, text: "vote даёт счёт выше single", better: higher}
+  - {metric: score, a: scored, b: single, text: "scored даёт счёт выше single", better: higher}
+  - {metric: score, a: scored_calc, b: single, text: "scored_calc (выбирает расчёт) даёт счёт выше single", better: higher}
+  - {metric: score, a: scored, b: scored_calc, text: "выбор модели по таблице лучше выбора расчётом", better: higher}
+  - {metric: score, a: wait15, b: single, text: "ожидание 15 с на решение снижает счёт", better: lower}
+  - {metric: score, a: wait29, b: wait15, text: "ожидание 29 с хуже ожидания 15 с", better: lower}

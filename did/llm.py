@@ -733,7 +733,7 @@ def request_json(client, messages, parse, schema=None, max_repairs=1, role='user
         return None, f'внутренняя ошибка: {type(e).__name__}: {_brief(e)}', exchanges, _ms(t0) + saved
 
 
-def request_plan(client, state, system_prompt=None, max_repairs=1, role='user'):
+def request_plan(client, state, system_prompt=None, max_repairs=1):
     """План от модели с проверкой; на ошибку разбора или проверки модель исправляет ответ.
 
     Исключений не бросает: при любой неудаче PlanResult(plan=None, error=...). Обмены — как в request_json.
@@ -744,7 +744,7 @@ def request_plan(client, state, system_prompt=None, max_repairs=1, role='user'):
     except Exception as e:
         return PlanResult(None, f'внутренняя ошибка планировщика: {type(e).__name__}: {_brief(e)}', [], _ms(t0))
     return PlanResult(*request_json(client, messages, lambda text: parse_plan(text, state), plan_schema(state),
-                                    max_repairs, role=role))
+                                    max_repairs))
 
 
 # --- сводка по обменам -------------------------------------------------------------------------
