@@ -544,8 +544,9 @@
   const story = D.stories[0];
   (() => {
     const all = Object.values(E).filter(Boolean);
-    F.runs_total = all.reduce((n, e) => n + (e.spec.manual ? 0 : e.runs.length), 0).toLocaleString('ru');
-    F.errors_total = all.reduce((n, e) => n + e.errors, 0);
+    const extra = D.research_runs || { runs: 0, errors: 0 };
+    F.runs_total = (all.reduce((n, e) => n + (e.spec.manual ? 0 : e.runs.length), 0) + extra.runs).toLocaleString('ru');
+    F.errors_total = all.reduce((n, e) => n + e.errors, 0) + extra.errors;
     const walls = E.E1.runs.map(r => r.wall_s).filter(Boolean).sort((a, b) => a - b);
     F.wall = num(walls[walls.length >> 1], 1);
     F.built = D.built;

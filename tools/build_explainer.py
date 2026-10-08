@@ -204,6 +204,18 @@ def research():
     return {'studies': studies, 'built': time.strftime('%d.%m.%Y %H:%M')}
 
 
+def research_runs():
+    """Сколько прогонов и аварий в опытах исследовательского контура (E15 и дальше)."""
+    runs = errors = 0
+    for p in sorted((ROOT / 'experiments').glob('E*.yaml')):
+        path = RUNS / p.stem / 'summary.json'
+        if int(p.stem[1:]) > 14 and path.exists():
+            s = json.loads(path.read_text(encoding='utf-8'))
+            runs += len(s['runs'])
+            errors += len(s['errors'])
+    return {'runs': runs, 'errors': errors}
+
+
 def shots():
     """Снимки окон (docs/explainer/shots/*.jpg) — внутрь страницы, чтобы она оставалась одним файлом."""
     import base64
@@ -269,7 +281,11 @@ def main():
         'levels': LEVELS,
         'stories': stories,
         'gazebo': gazebo,
-        'experiments': {p.stem: experiment(p.stem) for p in sorted((ROOT / 'experiments').glob('E*.yaml'))},
+        # Опыты E1–E14 показаны на странице графиками и встраиваются целиком; опыты исследовательского контура
+        # (E15 и дальше) представлены выводами в журнале, от них нужен только счёт прогонов.
+        'experiments': {p.stem: experiment(p.stem) for p in sorted((ROOT / 'experiments').glob('E*.yaml'))
+                        if int(p.stem[1:]) <= 14},
+        'research_runs': research_runs(),
         'science': science_story(),
         'inq_accuracy': inquiry_accuracy(),
         'traps': trap_table(),
