@@ -1,0 +1,13 @@
+#!/bin/bash
+# Запуск команды в окружении проекта из любого рабочего дерева git (в том числе из веток исследований).
+#   ./px python -m pytest tests -q
+#   ./px python -m did.experiments E15 --jobs 4
+# Окружение одно на все деревья и лежит в основном каталоге проекта; код берётся из текущего каталога.
+set -e
+MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+if [ -f "$MAIN/research/PAUSE" ] && [ "$(pwd -P)" != "$MAIN" ]; then
+    echo "Исследования на паузе (есть файл research/PAUSE в основном каталоге). Подождите и повторите." >&2
+    exit 75
+fi
+export PATH="$HOME/.pixi/bin:$PATH"
+exec nice -n 10 pixi run --manifest-path "$MAIN/pixi.toml" "$@"
