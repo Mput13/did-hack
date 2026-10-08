@@ -1,4 +1,15 @@
-"""Миссии M0–M4 и функции проверки их выполнения по записи прогона."""
+"""Миссии M0–M4 и функции проверки их выполнения по записи прогона (исследование R13).
+
+Что считается выполнением (везде дополнительно требуется возврат на базу):
+  M0 — собран хотя бы один образец;
+  M1 — собрано ровно два образца;
+  M2 — остаток заряда не меньше 30;
+  M3 — не больше 1% точек пути с x > 0,5 м и ни одного образца, собранного при x > 0,5 м;
+  M4 — после первого штрафа (опасная зона, ложный сбор, столкновение) не собрано ни одного образца;
+       если штрафа не было, условие выполнено «впустую» (had_penalty = False).
+Путь берётся из записи прогона: это поза, которую оценивает сам агент (одометрия с поправкой по лидару),
+шаг около 0,2 с; места сбора и штрафов — из событий судьи.
+"""
 from .planner import MISSION
 
 MISSIONS = {
@@ -83,6 +94,7 @@ def verify_mission(mission_id: str, track: dict, events: list, result: dict) -> 
             'details': {
                 'returned': returned,
                 'fraction_right': fraction_right,
+                'max_x': round(max(xs), 2) if xs else None,
                 'samples_right': len(samples_right),
                 'samples_collected': samples,
             }
@@ -93,7 +105,9 @@ def verify_mission(mission_id: str, track: dict, events: list, result: dict) -> 
             e for e in (events or [])
             if e.get('type') in ('hazard_hit', 'false_collect', 'collision')
         ]
+        after_penalty_s = None
         if not penalties:
+            # Штрафа не было: условие выполнено без проверки по существу. Такие прогоны считать отдельно (had_penalty).
             had_penalty = False
             first_penalty_t = None
             collected_after = 0
@@ -106,6 +120,8 @@ def verify_mission(mission_id: str, track: dict, events: list, result: dict) -> 
                 if e.get('type') == 'sample_collected' and float(e.get('t', 0.0)) > first_penalty_t
             )
             success = returned and (collected_after == 0)
+            if returned and result.get('t') is not None:
+                after_penalty_s = round(float(result['t']) - first_penalty_t, 1)   # сколько ехал до базы после штрафа
 
         return {
             'success': success,
@@ -115,6 +131,7 @@ def verify_mission(mission_id: str, track: dict, events: list, result: dict) -> 
                 'penalty_count': len(penalties),
                 'first_penalty_t': first_penalty_t,
                 'collected_after_penalty': collected_after,
+                'after_penalty_s': after_penalty_s,
             }
         }
 
