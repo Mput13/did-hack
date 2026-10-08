@@ -1,4 +1,5 @@
-// Один слайд «Реальные результаты: шесть опытов» — в оформлении презентации второго чекпоинта.
+// Слайд «Реальные результаты: шесть опытов» и за ним восемь слайдов с роликами прогонов — в оформлении
+// презентации второго чекпоинта.
 //
 //   pixi run python presentation/figures/results_numbers.py     # числа из сводок опытов → data/results.json
 //   cd presentation && node build_results_slide.js              # results_slide.pptx, текст рассказа, PDF и картинка
@@ -23,6 +24,7 @@ const NAME = "results_slide";
 const OUT = path.join(__dirname, `${NAME}.pptx`);
 const PDF = path.join(__dirname, `${NAME}.pdf`);
 const PREVIEW = path.join(__dirname, `${NAME}_preview.jpg`);
+const SLIDES = path.join(__dirname, "slides_results");
 const SPEECH = path.join(__dirname, `${NAME}_speech.md`);
 const D = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "results.json"), "utf8"));
 
@@ -154,6 +156,85 @@ s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: X0, y: yb, w: CW, h: 0.42, rectRa
 text([{ text: "Что не подтвердилось. ", options: { bold: true, color: C.accent1 } }, { text: NOT_SHOWN, options: { color: C.background1 } }],
   { x: X0 + 0.2, y: yb, w: CW - 0.4, h: 0.42, fontSize: 12 });
 
+// ---------- слайды с роликами: по одному на пример прогона ----------
+// Гифки собирает figures/experiment_clips.py. В PowerPoint, Keynote и Google Slides они идут в режиме показа;
+// в PDF остаётся первый кадр гифки — итоговая картинка прогона.
+const CLIPS_DIR = path.join(__dirname, "assets", "clips");
+const CLIP_SIZE = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(CLIPS_DIR, "clips.json"), "utf8")).map((c) => [c.name, c]));
+const K = D.clips, M = D.r13.missions;
+const all = (r) => (r.samples_collected === r.samples_total ? `все ${r.samples_total}` : String(r.samples_collected));
+const GIFS = [
+  {
+    clip: "e1_plan_vs_adaptive", title: "Опыт 1. Агент против готового маршрута",
+    lead: "Один сценарий: слева робот едет по готовому маршруту, справа перестраивает его по измерениям",
+    big: ROWS[0].big, small: `${ROWS[0].small} · ${D.e1.runs} прогонов, трудный уровень`, say: ROWS[0].say,
+    watch: `В этом прогоне: ${ru(K.e1[0].score)} очка против ${ru(K.e1[1].score)}, собрано ${K.e1[0].samples_collected} и ${K.e1[1].samples_collected} образцов из ${K.e1[1].samples_total}.`,
+  },
+  {
+    clip: "e9_search", title: "Опыт 2. Как искать образцы",
+    lead: "Один сценарий среднего уровня, три способа искать по датчику без направления",
+    big: ROWS[1].big, small: `${ROWS[1].small} к подъёму по сигналу · ${D.e9.runs} прогонов`, say: ROWS[1].say,
+    watch: `В этом прогоне спираль собрала ${K.e9[0].samples_collected} образца из ${K.e9[0].samples_total}, подъём по сигналу — ${K.e9[1].samples_collected}, карта вероятностей — ${all(K.e9[2])}.`,
+  },
+  {
+    clip: "p1_sensor_fault", title: "Опыт 3. Сбой датчика: ехать или ждать",
+    lead: "Датчик образцов выходит из строя на полминуты: прежний агент едет дальше, новый стоит и ждёт",
+    big: ROWS[2].big, small: `${ROWS[2].small} · ${D.p1.runs} прогонов, трудный уровень`, say: ROWS[2].say,
+    watch: `Чёрным — путь за время сбоя, жёлтое кольцо — робот ждёт. В этом прогоне: ${ru(K.p1[0].score)} очка против ${ru(K.p1[1].score)}.`,
+  },
+  {
+    clip: "r13_two_samples", title: "Опыт 4. Миссия, заданная словами",
+    lead: "Задание: «Собери ровно два образца и сразу возвращайся на базу»",
+    big: M.M1.model_every, small: `прогонов с моделью выполнили задание; правило — ${M.M1.rule}`, say: ROWS[3].say,
+    watch: `Правило текста не читает и собирает дальше: ${K.m1[0].samples_collected} образцов. Модель после второго поворачивает на базу.`,
+  },
+  {
+    clip: "r13_boundary", title: "Опыт 4. Миссия словами: запретная половина",
+    lead: "Задание: «Не заезжай в правую половину арены (x больше 0,5 м)»",
+    big: M.M3.model_every, small: `прогонов без заезда за черту; правило — ${M.M3.rule}`,
+    say: `Запрет есть только в тексте задания. Здесь модель отвечает на каждое решение; если часть решений оставить правилу — ${M.M3.model}.`,
+    watch: "Красная черта — граница из задания. Робот на правиле её пересекает, робот с моделью — нет.",
+  },
+  {
+    clip: "e17_journal", title: "Опыт 5. Журнал гипотез и скрытая правда",
+    lead: "Справа — журнал робота; после финиша его выводы сверяются со скрытой правдой среды",
+    big: ROWS[4].big, small: `гипотез о грунте верны; у адаптивного агента — ${pct(D.e17.soil.adaptive.share)}`, say: ROWS[4].say,
+    watch: "Строка появляется, когда робот выдвигает гипотезу. Ошибка в строке H6: грунт сменился как раз во время измерения.",
+  },
+  {
+    clip: "e7_fast_vs_gazebo", title: "Опыт 6. Перенос в Gazebo",
+    lead: "Один сценарий трудного уровня, один агент, два симулятора",
+    big: ROWS[5].big, small: `средняя разность счёта · ${D.e7.pairs} сценариев`,
+    say: `В ${D.e7.close} сценариях из ${D.e7.pairs} счёт сходится до 6 очков. Систематического сдвига нет.`,
+    watch: `В этом сценарии: ${ru(K.e7[0].score)} очка в быстром симуляторе и ${ru(K.e7[1].score)} в Gazebo. Бледная линия справа — путь из быстрого симулятора.`,
+  },
+  {
+    clip: "g2_gazebo_fix", title: "Опыт 6. Сбой, который нашёл Gazebo",
+    lead: "Трудный сценарий 5 в Gazebo: до правки агента и после неё",
+    big: `${D.e7.after.returned} из ${D.e7.after.n}`, small: "возвратов на базу после правки, без столкновений",
+    say: "Робот задел столб, отъехал назад вслепую и потерял положение. В быстром симуляторе этого не было видно.",
+    watch: `До правки: ${K.g2[0].collisions} столкновения, ${ru(K.g2[0].score)} очка; пунктир — где робот себя считал. После: ${ru(K.g2[1].score)} очка.`,
+  },
+];
+const GIF_Y = 1.85, GIF_W = 8.45, GIF_H = 4.95;
+GIFS.forEach((g) => {
+  const sl = pres.addSlide({ masterName: "CONTENT" });
+  sl.addText(g.title, { placeholder: "title" });
+  sl.addText(g.lead, { placeholder: "body" });
+  sl.addNotes(`${g.say} ${g.watch}`);
+  const size = CLIP_SIZE[g.clip], aspect = size.width / size.height;
+  const w = Math.min(GIF_W, GIF_H * aspect);
+  sl.addImage({ path: path.join(CLIPS_DIR, `${g.clip}.gif`), x: X0, y: GIF_Y, w, h: w / aspect, altText: g.lead });
+  const x = X0 + GIF_W + 0.3, cw = X0 + CW - x;
+  const t = (str, o) => sl.addText(str, { isTextBox: true, margin: 0, valign: "top", align: "left", color: C.text1, fontSize: 14, ...o });
+  t(g.big, { x, y: GIF_Y, w: cw, h: 0.62, fontSize: 34, bold: true, color: C.accent1, valign: "middle" });
+  t(g.small, { x, y: GIF_Y + 0.66, w: cw, h: 0.5, fontSize: 12, color: C.accent5 });
+  t(g.say, { x, y: GIF_Y + 1.3, w: cw, h: 1.6, fontSize: 15 });
+  sl.addShape(pres.shapes.LINE, { x, y: GIF_Y + 3.05, w: cw, h: 0, line: { color: "D5D9DE", width: 0.75 } });
+  t("В ролике", { x, y: GIF_Y + 3.15, w: cw, h: 0.28, fontSize: 11, bold: true, color: C.accent5 });
+  t(g.watch, { x, y: GIF_Y + 3.45, w: cw, h: 1.5, fontSize: 12.5 });
+});
+
 // ---------- текст рассказа ----------
 function writeSpeech() {
   const lines = ["# Реальные результаты: шесть опытов — текст рассказа", "",
@@ -177,11 +258,14 @@ function render() {
   fs.copyFileSync(made, PDF);
   console.log("PDF:", PDF);
   if (!pdftoppm) return console.warn("pdftoppm не найден: картинка слайда не обновлена (brew install poppler).");
-  const p = spawnSync(pdftoppm, ["-jpeg", "-r", "144", "-singlefile", PDF, path.join(tmp, "slide")], { encoding: "utf8" });
-  if (p.status !== 0) { console.error(p.stderr); process.exit(1); }
-  fs.copyFileSync(path.join(tmp, "slide.jpg"), PREVIEW);
   fs.rmSync(tmp, { recursive: true, force: true });
-  console.log("картинка:", PREVIEW);
+  fs.rmSync(SLIDES, { recursive: true, force: true });
+  fs.mkdirSync(SLIDES);
+  const p = spawnSync(pdftoppm, ["-jpeg", "-r", "110", PDF, path.join(SLIDES, "slide")], { encoding: "utf8" });
+  if (p.status !== 0) { console.error(p.stderr); process.exit(1); }
+  const files = fs.readdirSync(SLIDES).filter((f) => f.endsWith(".jpg")).sort();
+  fs.copyFileSync(path.join(SLIDES, files[0]), PREVIEW);
+  console.log(`картинки: ${SLIDES} (${files.length} слайдов)`);
 }
 
 (async () => {
