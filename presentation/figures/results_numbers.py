@@ -14,7 +14,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from tools.build_showcase import MISSIONS, RUNS, exp1, exp5, load, pair, stat, summary  # noqa: E402
+from tools.build_showcase import MISSIONS, R13_RUNS, RUNS, exp1, exp5, load, pair, stat, summary  # noqa: E402
 
 OUT = ROOT / 'presentation' / 'data' / 'results.json'
 
@@ -67,6 +67,19 @@ def main():
                'after': {'n': len(after), 'returned': sum(r['returned'] for r in after),
                          'collisions': sum(r['collisions'] for r in after)}},
     }
+    # Прогоны, которые идут в роликах на слайдах (presentation/figures/experiment_clips.py): их итоги для подписей.
+    res = lambda path: {k: load(path)['result'][k] for k in ('score', 'samples_collected', 'samples_total', 'returned', 'collisions')}  # noqa: E731
+    m = R13_RUNS / 'missions'
+    out['clips'] = {
+        'e1': [res(RUNS / 'E1' / a / 'hard-1026.json.gz') for a in ('fixed', 'adaptive')],
+        'e9': [res(RUNS / 'E9' / a / 'medium-1005.json.gz') for a in ('spiral', 'gradient', 'adaptive')],
+        'p1': [res(RUNS / '_showcase' / a / 'hard-8024.json.gz') for a in ('adaptive', 'adaptive_v2')],
+        'm1': [res(m / a / 'hard-1001.json.gz') for a in ('M1_rule', 'M1_llm')],
+        'm3': [res(m / a / 'hard-1002.json.gz') for a in ('M3_rule', 'M3_llm_ask')],
+        'e7': [res(RUNS / 'E7' / a / 'hard-4.json.gz') for a in ('fastsim', 'gazebo')],
+        'g2': [res(RUNS / 'E7' / 'gazebo' / 'hard-5.json.gz'), res(RUNS / 'F1_v2' / 'adaptive_v2' / 'hard-5.json.gz')],
+    }
+    out['r13']['missions'] = {mm[0]: {'rule': mm[2], 'model': mm[3], 'model_every': mm[4]} for mm in MISSIONS}
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding='utf-8')
     print(json.dumps(out, ensure_ascii=False, indent=1))
