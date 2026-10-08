@@ -1,0 +1,46 @@
+title: План на остаток прогона и разведка перед сбором — перепроверка после исправлений
+kind: main
+question: >-
+  Лучше ли нынешнего «лучшая цель сейчас» план на остаток прогона с пересчётом или короткая разведка перед
+  сбором — после исправления ошибок, найденных ревью, и на выборке, которой хватает для ответа?
+hypothesis: >-
+  Хотя бы один из двух вариантов — adaptive_tour, adaptive_survey — набирает больше очков, чем adaptive, на
+  одних и тех же сценариях и возвращается на базу не реже.
+method: >-
+  Нетронутые сценарии 9001–9160 (160 штук), уровень hard, базовые и «научные» правила. Код и настройки
+  заморожены до запуска; отладка шла только на сценариях 1–80 (tools/a1_dev.py), сценарии 6001–6040 уже
+  использованы опытом E23 и в подборе не участвовали. Считается один раз. Оракулы (did/oracle.py) — мерила:
+  им быстрый симулятор сообщает часть правды сценария.
+expect: >-
+  На отладочных сценариях после исправлений оба варианта на уровне adaptive (разность в пределах ±3 очков);
+  ожидается то же. Оракулы: знание мест и знание среды дают по 9–14 очков, «знает всё» — около 92.
+refute: >-
+  Критерий записан до запуска: вариант считается лучше нынешнего, если нижняя граница 95% интервала парной
+  разности счёта с adaptive выше нуля и при этом он возвращается на базу не реже adaptive (разность доли
+  возвратов не меньше нуля). Гипотеза о варианте опровергнута, если верхняя граница интервала разности счёта
+  не выше нуля; ноль внутри интервала — «различие не показано».
+arms:
+  - {id: adaptive, label: С адаптацией (нынешний), agent: adaptive}
+  - {id: adaptive_tour, label: 'A. План на остаток прогона', agent: adaptive_tour}
+  - {id: adaptive_survey, label: 'B. Сначала разведка (6 ед.), потом сбор', agent: adaptive_survey}
+  - {id: oracle_samples, label: 'Оракул: знает места образцов', agent: oracle_samples}
+  - {id: oracle_samples_tour, label: 'Оракул: знает места образцов, обход по плану', agent: oracle_samples_tour}
+  - {id: oracle_env, label: 'Оракул: знает грунты и опасные зоны', agent: oracle_env}
+  - {id: oracle_all, label: 'Оракул: знает всё', agent: oracle_all}
+conditions:
+  - {id: base, label: Базовые правила}
+  - {id: science, label: «Научные» правила,
+     rules: {drain_per_rad: 0.12, load_drain: 0.05, battery_sigma: 0.02, faults: true, hazard_battery_hit: 0.0}}
+levels: [hard]
+seeds: 160
+seed_start: 9001
+metrics: [score, samples_share, returned, penalties, battery_used]
+claims:
+  - {metric: score, a: adaptive_tour, b: adaptive, text: 'A. План на остаток прогона набирает больше очков'}
+  - {metric: returned, a: adaptive_tour, b: adaptive, text: 'A. План на остаток прогона возвращается не реже', better: higher}
+  - {metric: score, a: adaptive_survey, b: adaptive, text: 'B. Разведка 6 ед. перед сбором набирает больше очков'}
+  - {metric: returned, a: adaptive_survey, b: adaptive, text: 'B. Разведка 6 ед. перед сбором возвращается не реже', better: higher}
+  - {metric: score, a: oracle_samples, b: adaptive, text: 'Подсказка: места образцов при прежнем правиле'}
+  - {metric: score, a: oracle_env, b: adaptive, text: 'Подсказка: грунты и опасные зоны'}
+  - {metric: score, a: oracle_all, b: adaptive, text: 'Подсказка: всё сразу'}
+  - {metric: score, a: oracle_samples_tour, b: oracle_samples, text: 'Замена порядка обхода при известных местах'}
