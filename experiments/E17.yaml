@@ -1,0 +1,32 @@
+title: Достоверность журнала гипотез против скрытой правды среды
+kind: science
+question: Какая доля гипотез робота верна по скрытой правде среды, и совпадает ли это с вердиктами самого агента?
+hypothesis: >-
+  Журнал робота достоверен: подавляющее большинство подтверждённых гипотез (не менее 80%) верны
+  по объективному состоянию среды; относительная ошибка названного множителя грунта не превышает 30%;
+  среди гипотез, помеченных агентом как опровергнутые, доля фактически верных минимальна.
+method: >-
+  Агенты adaptive и scientist выполняют по 40 сценариев на уровнях medium и hard.
+  Каждая гипотеза сверяется со скрытым состоянием мира на момент её выдвижения.
+  Сравнение проводится в базовом режиме (base) и в режиме с комплексными сбоями (science).
+arms:
+  - {id: adaptive, label: С адаптацией, agent: adaptive}
+  - {id: scientist, label: Исследователь, agent: scientist}
+levels: [medium, hard]
+seeds: 40
+conditions:
+  - id: base
+    label: Базовые правила
+    rules: {}
+  - id: science
+    label: Научные правила
+    rules:
+      drain_per_rad: 0.12
+      load_drain: 0.05
+      battery_sigma: 0.02
+      faults: true
+      hazard_battery_hit: 0.0
+metrics: [hyp_correct_share, hyp_confirmed_correct, hyp_refuted_correct, hyp_soil_error, samples_share, returned, score]
+claims:
+  - {metric: hyp_confirmed_correct, a: scientist, b: adaptive, text: Исследователь подтверждает гипотезы не менее точно, better: higher}
+  - {metric: hyp_soil_error, a: scientist, b: adaptive, text: Ошибка оценки множителя грунта у исследователя не выше, better: lower}

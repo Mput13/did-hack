@@ -4,6 +4,7 @@
 заряд. Остальное объясняет, почему они получились такими.
 """
 import math
+import re
 
 import numpy as np
 
@@ -28,7 +29,12 @@ METRICS = {
     'inq_wrong': ('Ошибочных выводов за прогон', 'шт.', 'lower'),
     'inq_insufficient': ('Исход «недостаточно данных» за прогон', 'шт.', 'lower'),
     'inq_energy': ('Заряд на опыты', 'ед.', 'lower'),
-    'faults_found': ('Найдено сбоев', 'доля', 'higher'),
+        'faults_found': ('Найдено сбоев', 'доля', 'higher'),
+    # проверка гипотез против скрытой правды сценария (score_hypotheses)
+    'hyp_correct_share': ('Доля верных гипотез', 'доля', 'higher'),
+    'hyp_confirmed_correct': ('Верно подтверждённых гипотез', 'доля', 'higher'),
+    'hyp_refuted_correct': ('Верных среди опровергнутых', 'доля', 'lower'),
+    'hyp_soil_error': ('Ошибка множителя грунта', 'доля', 'lower'),
     # исследования по заданию (did/study.py): оценка робота против скрытой правды сценария
     'study_error_pct': ('Ошибка оценки', '% от истины', 'lower'),
     'study_covered': ('Истина в заявленном интервале 95%', 'доля прогонов', 'higher'),
@@ -237,3 +243,240 @@ def score_inquiries(inquiries, scenario, world):
             found += 1
     out['faults'], out['faults_found'] = len(faults), found
     return out
+
+
+def score_hypotheses(hypotheses, scenario, world, events=None):
+    """Сверка гипотез агента со скрытой правдой сценария.
+
+    Исходы:
+      'correct'      — верна
+      'wrong'        — неверна
+      'unverifiable' — проверить нечем
+
+    Виды:
+      - sample: верна, если в момент выдвижения в радиусе 0.35 м лежал несобранный образец
+        (образцы собираются по ходу прогона — время сбора есть в events записи);
+      - soil: верна, если в названной точке (и окрестности 0.2 м) в тот момент действительно был дорогой
+        грунт (множитель >= 1.4 с учётом soil_change);
+        дополнительно — относительная ошибка названного множителя;
+      - hazard: верна, если названное место пересекается с настоящей зоной, существовавшей к тому моменту
+        (с учётом new_hazard);
+      - sensor: верна, если в тот момент действительно шёл сбой датчика.
+    """
+    from .scenario import Scenario, soil_mult
+    if hasattr(hypotheses, 'hypotheses'):
+        hyp_list = hypotheses.hypotheses
+    else:
+        hyp_list = list(hypotheses)
+
+    if isinstance(scenario, dict):
+        scenario = Scenario.from_dict(scenario)
+
+    world = world or []
+    events = events or []
+
+    def get_kind(h):
+        k = h.get('key', '')
+        s = h.get('statement', '')
+        if k.startswith('law:'):
+            return 'law'
+        if k.startswith('sample:') or k == 'sample' or 'образец лежит' in s or ('образец' in s and not k.startswith('law:')):
+            return 'sample'
+        if k.startswith('soil:') or k == 'soil' or 'грунт' in s:
+            return 'soil'
+        if k.startswith('hazard:') or k == 'hazard' or 'опасн' in s:
+            return 'hazard'
+        if k.startswith('sensor') or 'датчик' in s:
+            return 'sensor'
+        return 'unknown'
+
+    def get_point(h):
+        d = h.get('data') or {}
+        if 'x' in d and 'y' in d and d['x'] is not None and d['y'] is not None:
+            return float(d['x']), float(d['y'])
+        m = re.search(r'\(([-+]?[0-9]*\.?[0-9]+);\s*([-+]?[0-9]*\.?[0-9]+)\)', h.get('statement', ''))
+        if m:
+            return float(m.group(1)), float(m.group(2))
+        return None
+
+    # Предварительный разбор событий сбора образцов
+    collected_samples = []
+    for e in events:
+        if e.get('type') == 'sample_collected':
+            t_col = float(e.get('t', 0.0))
+            s_idx = e.get('sample')
+            collected_samples.append((t_col, s_idx, (e.get('x'), e.get('y'))))
+
+    faults = fault_intervals(world)
+
+    for h in hyp_list:
+        kind = get_kind(h)
+        h['kind'] = kind
+        t_open = float(h.get('t_open', 0.0))
+
+        if kind == 'sample':
+            pt = get_point(h)
+            if pt is None or scenario is None or not hasattr(scenario, 'samples'):
+                verdict = 'unverifiable'
+            else:
+                collected_before = set()
+                for t_col, s_idx, (ex, ey) in collected_samples:
+                    if t_col < t_open - 1e-4:
+                        if s_idx is not None and s_idx < len(scenario.samples):
+                            collected_before.add(s_idx)
+                        elif ex is not None and ey is not None:
+                            for i, sp in enumerate(scenario.samples):
+                                if math.dist((ex, ey), sp) <= 0.15:
+                                    collected_before.add(i)
+                uncollected = [tuple(p) for i, p in enumerate(scenario.samples) if i not in collected_before]
+                if uncollected and min(math.dist(pt, sp) for sp in uncollected) <= 0.35:
+                    verdict = 'correct'
+                else:
+                    verdict = 'wrong'
+
+        elif kind == 'soil':
+            pt = get_point(h)
+            if pt is None or scenario is None or not hasattr(scenario, 'soils'):
+                verdict = 'unverifiable'
+            else:
+                active_soils = list(scenario.soils)
+                sc_events = getattr(scenario, 'events', []) or []
+                soil_evs = [ev for ev in sc_events if ev.get('type') == 'soil_change']
+                if soil_evs:
+                    change_t = next((float(w['t']) for w in world if w.get('type') == 'soil_change'), None)
+                    if change_t is None:
+                        change_t = float(soil_evs[0].get('t', 0.0))
+                    if change_t <= t_open:
+                        active_soils = list(soil_evs[0].get('soils', []))
+
+                hx, hy = pt
+                test_pts = [(hx, hy)]
+                for r_step in (0.05, 0.10, 0.15, 0.20):
+                    for a in np.linspace(0, 2 * math.pi, 8, endpoint=False):
+                        test_pts.append((hx + r_step * math.cos(a), hy + r_step * math.sin(a)))
+                true_mult = max(soil_mult(active_soils, px, py) for px, py in test_pts)
+                verdict = 'correct' if true_mult >= 1.4 else 'wrong'
+
+                named_mult = (h.get('data') or {}).get('mult')
+                if named_mult is None:
+                    m_mult = re.search(r'в\s+([\d\.]+)\s+раза', h.get('statement', ''))
+                    if m_mult:
+                        named_mult = float(m_mult.group(1))
+                if named_mult is not None:
+                    rel_err = abs(float(named_mult) - true_mult) / true_mult
+                    h['rel_error'] = round(float(rel_err), 4)
+
+        elif kind == 'hazard':
+            pt = get_point(h)
+            if pt is None or scenario is None or not hasattr(scenario, 'hazards'):
+                verdict = 'unverifiable'
+            else:
+                d = h.get('data') or {}
+                hr = d.get('r')
+                if hr is None:
+                    rm = re.search(r'радиусом около\s+([\d\.]+)', h.get('statement', ''))
+                    hr = float(rm.group(1)) if rm else 0.3
+                else:
+                    hr = float(hr)
+
+                active_hazards = list(scenario.hazards)
+                sc_events = getattr(scenario, 'events', []) or []
+                for ev in sc_events:
+                    if ev.get('type') == 'new_hazard':
+                        ev_t = float(ev.get('t', 0.0))
+                        w_t = next((float(w['t']) for w in world if w.get('type') == 'new_hazard'), ev_t)
+                        if w_t <= t_open:
+                            active_hazards.append(ev['zone'])
+
+                hx, hy = pt
+                intersects = False
+                for z in active_hazards:
+                    zx = z.x if hasattr(z, 'x') else z['x']
+                    zy = z.y if hasattr(z, 'y') else z['y']
+                    shape = getattr(z, 'shape', None) or (z.get('shape') if isinstance(z, dict) else 'circle')
+                    if shape == 'circle':
+                        zr = z.r if hasattr(z, 'r') else z.get('r', 0.0)
+                        if math.dist((hx, hy), (zx, zy)) <= hr + zr:
+                            intersects = True
+                            break
+                    else:
+                        zw = z.w if hasattr(z, 'w') else z.get('w', 0.0)
+                        zh = z.h if hasattr(z, 'h') else z.get('h', 0.0)
+                        dx = max(0.0, abs(hx - zx) - zw / 2)
+                        dy = max(0.0, abs(hy - zy) - zh / 2)
+                        if math.hypot(dx, dy) <= hr:
+                            intersects = True
+                            break
+                verdict = 'correct' if intersects else 'wrong'
+
+        elif kind == 'sensor':
+            active = any(k.startswith('sensor') and a - 0.5 <= t_open <= b + 0.5 for k, a, b in faults)
+            if not active and scenario is not None:
+                sc_events = getattr(scenario, 'events', []) or []
+                for ev in sc_events:
+                    if ev.get('type') == 'sensor_fault':
+                        t0 = float(ev.get('t', 0.0))
+                        t1 = t0 + float(ev.get('duration', 0.0))
+                        if t0 - 0.5 <= t_open <= t1 + 0.5:
+                            active = True
+                            break
+            verdict = 'correct' if active else 'wrong'
+
+        else:
+            verdict = 'unverifiable'
+
+        h['truth_verdict'] = verdict
+
+    total = len(hyp_list)
+    correct = sum(1 for h in hyp_list if h.get('truth_verdict') == 'correct')
+    wrong = sum(1 for h in hyp_list if h.get('truth_verdict') == 'wrong')
+    unverifiable = sum(1 for h in hyp_list if h.get('truth_verdict') == 'unverifiable')
+
+    confirmed = [h for h in hyp_list if h.get('status') == 'confirmed']
+    refuted = [h for h in hyp_list if h.get('status') == 'refuted']
+
+    confirmed_correct = sum(1 for h in confirmed if h.get('truth_verdict') == 'correct')
+    refuted_correct = sum(1 for h in refuted if h.get('truth_verdict') == 'correct')
+    all_soil_errors = [h['rel_error'] for h in hyp_list if 'rel_error' in h]
+
+    confusion = {
+        st: {v: sum(1 for h in hyp_list if h.get('status') == st and h.get('truth_verdict') == v)
+             for v in ('correct', 'wrong', 'unverifiable')}
+        for st in ('confirmed', 'refuted', 'outdated', 'open')
+    }
+
+    by_kind = {}
+    for k in ('sample', 'soil', 'hazard', 'sensor', 'law'):
+        kh = [h for h in hyp_list if h.get('kind') == k]
+        conf = [h for h in kh if h.get('status') == 'confirmed']
+        ref = [h for h in kh if h.get('status') == 'refuted']
+        k_errors = [h['rel_error'] for h in kh if 'rel_error' in h]
+        by_kind[k] = {
+            'total': len(kh),
+            'correct': sum(1 for h in kh if h.get('truth_verdict') == 'correct'),
+            'wrong': sum(1 for h in kh if h.get('truth_verdict') == 'wrong'),
+            'unverifiable': sum(1 for h in kh if h.get('truth_verdict') == 'unverifiable'),
+            'confirmed': len(conf),
+            'confirmed_correct': sum(1 for h in conf if h.get('truth_verdict') == 'correct'),
+            'refuted': len(ref),
+            'refuted_correct': sum(1 for h in ref if h.get('truth_verdict') == 'correct'),
+            'confusion': {
+                st: {v: sum(1 for h in kh if h.get('status') == st and h.get('truth_verdict') == v)
+                     for v in ('correct', 'wrong', 'unverifiable')}
+                for st in ('confirmed', 'refuted', 'outdated', 'open')
+            },
+            'rel_error_mean': round(float(np.mean(k_errors)), 4) if k_errors else None,
+        }
+
+    return {
+        'total': total,
+        'correct': correct,
+        'wrong': wrong,
+        'unverifiable': unverifiable,
+        'correct_share': round(correct / total, 4) if total > 0 else None,
+        'confirmed_correct': round(confirmed_correct / len(confirmed), 4) if confirmed else None,
+        'refuted_correct': round(refuted_correct / len(refuted), 4) if refuted else None,
+        'soil_error': round(float(np.mean(all_soil_errors)), 4) if all_soil_errors else None,
+        'by_kind': by_kind,
+        'confusion': confusion,
+    }
