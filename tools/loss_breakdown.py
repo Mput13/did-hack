@@ -15,8 +15,9 @@
 ближайшему из ещё не собранных; «сбой датчика» ставится, только если сбой шёл во время подъезда;
 «заряда не хватало» — только если его и правда не хватало. Что этими правилами не объясняется,
 идёт в отдельную причину «неясно». После P3 «знал» значит то же, что у агента: до решения о возврате место
-было кандидатом (пик вероятности в круге 0,25 м не ниже порога агента). Если уверенность у образца набралась
-только кольцом от далёких показаний или уже по дороге домой, причина — «место не было выделено». Справочно
+было в его списке кандидатов (список строит тот же SampleBelief.candidates по снимку карты из записи). Если
+уверенность у образца набралась только кольцом от далёких показаний или уже по дороге домой, причина — «место не
+было выделено». Снимки карты идут раз в 2 с и квантованы: кандидат, проживший меньше, разбору не виден. Справочно
 считается, сколько несобранных образцов робот проехал в радиусе сбора при уверенности, с которой он собирает. Оракул недостижим: поиск образцов по датчику без направления
 стоит пути. Поэтому «лишний путь» показан отдельной строкой справки.
 """
@@ -219,31 +220,35 @@ def _belief_peaks(tr, points, radius=0.35, known=0.35):
     return out, when
 
 
-def _disc_kernel(radius, res):
-    k = int(math.ceil(radius / res))
-    yy, xx = np.mgrid[-k:k + 1, -k:k + 1]
-    return (np.hypot(xx, yy) * res <= radius).astype(float)
+def _candidate_snaps(tr):
+    """Кандидаты агента на каждом снимке карты: [(t, [(x, y), ...])].
 
-
-def _spot_times(tr, point, near=0.5, radius=0.25):
-    """Моменты, когда место образца было кандидатом агента: в пределах near от него есть клетка, вокруг
-    которой в круге radius набрана вероятность не ниже порога агента candidate_mass (так кандидатов отбирает
-    SampleBelief.candidates). Кольцо от далёкого показания, проходящее через место, под это не подходит."""
-    from scipy import ndimage
+    Отбор делает тот же код, что у агента: карта из снимка кладётся в SampleBelief и вызывается его
+    candidates с порогом агента candidate_mass — локальные максимумы, только допустимые клетки, не больше пяти
+    мест (так планировщик получает кандидатов в Agent._state). Точность ограничена записью: снимок раз в
+    belief_dt (2 с), вероятность хранится как round(255·√p) — кандидат, проживший меньше шага снимков, не виден,
+    а место с массой у самого порога может попасть не на ту сторону.
+    """
+    from did.belief import SampleBelief
     b = tr.get('belief')
     if not b:
         return []
     need = ((tr.get('agent') or {}).get('config') or {}).get('candidate_mass', 0.35)
-    ys = b['y0'] + (np.arange(b['h']) + 0.5) * b['res']
-    xs = b['x0'] + (np.arange(b['w']) + 0.5) * b['res']
-    around = np.hypot(xs[None, :] - point[0], ys[:, None] - point[1]) <= near
-    kernel = _disc_kernel(radius, b['res'])
+    sb = SampleBelief(load_arena(), 1, (tr.get('rules') or {}).get('sensor_range_m', 2.0))
+    assert (sb.h, sb.w) == (b['h'], b['w']) and abs(sb.res - b['res']) < 1e-9, 'снимок карты не с этой арены'
     out = []
     for snap in b['snaps']:
-        p = (decode_grid(snap['data'], b['h'], b['w']).astype(float) / 255.0) ** 2
-        if ndimage.convolve(p, kernel, mode='constant')[around].max() >= need:
-            out.append(snap['t'])
+        sb.p = ((decode_grid(snap['data'], b['h'], b['w']).astype(float) / 255.0) ** 2)[sb.iy, sb.ix]
+        out.append((snap['t'], [(c['x'], c['y']) for c in sb.candidates(min_mass=need)]))
     return out
+
+
+def _spot_times(tr, point, near=0.5, snaps=None):
+    """Моменты, когда место образца было кандидатом агента: в списке кандидатов (_candidate_snaps) есть место
+    не дальше near от образца. Кольцо от далёкого показания, проходящее через место, и место, вытесненное из
+    списка пятью более сильными, под это не подходят."""
+    snaps = _candidate_snaps(tr) if snaps is None else snaps
+    return [t for t, cands in snaps if any(math.hypot(x - point[0], y - point[1]) <= near for x, y in cands)]
 
 
 def _passed_in_reach(tr, rules, point):
@@ -405,6 +410,7 @@ def analyze(tr):
     tx, ty = np.array(tr['track']['x']), np.array(tr['track']['y'])
     back_t = next((p['t'] for p in tr['plans'] if p['subgoals'] and p['subgoals'][0]['type'] == 'return_base'),
                   res['t'])
+    cand_snaps = None                       # кандидаты агента по снимкам карты: считаются, когда понадобятся
     for i, peak, known in zip(missed, peaks, known_at):
         sx, sy = samples[i]
         mine = owned.get(i, [])
@@ -416,7 +422,8 @@ def analyze(tr):
         elif peak >= 0.35:
             # Знал, но не поехал. «Знал» — место было кандидатом агента до решения о возврате, а не кольцом
             # от далёких показаний. «Заряда не хватало» — только если его и правда не хватало.
-            spot = [t for t in _spot_times(tr, samples[i]) if t < back_t]
+            cand_snaps = _candidate_snaps(tr) if cand_snaps is None else cand_snaps
+            spot = [t for t in _spot_times(tr, samples[i], snaps=cand_snaps) if t < back_t]
             cause = 'sample_vague' if not spot else \
                 'sample_unclear' if _could_afford(tr, scenario, rules, samples[i], spot) else 'sample_no_charge'
         else:

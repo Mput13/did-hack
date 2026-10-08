@@ -248,3 +248,52 @@ def test_spot_is_a_peak_not_a_ring(arena):
     rec.add_belief(3.0, b)
     tr = {'belief': rec.belief, 'agent': {'config': {'candidate_mass': 0.35}}}
     assert lb._spot_times(tr, ring) == [3.0]
+
+
+def test_candidate_must_be_on_the_agents_own_list():
+    """Находка ревью. E26, hard-11002, образец № 4: масса у места набрана на 36–40 с, но в список кандидатов
+    агента (локальные максимумы, не больше пяти) место до возврата не попадает — это «место не было выделено»."""
+    from did.recorder import load_trace
+    from did.runner import RUNS
+    s = run_episode('hard', 11002, 'adaptive_v2', experiment='_test', arm='p3_loss')
+    tr = load_trace(RUNS / s['file'])
+    sample = tuple(tr['scenario']['samples'][4])
+    back = next(p['t'] for p in tr['plans'] if p['subgoals'] and p['subgoals'][0]['type'] == 'return_base')
+    snaps = lb._candidate_snaps(tr)
+    assert len(snaps) == len(tr['belief']['snaps']) and all(len(c) <= 5 for _, c in snaps)
+    spot = lb._spot_times(tr, sample, snaps=snaps)
+    assert spot and min(spot) > back                               # кандидатом место стало только по дороге домой
+    row = lb.analyze(tr)
+    assert row['detail']['missed'][4]['cause'] == 'sample_vague'
+    assert abs(sum(row['loss'].values()) - row['gap']) < 0.05
+
+
+# --- приёмка -----------------------------------------------------------------------------------------
+
+def _summary(extra_miss):
+    """Синтетический итог: v4 набирает на 2 очка больше (интервал выше нуля), возврат прежний."""
+    runs = []
+    for seed in range(40):
+        for arm, score, miss in (('old', 80.0, 0), ('new', 82.0 + 0.1 * (seed % 5), int(extra_miss and seed == 7))):
+            runs.append({'arm': arm, 'condition': 'base', 'level': 'hard', 'seed': seed,
+                         'metrics': {'score': score, 'returned': 1.0, 'samples_share': 0.9, 'hazard_hits': 0.0,
+                                     'false_collects': miss, 'time': 100.0}})
+    return {'runs': runs, 'seeds': 40, 'errors': [],
+            'spec': {'seed_start': 0, 'conditions': [{'id': 'base', 'label': 'Базовые'}]}}
+
+
+def test_acceptance_rejects_an_extra_false_collect(monkeypatch):
+    import p2_acceptance
+    import p3_acceptance
+    p2_judge = p2_acceptance.judge
+    monkeypatch.setattr(p2_acceptance, 'judge', p3_acceptance.judge)
+    row = p2_acceptance.table(_summary(False), 'new', 'old').splitlines()[-1]
+    assert '+2.20' in row and row.rstrip(' |').split('|')[-1].strip().startswith('да')
+    row = p2_acceptance.table(_summary(True), 'new', 'old').splitlines()[-1]
+    assert '+2.20' in row and row.rstrip(' |').split('|')[-1].strip().startswith('**нет**')
+    ok = {'mean': 2.0, 'ci': [1.0, 3.0]}
+    same, more = {'mean': 0.0, 'ci': [0.0, 0.0]}, {'mean': 0.025, 'ci': [0.0, 0.075]}
+    assert p3_acceptance.judge('base', 'hard', ok, same, same)[0]
+    assert not p3_acceptance.judge('base', 'hard', ok, same, more)[0]
+    assert not p3_acceptance.judge('science', 'hard', ok, same, more)[0]
+    assert p2_judge('base', 'hard', {'mean': 3.0, 'ci': [1.0, 4.0]}, same, more)[0]     # критерий P2 прежний
