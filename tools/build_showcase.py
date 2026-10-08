@@ -337,7 +337,7 @@ def clip(name, caption):
     meta = {c['name']: c for c in json.loads((CLIPS / 'clips.json').read_text(encoding='utf-8'))}[name]
     data = base64.b64encode((CLIPS / f'{name}.gif').read_bytes()).decode('ascii')
     return (f'<figure class="clip"><img src="data:image/gif;base64,{data}" width="{meta["width"]}" '
-            f'height="{meta["height"]}" loading="lazy" alt="{esc(caption)}"><figcaption>{caption}</figcaption></figure>')
+            f'height="{meta["height"]}" alt="{esc(caption)}"><figcaption>{caption}</figcaption></figure>')
 
 
 def qa(items):
