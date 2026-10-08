@@ -606,6 +606,10 @@ export async function render(root, ctx) {
   const stopBtn = btn('Стоп', 'pl-btn--stop', () => send('stop'));
   const homeBtn = btn('Домой', '', () => send('home'), 'Вернуться на базу (−2,0; −0,5)');
   const resetBtn = btn('Сбросить', '', () => send('reset'), 'Стереть карту и след, начать прогон заново');
+  // Только в режиме карты SLAM (pixi run demo --slam-map): робот сам едет к границам увиденного.
+  const exploreBtn = btn('Построить карту', 'pl-btn--explore', () => send('explore'),
+    'Робот сам объедет арену: едет туда, где карта SLAM Toolbox ещё обрывается');
+  exploreBtn.hidden = true;
   const undoBtn = btn('Убрать точку', 'pl-btn--small',  () => send('route', { points: pending().slice(0, -1) }, true));
   const clearBtn = btn('Очистить', 'pl-btn--small', () => send('route', { points: [] }, true));
   const routeInfo = h('div', { class: 'pl-route__info' });
@@ -628,7 +632,7 @@ export async function render(root, ctx) {
     h('section', { class: 'lb-card pl-card' },
       h('div', { class: 'pl-card__head' }, h('h2', { class: 'pl-h', text: 'Маршрут' }), routeInfo),
       h('div', { class: 'pl-route' }, routeDots, h('div', { class: 'pl-route__edit' }, undoBtn, clearBtn)),
-      h('div', { class: 'pl-buttons' }, goBtn, stopBtn, homeBtn, resetBtn)),
+      h('div', { class: 'pl-buttons' }, goBtn, stopBtn, homeBtn, resetBtn, exploreBtn)),
     h('section', { class: 'pl-tiles' }, Object.values(tiles).map((t) => t.el)));
   const colMission = h('div', { class: 'pl-col' },
     h('section', { class: 'lb-card pl-card pl-mission' },
@@ -647,13 +651,15 @@ export async function render(root, ctx) {
     h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__fog' }), 'ещё не видел'),
     h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__trail' }), 'след'),
     h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__path' }), 'путь'));
+  const refCheck = check('Эталонная карта', true, (v) => map.setOpts({ ref: v }));
   const toggles = h('div', { class: 'pl-toggles' },
     check('Показать скрытую правду', false, (v) => map.setOpts({ truth: v })),
     check('Лучи лидара', true, (v) => map.setOpts({ rays: v })),
-    check('Эталонная карта', true, (v) => map.setOpts({ ref: v })),
+    refCheck,
     check('Что думает агент', true, (v) => map.setOpts({ belief: v })));
   // Переключатель карты появляется, когда рядом работает SLAM Toolbox (pixi run demo --slam).
   let slamOn = false;
+  let slamNavSeen = false;       // режим карты SLAM уже замечен: карта SLAM включена, эталонная скрыта
   const slamSeg = h('div', { class: 'lb-seg pl-slam', role: 'group', 'aria-label': 'Чья карта на экране', hidden: true },
     [[false, 'Наша карта по лидару'], [true, 'Карта SLAM Toolbox']].map(([v, label]) => h('button', {
       class: 'lb-seg__btn', type: 'button', 'aria-pressed': String(v === slamOn), data: { slam: v ? '1' : '' },
@@ -689,6 +695,9 @@ export async function render(root, ctx) {
     const m = s.mission;
     const left = s.path_len ? `осталось ${num(s.path_len, 1)} м` : '';
     if (s.mode === 'settle') return ['wait', `Робот оседает на колёса: ещё ${num(s.settle_left, 0)} с`, 'Сразу после появления в мире ехать нельзя — одометрия собьётся. Карта уже строится'];
+    if (s.mode === 'drive' && s.nav && s.nav.explore && !s.nav.explore.done) {
+      return ['on', 'Строю карту: еду к границе увиденного', `подъезд ${s.nav.explore.visited}, границ осталось ${s.nav.frontiers}${left ? ` · ${left}` : ''}`];
+    }
     if (s.mode === 'drive') {
       const done = s.route.filter((p) => p.done).length;
       return ['on', `Еду по маршруту: точка ${Math.min(done + 1, s.route.length)} из ${s.route.length}`, left];
@@ -806,7 +815,7 @@ export async function render(root, ctx) {
     fill(sourceChip, active
       ? [h('span', { class: 'lb-dot', style: { background: s.backend === 'gazebo' ? COLOR.green : COLOR.path } }),
         s.backend === 'gazebo' ? 'Gazebo' : `Быстрый симулятор ×${s.speed || 1}`,
-        h('span', { class: 'pl-source__sub', text: `${levelName(s.level).toLowerCase()} уровень, сценарий ${s.seed}` })]
+        h('span', { class: 'pl-source__sub', text: `${levelName(s.level).toLowerCase()} уровень, сценарий ${s.seed}${s.slam_nav ? ' · карта SLAM, готовой нет' : ''}` })]
       : 'робот не подключён');
     paintSource(s);
     const manual = active && !['mission', 'settle', 'wait'].includes(s.mode);
@@ -815,6 +824,8 @@ export async function render(root, ctx) {
     stopBtn.disabled = !(active && ['drive', 'home', 'mission'].includes(s.mode));
     homeBtn.disabled = !(manual && s.mode !== 'home' && !s.at_base);
     resetBtn.disabled = !(active && s.mode !== 'wait');
+    exploreBtn.hidden = !(active && s.slam_nav);
+    exploreBtn.disabled = !(manual && s.nav && s.nav.ready && !['drive', 'home'].includes(s.mode));
     undoBtn.disabled = clearBtn.disabled = !(manual && todo.length && s.mode !== 'home');
     if (!active || s.mode === 'wait') {
       routeInfo.textContent = '';
@@ -842,6 +853,15 @@ export async function render(root, ctx) {
     tiles.dist.value.textContent = `${num(s.distance, 1)} м`;
     tiles.dist.sub.textContent = `прогон идёт ${num(s.t, 0)} с`;
     slamSeg.hidden = !s.slam;
+    if (s.slam_nav && s.slam && !slamNavSeen) {
+      // Робот едет по карте SLAM Toolbox: её и показываем, а готовую карту убираем с экрана.
+      slamNavSeen = true;
+      slamOn = true;
+      refCheck.querySelector('input').checked = false;
+      map.setOpts({ slam: true, ref: false });
+      slamSeg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(!!b.dataset.slam === slamOn)));
+      map.setState(s);
+    }
     const bySlam = slamOn && s.slam;
     const mp = (bySlam ? s.slam : s.map) || {};
     tiles.cover.value.textContent = `${num((mp.coverage || 0) * 100, 0)} %`;
@@ -850,11 +870,13 @@ export async function render(root, ctx) {
     tiles.agree.value.textContent = mp.coverage ? `${num((mp.agreement || 0) * 100, 1)} %` : '—';
     tiles.agree.sub.textContent = bySlam ? 'клеток SLAM совпало' : 'клеток совпало';
     const f = s.fix || {};
-    tiles.pose.value.textContent = f.source === 'lidar' ? 'колёса + лидар' : 'только колёса';
+    tiles.pose.value.textContent = f.source === 'slam' ? 'колёса + SLAM' : f.source === 'lidar' ? 'колёса + лидар' : 'только колёса';
     tiles.pose.value.classList.add('pl-tile__value--text');
-    tiles.pose.sub.textContent = f.source === 'lidar'
-      ? `поправка по лидару ${cm(f.shift || 0)} см, ${num(Math.abs(f.dth || 0) * 180 / Math.PI, 1)}°`
-      : 'поправки по лидару нет';
+    tiles.pose.sub.textContent = f.source === 'slam'
+      ? `поправка от SLAM Toolbox ${cm(f.shift || 0)} см, ${num(Math.abs(f.dth || 0) * 180 / Math.PI, 1)}°`
+      : f.source === 'lidar'
+        ? `поправка по лидару ${cm(f.shift || 0)} см, ${num(Math.abs(f.dth || 0) * 180 / Math.PI, 1)}°`
+        : 'поправки по лидару нет';
 
     paintMission(s);
     fill(eventsBox, (s.events || []).slice(-5).reverse().map((e) => h('li', { class: 'pl-ev', data: { kind: e.kind } },
