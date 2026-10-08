@@ -69,6 +69,8 @@ export function teamTiles(trace) {
     const tone = !known ? '' : Number(v) ? ' lb-yn--no' : ' lb-yn--yes';
     return h('span', { class: `lb-chip lb-chip--plain${unit ? '' : tone}`, text: known ? `${num(v, 0)}${unit || ''}` : 'не измерено' });
   };
+  // Зазор без min_gap_source — из старых записей, где он считался по несинхронным кадрам: не показываем.
+  const gap = r.min_gap_m != null && r.min_gap_source;
   return h('div', null,
     h('div', { class: 'lb-tiles' },
       tile('Счёт команды', num(r.score, 1), `на одного робота ${num(r.score_per_robot, 1)}`),
@@ -83,8 +85,8 @@ export function teamTiles(trace) {
       measured(r.same_target_s, ' с'),
       h('span', { class: 'lb-muted', text: 'Столкновений друг с другом:' }),
       measured(r.robot_contacts),
-      r.min_gap_m != null ? h('span', { class: 'lb-muted', text: 'Ближе всего между центрами:' }) : null,
-      r.min_gap_m != null ? h('span', { class: 'lb-chip lb-chip--plain', text: `${num(r.min_gap_m, 2)} м` }) : null));
+      gap ? h('span', { class: 'lb-muted', text: 'Ближе всего между центрами:' }) : null,
+      gap ? h('span', { class: 'lb-chip lb-chip--plain', text: `${num(r.min_gap_m, 2)} м` }) : null));
 }
 
 /** Заметил ли агент скрытые события среды. */
