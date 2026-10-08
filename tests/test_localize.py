@@ -242,3 +242,120 @@ def test_agent_survives_drift_only_with_localization():
     assert fixed['samples_collected'] >= base['samples_collected'] - 1
     assert fixed['returned'] and fixed['collisions'] <= base['collisions'] + 1
     assert lost['score'] <= fixed['score'] - 15          # без поправки: не вернулся, потерял образцы, бился о стены
+
+
+# --- симметрия арены, потеря и поиск положения (исследование G2) ----------------------------------
+
+def _turned(pose, deg):
+    """Та же поза, повёрнутая вокруг центра арены: стены шестиугольника при этом совпадают сами с собой."""
+    c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    return c * pose[0] - s * pose[1], s * pose[0] + c * pose[1], pose[2] + math.radians(deg)
+
+
+@pytest.mark.parametrize('true, deg', [((-1.9, -1.2, 0.7), 120), ((-1.9, 1.25, 0.7), -120), ((-1.9, 0.2, 0.7), 180)])
+def test_symmetric_false_match_is_not_accepted(arena, true, deg):
+    """Одометрия думает, что робот в позе, повёрнутой вокруг центра арены. Стены оттуда выглядят так же,
+    столбы — нет. Прежний трекер такое совмещение принимал и подтверждал ложную позу; теперь — нет."""
+    guess = _turned(true, deg)
+    scan = _scan(arena, *true)
+    old, new = PoseTracker(arena, verify=False), PoseTracker(arena)
+    old._calib = new._calib = None
+    for _ in range(12):
+        old.update(*guess, scan)
+        pose = new.update(*guess, scan)
+    assert old.stats['fixes'] > 0 and old.stats['skipped'] < 12        # прежний трекер считал, что всё сошлось
+    assert new.stats['fixes'] == 0 and new.stats['skipped'] == 12
+    assert new.lost and new.stats['lost']
+    assert pose == pytest.approx((guess[0], guess[1], _wrap(guess[2])))   # и позу не трогает: искать негде
+
+
+def test_two_way_check_sees_through_pillars(arena):
+    true = (-1.9, -1.2, 0.7)
+    tracker = PoseTracker(arena)
+    assert tracker._agree(true, _scan(arena, *true), None) > 0.97
+    assert tracker._agree(_turned(true, 120), _scan(arena, *true), None) < PoseTracker.MIN_AGREE
+    half = _scan(arena, *true)[::2]                                      # скан с другим числом лучей
+    assert tracker._agree(true, half, 2 * math.pi / 180) > 0.97
+
+
+@pytest.mark.parametrize('true, off', [
+    ((0.85, -0.85, -1.0), (0.30, -0.25, 2.3)),         # у столба, курс по одометрии ушёл на 130°
+    ((-1.5, 0.4, 2.0), (-0.35, 0.30, -1.6)),
+    ((1.6, 0.5, 0.3), (0.0, 0.45, 3.0)),
+])
+def test_lost_pose_is_found_again(arena, true, off):
+    """Колёса прокрутились без сцепления: одометрия уехала на десятки сантиметров и больше чем на 90°."""
+    rng = np.random.default_rng(4)
+    tracker = PoseTracker(arena)
+    tracker._calib = None
+    for _ in range(3):
+        tracker.update(*true, _scan(arena, *true, rng))
+    odom = (true[0] + off[0], true[1] + off[1], true[2] + off[2])
+    seen_lost = False
+    for k in range(12):
+        x, y, th = tracker.update(*odom, _scan(arena, *true, rng))
+        seen_lost = seen_lost or tracker.stats['lost']
+        if k < PoseTracker.LOST_SCANS - 1:              # пока не уверен, что потерялся, позу не трогает
+            assert (x, y, th) == pytest.approx((odom[0], odom[1], _wrap(odom[2])))
+    assert seen_lost and not tracker.lost and tracker.stats['relocations'] == 1
+    assert math.hypot(x - true[0], y - true[1]) < 0.03 and abs(_wrap(th - true[2])) < 0.03
+    assert tracker.stats['slip'] < 0.05                 # скачок после потери — не «проскальзывание»
+
+
+def test_garbage_scans_do_not_move_pose(arena):
+    """Робот раскачивается: лидар бьёт в пол и поверх стен. Поза стоит, а когда сканы вернутся — находится."""
+    rng = np.random.default_rng(5)
+    true = (0.85, -0.85, -1.0)
+    tracker = PoseTracker(arena)
+    tracker._calib = None
+    tracker.update(*true, _scan(arena, *true, rng))
+    odom = (true[0] + 0.2, true[1] - 0.2, true[2] + 1.2)
+    for _ in range(40):
+        junk = np.where(rng.random(360) < 0.5, rng.uniform(0.15, 1.0, 360), np.inf)
+        pose = tracker.update(*odom, junk)
+    assert tracker.lost and tracker.stats['relocations'] == 0 and tracker.stats['fixes'] <= 1
+    assert pose == pytest.approx((odom[0], odom[1], _wrap(odom[2])))
+    for _ in range(4):
+        x, y, th = tracker.update(*odom, _scan(arena, *true, rng))
+    assert not tracker.lost and math.hypot(x - true[0], y - true[1]) < 0.03 and abs(_wrap(th - true[2])) < 0.03
+
+
+def test_degenerate_geometry_is_not_a_loss(arena, monkeypatch):
+    """Скан лёг на карту, но сдвиг вдоль стены не определяет: поправлять нечего, но это и не потеря положения."""
+    tracker = PoseTracker(arena)
+    tracker._calib = None
+    pose = (-1.6, 0.5, 0.4)
+    fit = tracker._fit
+
+    def loose(*args, **kw):                              # та же подгонка, но «положение держится только на привязке»
+        found, quality = fit(*args, **kw)
+        return found, (*quality[:3], False)
+
+    monkeypatch.setattr(tracker, '_fit', loose)
+    for _ in range(8):
+        assert tracker.update(pose[0] + 0.03, pose[1], pose[2], _scan(arena, *pose)) == pytest.approx((pose[0] + 0.03, *pose[1:]))
+    assert tracker.stats['skipped'] == 8 and tracker.stats['fixes'] == 0
+    assert not tracker.stats['unsure'] and not tracker.lost
+
+
+def test_good_degenerate_scans_clear_the_doubt(arena, monkeypatch):
+    """Ревью G2: два плохих скана, а дальше сканы сходятся с картой, но сдвиг не определяют. Сомнение
+    («не уверен») должно сняться: раньше счётчик плохих сканов оставался на двух навсегда и робот стоял."""
+    tracker = PoseTracker(arena)
+    tracker._calib = None
+    pose = (-1.6, 0.5, 0.4)
+    tracker.update(*pose, _scan(arena, *pose))
+    for _ in range(2):
+        tracker.update(*pose, np.full(360, np.inf))
+    assert tracker.stats['unsure'] and not tracker.lost
+    fit = tracker._fit
+
+    def loose(*args, **kw):
+        found, quality = fit(*args, **kw)
+        return found, (*quality[:3], False)
+
+    monkeypatch.setattr(tracker, '_fit', loose)
+    for _ in range(100):
+        tracker.update(*pose, _scan(arena, *pose))
+    assert tracker._agree(pose, _scan(arena, *pose), None) == 1.0
+    assert tracker._lost == 0 and not tracker.stats['unsure'] and not tracker.lost

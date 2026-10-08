@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DID Hack — настоящие вызовы языковой модели</title>
+<style>
+ :root { --acc: #eb6834; --ok: #1baf7a; }
+ body { margin: 0 auto; max-width: 1100px; padding: 18px 22px 60px; font: 15.5px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--foreground, #14181c); background: var(--background, #fff); }
+ h1 { font-size: 26px; margin: 8px 0 6px; } h2 { font-size: 20px; margin: 38px 0 8px; } h2:first-child { margin-top: 0; } h3 { font-size: 17px; margin: 0 0 6px; } h4 { font-size: 13.5px; margin: 12px 0 5px; color: var(--muted-foreground, #5b6570); }
+ p { margin: 7px 0; } .sub, .note { color: var(--muted-foreground, #5b6570); } .note { font-size: 14px; }
+ code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: rgba(127,127,127,.13); padding: 1px 5px; border-radius: 4px; }
+ pre { font: 12.5px/1.45 ui-monospace, Menlo, monospace; background: rgba(127,127,127,.09); border-radius: 8px; padding: 10px 12px; margin: 0; white-space: pre-wrap; word-break: break-word; overflow: auto; }
+ pre.tall { max-height: 440px; }
+ table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
+ th, td { text-align: left; padding: 6px 10px 6px 0; vertical-align: top; border-top: 1px solid rgba(127,127,127,.25); }
+ th { font-size: 12.5px; color: var(--muted-foreground, #5b6570); border-top: 0; }
+ .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
+ .call { border: 1px solid rgba(127,127,127,.3); border-radius: 12px; padding: 16px 18px; margin: 16px 0; }
+ .meta { font-size: 13.5px; color: var(--muted-foreground, #5b6570); margin: 6px 0 10px; }
+ .after { margin-top: 12px; } details { margin: 8px 0 12px; } summary { cursor: pointer; font-size: 14px; color: var(--muted-foreground, #5b6570); }
+ .tag { font-size: 12.5px; font-weight: 650; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+ .tag.llm { background: rgba(235,104,52,.16); color: #b8481b; } .tag.rule { background: rgba(127,127,127,.18); }
+ .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; margin: 12px 0; } .flow div { flex: 1 1 150px; border: 1px solid rgba(127,127,127,.35); border-radius: 10px; padding: 9px 11px; font-size: 13.5px; }
+ .flow div b { display: block; font-size: 14.5px; } .flow .hl { border-color: var(--acc); border-width: 2px; }
+</style></head><body>
+<h1>Настоящие вызовы языковой модели</h1>
+<p class="sub">Что именно агент отправляет модели, что получает в ответ и что делает с ответом. Всё ниже — из записей настоящих прогонов, без пересказа.</p>
+
+<h2>0. На чём построен агент и где в нём модель</h2>
+<p>Агент — обычная программа на Python, написанная командой; готовых «агентных» библиотек в ней нет. Десять раз в секунду она делает одно и то же:</p>
+<div class="flow">
+ <div><b>1. Читает датчики</b>одометрия, лидар, батарея, датчик образцов</div>
+ <div><b>2. Обновляет картину мира</b>где могут быть образцы, сколько стоит пол, где опасно. Это расчёт, без модели</div>
+ <div class="hl"><b>3. Если есть повод — выбирает подцели</b>собран образец, пропал кандидат, сбой датчика… Здесь стоит сменная деталь: <b>правило</b> или <b>языковая модель</b></div>
+ <div><b>4. Едет</b>путь по карте, скорости, объезд, сбор, возврат по заряду. Без модели</div>
+</div>
+<table><thead><tr><th style="width:20%">Вариант агента</th><th style="width:30%">Кто выбирает подцели</th><th>Что ещё</th></tr></thead><tbody>
+<tr><td><code>fixed</code></td><td>никто: маршрут посчитан заранее</td><td>база для сравнения</td></tr>
+<tr><td><code>adaptive</code></td><td>правило: «уверенность, делённая на цену пути»</td><td>основной агент, на нём посчитано большинство опытов</td></tr>
+<tr><td><code>scientist</code></td><td>правило</td><td>плюс расследования странностей: объяснения и опыты выбирает код</td></tr>
+<tr><td><code>adaptive_llm</code></td><td><span class="tag llm">модель</span>, при отказе — правило</td><td>всё остальное как у <code>adaptive</code></td></tr>
+<tr><td><code>scientist_llm</code></td><td><span class="tag llm">модель</span>, при отказе — правило</td><td>та же модель — автор и критик в расследованиях</td></tr>
+</tbody></table>
+<p>Вызов модели — это один HTTP-запрос к серверу МАИ в формате, общем для большинства моделей. Вот код, который его делает (файлы <code>did/planner.py</code> и <code>did/llm.py</code>):</p>
+<div class="cols"><div><h4>Планировщик: спросить модель, проверить ответ, при отказе — правило</h4><pre class="tall">    def plan(self, state):
+        self.calls += 1
+        mission = self.mission or state.get(&#x27;mission&#x27;) or MISSION
+        if self.strategy != &#x27;single&#x27;:
+            from .llm_orchestration import plan_orchestrated
+            out = plan_orchestrated(self.strategy, self.client, {**state, &#x27;mission&#x27;: mission}, self.fallback,
+                                    system_prompt=self.system_prompt, max_repairs=self.max_repairs)
+            self.failures += out[&#x27;source&#x27;] == &#x27;fallback&#x27;
+            return out
+        from .llm import request_plan
+        res = request_plan(self.client, {**state, &#x27;mission&#x27;: mission}, system_prompt=self.system_prompt,
+                           max_repairs=self.max_repairs)
+        if res.plan is None:
+            self.failures += 1
+            out = self.fallback.plan(state)
+            out.update(source=&#x27;fallback&#x27;, exchanges=res.exchanges, error=res.error)
+            out[&#x27;reasoning&#x27;] = f&#x27;Модель не дала пригодного плана ({res.error}). Решение по правилу: &#x27; + out[&#x27;reasoning&#x27;]
+            return out
+        plan = res.plan.model_dump(exclude_none=True)
+        return {&#x27;reasoning&#x27;: plan[&#x27;reasoning&#x27;], &#x27;hypotheses&#x27;: plan.get(&#x27;hypotheses&#x27;, []),
+                &#x27;subgoals&#x27;: plan[&#x27;subgoals&#x27;], &#x27;source&#x27;: &#x27;llm&#x27;, &#x27;exchanges&#x27;: res.exchanges, &#x27;error&#x27;: None}</pre></div>
+<div><h4>Сам запрос</h4><pre class="tall">    def _post(self, content):
+        &quot;&quot;&quot;(код, заголовки, тело ответа). timeout_s ограничивает весь ответ, а не только паузы в нём:
+        иначе сервер, который в ожидании очереди шлёт пустые строки, держит вызов минутами.&quot;&quot;&quot;
+        deadline = time.monotonic() + self.timeout_s
+        with self._http.stream(&#x27;POST&#x27;, self.base_url + &#x27;/chat/completions&#x27;, content=content,
+                               headers={&#x27;Content-Type&#x27;: &#x27;application/json&#x27;}) as r:
+            chunks = []
+            for chunk in r.iter_bytes():
+                chunks.append(chunk)
+                if time.monotonic() &gt; deadline:
+                    raise httpx.ReadTimeout(&#x27;ответ не уложился в срок&#x27;)
+            return r.status_code, r.headers, b&#x27;&#x27;.join(chunks).decode(&#x27;utf-8&#x27;, &#x27;replace&#x27;)</pre></div></div>
+<h2>1. Один прогон целиком: когда агент спрашивал модель</h2>
+<p>Агент <code>adaptive_llm</code>, модель <b>qwen3.8-flash-next</b> с сервера МАИ, трудный сценарий 1001. Робот собрал
+5 образцов из 7, вернулся на базу, счёт 66.8. За прогон длиной 85 секунд
+было 14 решений о том, куда ехать дальше: 10 приняла модель, 4 — правило.
+Модель в сумме думала 159 секунд; в этом прогоне время раздумий роботу не засчитывалось.</p>
+<table><thead><tr><th>Время</th><th>Повод</th><th>Кто решал</th><th>Ответ за</th><th>Первая подцель</th><th>Обоснование (начало)</th></tr></thead>
+<tbody><tr><td>0,0 с</td><td>старт</td><td><span class="tag llm">модель</span></td><td>10 с</td><td>разведка E1</td><td>Старт: заряд 60.0, собрано 0 из 7, кандидатов нет — разведка. E1: unseen_share 0.13, путь 5.0, возврат 5.0 — лучший балл 0.13/6.0. E2: 0.12/5.6 — втор</td></tr>
+<tr><td>2,1 с</td><td>найден кандидат</td><td><span class="tag rule">правило</span></td><td>—</td><td>проверить кандидата C1</td><td>Кандидат C1 в (-1.6; 1.1): уверенность 39%, дорога 3.8 ед., возврат оттуда 4.2 ед. при заряде 58.9.</td></tr>
+<tr><td>4,1 с</td><td>кандидат не подтвердился</td><td><span class="tag llm">модель</span></td><td>11 с</td><td>проверить кандидата C1</td><td>Собрано 0 из 7, заряд 58.3, возврат 1.3 — запас огромный. C1: confidence 0.64, путь 4.5, возврат 4.3, суммарно ~8.8 — очень выгодно. После C1 разведка</td></tr>
+<tr><td>15,6 с</td><td>образец собран</td><td><span class="tag llm">модель</span></td><td>15 с</td><td>проверить кандидата C1</td><td>Собрано 1 из 7, заряд 54.1, возврат 3.9 — запас большой. Все 4 кандидата feasible. C1: confidence 0.36, путь 4.8, возврат 6.0, отношение 0.36/5.3=0.06</td></tr>
+<tr><td>27,7 с</td><td>образец собран</td><td><span class="tag llm">модель</span></td><td>8 с</td><td>разведка E1</td><td>Собрано 2 из 7, кандидатов нет — разведка. E1: unseen 0.29, путь 5.0, возврат 12.8; E2: unseen 0.23, путь 3.9, возврат 7.8. Заряд 49.8 при возврате 7.</td></tr>
+<tr><td>28,8 с</td><td>найден кандидат</td><td><span class="tag rule">правило</span></td><td>—</td><td>проверить кандидата C2</td><td>Кандидат C2 в (0.6; 0.7): уверенность 37%, дорога 4.1 ед., возврат оттуда 7.6 ед. при заряде 49.3.</td></tr>
+<tr><td>38,1 с</td><td>образец собран</td><td><span class="tag llm">модель</span></td><td>13 с</td><td>разведка E1</td><td>Собрано 3 из 7, заряд 45.1, возврат 6.8 — запас большой. Кандидатов нет, датчик показывает 0.12 — образцы в неразведанных зонах. E1: unseen 27%, путь </td></tr>
+<tr><td>40,7 с</td><td>найден кандидат</td><td><span class="tag rule">правило</span></td><td>—</td><td>проверить кандидата C1</td><td>Кандидат C1 в (0.8; 2.2): уверенность 37%, дорога 4.4 ед., возврат оттуда 11.5 ед. при заряде 44.2.</td></tr>
+<tr><td>42,2 с</td><td>кандидат не подтвердился</td><td><span class="tag llm">модель</span></td><td>13 с</td><td>проверить кандидата C1</td><td>Собрано 3 из 7, заряд 43.8, возврат 7.9 — запас большой. Кандидат потерян, но C1 (conf 0.46, путь 4.3, возврат 9.1) и C2 (conf 0.36, путь 4.7) оба fea</td></tr>
+<tr><td>51,4 с</td><td>образец собран</td><td><span class="tag llm">модель</span></td><td>22 с</td><td>проверить кандидата C3</td><td>Собрано 4 из 7, заряд 39.7, возврат 8.4 — запас большой. C3: confidence 0.38, путь 5.2, возврат 4.6, отношение 0.38/5.7=0.067 — лучший кандидат. Затем</td></tr>
+<tr><td>52,0 с</td><td>кандидат не подтвердился</td><td><span class="tag rule">правило</span></td><td>—</td><td>проверить кандидата C1</td><td>Кандидат C1 в (2.2; -0.5): уверенность 61%, дорога 9.3 ед., возврат оттуда 10.7 ед. при заряде 39.5.</td></tr>
+<tr><td>60,8 с</td><td>датчик сбоит</td><td><span class="tag llm">модель</span></td><td>28 с</td><td>проверить кандидата C1</td><td>Собрано 4 из 7, заряд 35.3, возврат 8.3. Датчик degraded (шум 0.13). C1: confidence 0.6 ≥ 0.5 — допустим, путь 7.2, возврат 4.4, запас 23.7. C2 исключ</td></tr>
+<tr><td>66,7 с</td><td>штраф: опасная зона</td><td><span class="tag llm">модель</span></td><td>22 с</td><td>проверить кандидата C1</td><td>Заряд 29.7, возврат 6.2, запас 23.5. C1: confidence 0.62 &gt; 0.5 (degraded-датчик не блокирует), путь 4.6 + возврат 4.7 = 9.3, остаток 20.4 &gt; 6.2. Робот</td></tr>
+<tr><td>75,7 с</td><td>образец собран</td><td><span class="tag llm">модель</span></td><td>17 с</td><td>на базу</td><td>Заряд 22.0, возврат 4.3. Все цели feasible: false: даже E3 (10.5+10.8=21.3) превышает заряд без запаса. Собрано 5 из 7, но доехать до оставшихся и вер</td></tr></tbody></table>
+<p class="note">Почему часть решений принимает правило: если модель спрашивали меньше четырёх секунд назад, на новый повод отвечает
+правило — иначе робот стоял бы в ожидании почти весь прогон. Это настройка <code>llm_min_interval_s</code>.</p>
+<h2>2. Вызовы целиком</h2>
+<p>Каждый запрос состоит из двух частей. Первая — постоянная инструкция: кто ты, что означают поля сводки, как выбирать, в каком виде
+отвечать. Вторая — сводка состояния на этот момент. Инструкция одна и та же во всех вызовах планировщика:</p>
+<details><summary>Инструкция модели целиком (5487 знаков)</summary><pre># Роль
+Ты — планировщик верхнего уровня автономного робота-исследователя (TurtleBot3) на закрытой арене.
+Ты выбираешь, куда ехать дальше. Скоростью, объездом препятствий, сбором образца и аварийным
+возвратом по заряду управляет исполнитель, не ты.
+Тебя вызывают после каждого важного события, поэтому план короткий: его пересчитают раньше, чем
+он закончится.
+
+# Миссия
+Собери как можно больше образцов, избегай дорогих зон и вернись на базу до разрядки батареи.
+
+# Состояние (JSON в сообщении пользователя)
+- `trigger` — почему тебя вызвали; `mission` — формулировка миссии.
+- `time_s`, `time_limit_s` — время прогона и его предел, секунды.
+- `battery`, `battery_start` — заряд сейчас и на старте. При нуле заряда прогон обрывается.
+- `pose`, `base` — где робот и где база, метры. `samples` — собрано и всего образцов.
+- `return_cost` — оценка заряда на путь до базы из текущей точки.
+- `candidates` — места, где датчик уже видит признаки образца: `confidence` — вероятность образца
+  (в список попадают места от 0.35, при подъезде датчик её уточнит), `cost_to` — заряд на путь
+  туда, `cost_back` — заряд на путь оттуда до базы, `feasible` — хватит ли заряда доехать туда и
+  вернуться на базу с запасом.
+- `explore_points` — точки разведки: `unseen_share` — доля ещё не проверенной области вокруг;
+  `cost_to`, `cost_back`, `feasible` — как у кандидатов.
+- `soil_zones` — зоны дорогого грунта: `mult` — во сколько раз расход выше обычного,
+  `evidence_m` — на скольких метрах пути это измерено, `status` — `confirmed` или `suspected`.
+- `hazards` — опасные зоны, въезд штрафуется; исполнитель их объезжает.
+- `sensor` — датчик образцов: `reading` 0..1 (чем ближе образец, тем больше), `noise` — шум,
+  `status` — `ok` или `degraded`.
+- `recent_events` — последние события; `alarms` — расхождения с прогнозом, их нужно объяснить;
+  `open_hypotheses` — гипотезы, которые ещё не проверены.
+Любой список может быть пустым. Все `cost_*` уже учитывают известные грунты и опасные зоны; там,
+где робот ещё не ездил, расход может оказаться выше.
+
+# Как выбирать
+1. Есть кандидат с `feasible: true` — первая подцель `investigate`: тот, у кого больше
+   `confidence / (cost_to + 0.5)`. Невысокая `confidence` — не повод его пропускать: подъезд и
+   есть проверка. Исключение — `sensor.status: degraded` и `confidence` меньше 0.5.
+2. Кандидатов нет — `explore`: точка с `feasible: true`, у которой больше `unseen_share / (cost_to + 1)`.
+3. `return_base` — когда пора домой: все образцы собраны, ни одной цели с `feasible: true` нет
+   или до `time_limit_s` осталось мало.
+4. Вторая подцель — что делать после первой (следующая по выгоде цель). Хватит 1–3 подцелей.
+5. `reasoning` — почему так, числами из состояния, до 400 символов, по-русски.
+6. `hypotheses` — до 3 проверяемых гипотез о грунтах и образцах: что утверждаешь и каким
+   действием или измерением робота это проверить. Есть `alarms` — объясни их гипотезой.
+   Не повторяй `open_hypotheses`. Нечего проверять — пустой список.
+
+# Запреты
+- `target` — только `id` из `candidates` (для `investigate`) или из `explore_points` (для
+  `explore`) с `feasible: true`. Пиши его точно как в состоянии: &quot;C1&quot; — без пробелов, пояснений
+  и любых других знаков внутри строки.
+- Не добавляй `return_base` после цели «на всякий случай»: это конец прогона, несобранные образцы
+  пропадут. После события тебя спросят снова, а возврат по заряду исполнитель сделает сам.
+- `return_base` — только последней подцелью. Одна и та же цель не идёт два раза подряд.
+- `goto` — только чтобы проверить гипотезу там, где нет точки из списков; |x| ≤ 2.6, |y| ≤ 2.6,
+  не внутри `hazards`.
+- Не придумывай числа: в `reasoning` — только числа из состояния, их суммы и разности.
+
+# Формат ответа
+Только один JSON-объект, без Markdown и без текста вне JSON:
+{&quot;reasoning&quot;: строка,
+ &quot;hypotheses&quot;: [{&quot;statement&quot;: строка, &quot;test&quot;: строка}],
+ &quot;subgoals&quot;: [подцель, ...]}
+Подцель — одно из:
+{&quot;type&quot;: &quot;investigate&quot;, &quot;target&quot;: &quot;C1&quot;} — подъехать к кандидату и попытаться собрать образец;
+{&quot;type&quot;: &quot;explore&quot;, &quot;target&quot;: &quot;E2&quot;} — доехать до точки разведки;
+{&quot;type&quot;: &quot;goto&quot;, &quot;x&quot;: 0.5, &quot;y&quot;: -1.0} — произвольная точка арены;
+{&quot;type&quot;: &quot;return_base&quot;} — вернуться на базу и завершить прогон.
+
+# Примеры
+Состояние: заряд 41.2, `return_cost` 5.1, собрано 2 из 5, кандидат C1 (confidence 0.74, cost_to
+3.2, cost_back 5.0), точка E1 (unseen_share 0.31, cost_to 4.0), тревога о расходе около (0.4; 1.0).
+Ответ:
+{&quot;reasoning&quot;: &quot;Собрано 2 из 5, заряд 41.2. C1: вероятность 0.74, путь 3.2 и возврат 5.0 — запас большой. Потом E1: не проверено 31%, путь 4.0, возврат 6.2. Зона S1 (×2.9) подтверждена, в оценках учтена.&quot;,
+ &quot;hypotheses&quot;: [{&quot;statement&quot;: &quot;Перерасход около (0.4; 1.0) вызван зоной S1, её граница шире оценки&quot;, &quot;test&quot;: &quot;проехать 0.5 м вдоль края S1 и сравнить расход с прогнозом для обычного пола&quot;}],
+ &quot;subgoals&quot;: [{&quot;type&quot;: &quot;investigate&quot;, &quot;target&quot;: &quot;C1&quot;}, {&quot;type&quot;: &quot;explore&quot;, &quot;target&quot;: &quot;E1&quot;}]}
+
+Состояние: то же, но `candidates` пуст — датчик образцов не видит.
+Ответ:
+{&quot;reasoning&quot;: &quot;Собрано 2 из 5, кандидатов нет — разведка. E1: не проверено 31%, путь 4.0, возврат 6.2 при заряде 41.2. На базу рано: 3 образца ещё не найдены, запаса хватает.&quot;,
+ &quot;hypotheses&quot;: [],
+ &quot;subgoals&quot;: [{&quot;type&quot;: &quot;explore&quot;, &quot;target&quot;: &quot;E1&quot;}]}
+
+Состояние: заряд 9.0, `return_cost` 5.1, у C1 и E1 `feasible: false`.
+Ответ:
+{&quot;reasoning&quot;: &quot;Заряд 9.0 при возврате 5.1: ни C1, ни E1 не достижимы с запасом (feasible: false). Еду на базу, пока хватает заряда.&quot;,
+ &quot;hypotheses&quot;: [],
+ &quot;subgoals&quot;: [{&quot;type&quot;: &quot;return_base&quot;}]}</pre></details><div class="call">
+<h3>Вызов на старте: куда ехать, когда ещё ничего не известно</h3>
+<p>Первая секунда прогона. Кандидатов нет, поэтому в сводке только точки разведки (<code>explore_points</code>) с долей неосмотренной площади и ценой пути до каждой.</p>
+<div class="meta">агент <code>adaptive_llm</code> · модель qwen3.8-flash-next · сценарий hard-1001 · время 0,0 с · ответ за <b>10.2 с</b> · запрос 2312 токенов, ответ 712</div>
+<div class="cols">
+ <div><h4>Агент → модель: сводка состояния</h4><pre class="tall">{
+ &quot;mission&quot;: &quot;Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.&quot;,
+ &quot;trigger&quot;: &quot;start&quot;,
+ &quot;time_s&quot;: 0.0,
+ &quot;time_limit_s&quot;: 600.0,
+ &quot;battery&quot;: 60.0,
+ &quot;battery_start&quot;: 60.0,
+ &quot;pose&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;base&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;samples&quot;: {
+  &quot;collected&quot;: 0,
+  &quot;total&quot;: 7
+ },
+ &quot;return_cost&quot;: 0.0,
+ &quot;candidates&quot;: [],
+ &quot;explore_points&quot;: [
+  {
+   &quot;id&quot;: &quot;E1&quot;,
+   &quot;x&quot;: -0.25,
+   &quot;y&quot;: -1.25,
+   &quot;unseen_share&quot;: 0.13,
+   &quot;cost_to&quot;: 5.0,
+   &quot;cost_back&quot;: 5.0,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: -0.25,
+   &quot;y&quot;: -0.25,
+   &quot;unseen_share&quot;: 0.12,
+   &quot;cost_to&quot;: 4.6,
+   &quot;cost_back&quot;: 4.6,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E3&quot;,
+   &quot;x&quot;: -0.75,
+   &quot;y&quot;: -1.75,
+   &quot;unseen_share&quot;: 0.12,
+   &quot;cost_to&quot;: 4.8,
+   &quot;cost_back&quot;: 4.8,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E4&quot;,
+   &quot;x&quot;: -0.75,
+   &quot;y&quot;: 0.75,
+   &quot;unseen_share&quot;: 0.12,
+   &quot;cost_to&quot;: 4.6,
+   &quot;cost_back&quot;: 4.6,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;soil_zones&quot;: [],
+ &quot;hazards&quot;: [],
+ &quot;sensor&quot;: {
+  &quot;reading&quot;: 0.17,
+  &quot;noise&quot;: 0.05,
+  &quot;status&quot;: &quot;ok&quot;
+ },
+ &quot;recent_events&quot;: [],
+ &quot;alarms&quot;: [],
+ &quot;open_hypotheses&quot;: []
+}</pre></div>
+ <div><h4>Модель → агент: план</h4><pre class="tall">{
+ &quot;reasoning&quot;: &quot;Старт: заряд 60.0, собрано 0 из 7, кандидатов нет — разведка. E1: unseen_share 0.13, путь 5.0, возврат 5.0 — лучший балл 0.13/6.0. E2: 0.12/5.6 — вторая по выгоде, ближе к E1. Запас заряда огромный, время 0/600. Грунтов и опасностей нет.&quot;,
+ &quot;hypotheses&quot;: [
+  {
+   &quot;statement&quot;: &quot;Образцы распределены по арене неравномерно; в секторе x∈[-1,0], y∈[-2,-1] их плотность выше средней&quot;,
+   &quot;test&quot;: &quot;собрать данные с датчика в E1 и E3 и сравнить среднее reading с E2/E4&quot;
+  }
+ ],
+ &quot;subgoals&quot;: [
+  {
+   &quot;type&quot;: &quot;explore&quot;,
+   &quot;target&quot;: &quot;E1&quot;
+  },
+  {
+   &quot;type&quot;: &quot;explore&quot;,
+   &quot;target&quot;: &quot;E2&quot;
+  }
+ ]
+}</pre></div>
+</div>
+<p class="after"><b>Что сделал код.</b> Ответ прошёл проверку формы (это план по схеме) и смысла (такие точки есть, заряда хватает). Исполнитель повёл робота к первой подцели сам: путь, скорости и объезд препятствий модель не задаёт.</p>
+</div>
+<div class="call">
+<h3>Вызов при сбое датчика</h3>
+<p>На 61-й секунде агент заметил, что датчик образцов ведёт себя не так, как предсказывает карта. В сводке это видно в полях <code>sensor</code> и <code>alarms</code>.</p>
+<div class="meta">агент <code>adaptive_llm</code> · модель qwen3.8-flash-next · сценарий hard-1001 · время 60,8 с · ответ за <b>28.4 с</b> · запрос 2509 токенов, ответ 2299</div>
+<div class="cols">
+ <div><h4>Агент → модель: сводка состояния</h4><pre class="tall">{
+ &quot;mission&quot;: &quot;Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.&quot;,
+ &quot;trigger&quot;: &quot;sensor_degraded&quot;,
+ &quot;time_s&quot;: 60.8,
+ &quot;time_limit_s&quot;: 600.0,
+ &quot;battery&quot;: 35.3,
+ &quot;battery_start&quot;: 60.0,
+ &quot;pose&quot;: {
+  &quot;x&quot;: 0.78,
+  &quot;y&quot;: 0.88
+ },
+ &quot;base&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;samples&quot;: {
+  &quot;collected&quot;: 4,
+  &quot;total&quot;: 7
+ },
+ &quot;return_cost&quot;: 8.3,
+ &quot;candidates&quot;: [
+  {
+   &quot;id&quot;: &quot;C1&quot;,
+   &quot;x&quot;: -1.85,
+   &quot;y&quot;: 1.15,
+   &quot;confidence&quot;: 0.6,
+   &quot;cost_to&quot;: 7.2,
+   &quot;cost_back&quot;: 4.4,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;C2&quot;,
+   &quot;x&quot;: 2.25,
+   &quot;y&quot;: -0.55,
+   &quot;confidence&quot;: 0.35,
+   &quot;cost_to&quot;: 5.2,
+   &quot;cost_back&quot;: 10.7,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;explore_points&quot;: [
+  {
+   &quot;id&quot;: &quot;E1&quot;,
+   &quot;x&quot;: -1.25,
+   &quot;y&quot;: 1.25,
+   &quot;unseen_share&quot;: 0.34,
+   &quot;cost_to&quot;: 6.0,
+   &quot;cost_back&quot;: 5.5,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: 1.75,
+   &quot;y&quot;: -0.25,
+   &quot;unseen_share&quot;: 0.26,
+   &quot;cost_to&quot;: 3.9,
+   &quot;cost_back&quot;: 9.7,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E3&quot;,
+   &quot;x&quot;: -1.75,
+   &quot;y&quot;: 0.75,
+   &quot;unseen_share&quot;: 0.34,
+   &quot;cost_to&quot;: 6.6,
+   &quot;cost_back&quot;: 3.4,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E4&quot;,
+   &quot;x&quot;: 2.25,
+   &quot;y&quot;: -0.75,
+   &quot;unseen_share&quot;: 0.26,
+   &quot;cost_to&quot;: 5.6,
+   &quot;cost_back&quot;: 10.9,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;soil_zones&quot;: [],
+ &quot;hazards&quot;: [],
+ &quot;sensor&quot;: {
+  &quot;reading&quot;: 0.16,
+  &quot;noise&quot;: 0.132,
+  &quot;status&quot;: &quot;degraded&quot;
+ },
+ &quot;recent_events&quot;: [],
+ &quot;alarms&quot;: [
+  &quot;Датчик образцов шумит: разброс 0.13 вместо 0.05&quot;
+ ],
+ &quot;open_hypotheses&quot;: [
+  {
+   &quot;id&quot;: &quot;H5&quot;,
+   &quot;statement&quot;: &quot;образец лежит около (2.2; -0.4)&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H6&quot;,
+   &quot;statement&quot;: &quot;датчик образцов неисправен, его показаниям нельзя верить как раньше&quot;
+  }
+ ]
+}</pre></div>
+ <div><h4>Модель → агент: план</h4><pre class="tall">{
+ &quot;reasoning&quot;: &quot;Собрано 4 из 7, заряд 35.3, возврат 8.3. Датчик degraded (шум 0.13). C1: confidence 0.6 ≥ 0.5 — допустим, путь 7.2, возврат 4.4, запас 23.7. C2 исключён: confidence 0.35 &lt; 0.5 при degraded. Среди разведки E2 лучший: 0.26/(3.9+1)=0.053. Времени много (60.8/600).&quot;,
+ &quot;hypotheses&quot;: [
+  {
+   &quot;statement&quot;: &quot;Повышенный шум датчика (0.13 вместо 0.05) вызван не поломкой, а помехой в конкретной зоне арены; вдали от неё шум вернётся к норме&quot;,
+   &quot;test&quot;: &quot;после подъезда к C1 записать серию показаний датчика на месте и сравнить разброс с текущим 0.132&quot;
+  },
+  {
+   &quot;statement&quot;: &quot;C1 содержит образец несмотря на degraded-датчик: confidence 0.6 устойчива к шуму 0.13&quot;,
+   &quot;test&quot;: &quot;подъехать к C1 и собрать образец; если reading стабильно &gt; 0.5 при подходе — гипотеза подтверждена&quot;
+  }
+ ],
+ &quot;subgoals&quot;: [
+  {
+   &quot;type&quot;: &quot;investigate&quot;,
+   &quot;target&quot;: &quot;C1&quot;
+  },
+  {
+   &quot;type&quot;: &quot;explore&quot;,
+   &quot;target&quot;: &quot;E2&quot;
+  }
+ ]
+}</pre></div>
+</div>
+<p class="after"><b>Что сделал код.</b> План принят и исполнен. Что датчик сбоит, определил код (сравнение показаний с прогнозом); модель получила это готовым фактом и учла в выборе цели.</p>
+</div>
+<div class="call">
+<h3>Миссия, заданная словами: «Собери ровно два образца и сразу возвращайся на базу»</h3>
+<p>Тот же агент и тот же сценарий, но текст миссии другой (поле <code>mission</code> в сводке). На 27.7-й секунде собран второй образец. На арене ещё пять, заряда много — правило поехало бы дальше.</p>
+<div class="meta">агент <code>adaptive_llm</code> · модель qwen3.8-flash-next · сценарий hard-1001 · время 27.7 с · ответ за <b>5.4 с</b> · запрос 2307 токенов, ответ 386</div>
+<div class="cols">
+ <div><h4>Агент → модель: сводка состояния</h4><pre class="tall">{
+ &quot;mission&quot;: &quot;Собери ровно два образца и сразу возвращайся на базу.&quot;,
+ &quot;trigger&quot;: &quot;sample_collected&quot;,
+ &quot;time_s&quot;: 27.7,
+ &quot;time_limit_s&quot;: 600.0,
+ &quot;battery&quot;: 49.8,
+ &quot;battery_start&quot;: 60.0,
+ &quot;pose&quot;: {
+  &quot;x&quot;: 0.43,
+  &quot;y&quot;: -1.14
+ },
+ &quot;base&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;samples&quot;: {
+  &quot;collected&quot;: 2,
+  &quot;total&quot;: 7
+ },
+ &quot;return_cost&quot;: 7.8,
+ &quot;candidates&quot;: [],
+ &quot;explore_points&quot;: [
+  {
+   &quot;id&quot;: &quot;E1&quot;,
+   &quot;x&quot;: 1.75,
+   &quot;y&quot;: 0.25,
+   &quot;unseen_share&quot;: 0.29,
+   &quot;cost_to&quot;: 5.0,
+   &quot;cost_back&quot;: 12.8,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: 0.75,
+   &quot;y&quot;: 0.25,
+   &quot;unseen_share&quot;: 0.23,
+   &quot;cost_to&quot;: 3.9,
+   &quot;cost_back&quot;: 7.8,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E3&quot;,
+   &quot;x&quot;: 1.25,
+   &quot;y&quot;: 0.75,
+   &quot;unseen_share&quot;: 0.28,
+   &quot;cost_to&quot;: 5.6,
+   &quot;cost_back&quot;: 9.5,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E4&quot;,
+   &quot;x&quot;: 1.25,
+   &quot;y&quot;: -0.25,
+   &quot;unseen_share&quot;: 0.18,
+   &quot;cost_to&quot;: 3.0,
+   &quot;cost_back&quot;: 10.8,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;soil_zones&quot;: [],
+ &quot;hazards&quot;: [],
+ &quot;sensor&quot;: {
+  &quot;reading&quot;: 0.14,
+  &quot;noise&quot;: 0.05,
+  &quot;status&quot;: &quot;ok&quot;
+ },
+ &quot;recent_events&quot;: [],
+ &quot;alarms&quot;: [],
+ &quot;open_hypotheses&quot;: []
+}</pre></div>
+ <div><h4>Модель → агент: план</h4><pre class="tall">{
+ &quot;reasoning&quot;: &quot;Миссия: ровно 2 образца и сразу на базу. Собрано 2 из требуемых 2 — цель выполнена. Заряд 49.8, возврат 7.8, запас огромный. Время 27.7 из 600. Дальнейшая разведка не нужна: миссия завершена.&quot;,
+ &quot;hypotheses&quot;: [],
+ &quot;subgoals&quot;: [
+  {
+   &quot;type&quot;: &quot;return_base&quot;
+  }
+ ]
+}</pre></div>
+</div>
+<p class="after"><b>Что сделал код.</b> Робот вернулся на базу с двумя образцами из 7. Кода, который знает про «ровно два», в программе нет: поведение изменила одна фраза в миссии. Это исследование R13.</p>
+</div>
+<div class="call"><h3>Негодный ответ и что с ним происходит</h3>
+<p>Модель <b>DeepSeek-V4-Flash</b>, трудный сценарий 1003, время 54.7 с. Модель рассуждала так долго, что упёрлась в лимит длины
+и не успела написать сам план.</p>
+<div class="cols">
+ <div><h4>Первый ответ модели</h4><pre>(пусто)</pre>
+ <h4>Что нашла проверка</h4><pre>— пустой ответ
+— ответ обрезан по лимиту токенов, отвечай короче</pre></div>
+ <div><h4>Агент → модель: просьба исправить</h4><pre>Ответ не принят. Ошибки: - пустой ответ - ответ обрезан по лимиту токенов, отвечай короче Исправь и верни план заново: один JSON-объект по схеме, без пояснений и без Markdown.</pre>
+ <h4>Второй ответ модели (4 с)</h4><pre class="tall">{
+ &quot;reasoning&quot;: &quot;Собрано 5 из 7, заряд 31.1 при возврате 8.6 — запас большой. C1: вероятность 0.85, путь 1.7, возврат 6.9, feasible — еду туда первым. Затем E1: не проверено 97%, путь 1.5, возврат 7.4. На базу рано, 2 образца ещё не найдены.&quot;,
+ &quot;hypotheses&quot;: [
+  {
+   &quot;statement&quot;: &quot;Расход к C1 и E1 выше прогноза из-за близости подтверждённой зоны S1 (×1.98)&quot;,
+   &quot;test&quot;: &quot;сравнить расход на пути 1.7 м к C1 с прогнозом cost_to&quot;
+  }
+ ],
+ &quot;subgoals&quot;: [
+  {
+   &quot;type&quot;: &quot;investigate&quot;,
+   &quot;target&quot;: &quot;C1&quot;
+  },
+  {
+   &quot;type&quot;: &quot;explore&quot;,
+   &quot;target&quot;: &quot;E1&quot;
+  }
+ ]
+}</pre></div>
+</div>
+<p class="after"><b>Что сделал код.</b> Второй ответ прошёл проверку, план исполнен. Если бы и он не прошёл, решение принял бы запасной
+вариант — правило; робот без плана не остаётся никогда.</p></div>
+<h2>3. Модель в расследовании: автор, критик, рассказчик</h2>
+<p>Расследование начинается, когда агент <code>scientist</code> заметил странность. Здесь: «расход вырос: 6,8 ед/м при прогнозе 2,6».
+Код заранее составил список объяснений с начальными вероятностями и список опытов с их ценой и пользой — это вход для модели.
+Модель <b>GPT-6 Luna</b>. Это записанный отдельный пример, а не прогон: серия на моделях МАИ сейчас идёт (исследование L3).</p>
+<div class="cols">
+ <div><h4>Объяснения, которые подготовил код</h4><table><thead><tr><th>Объяснение</th><th>Вероятность до опытов</th></tr></thead><tbody><tr><td>здесь дорогой грунт</td><td>40%</td></tr><tr><td>батарея теряет заряд сама по себе (сбой)</td><td>30%</td></tr><tr><td>заряд ушёл на повороты</td><td>20%</td></tr><tr><td>причина не из этого списка</td><td>10%</td></tr></tbody></table></div>
+ <div><h4>Опыты, которые можно поставить</h4><table><thead><tr><th>Опыт</th><th>Цена, ед. заряда</th><th>Польза, бит</th></tr></thead><tbody><tr><td>постоять 2 секунды</td><td>0.05</td><td>0.9</td></tr><tr><td>проехать прямо 0,3 м</td><td>0.8</td><td>0.4</td></tr><tr><td>развернуться на месте на 90°</td><td>0.3</td><td>0.3</td></tr></tbody></table></div>
+</div>
+<div class="cols">
+ <div><h4>Автор (модель): какие объяснения проверять и какими опытами</h4><pre class="tall">{
+ &quot;consider&quot;: [
+  &quot;soil&quot;,
+  &quot;leak&quot;,
+  &quot;turn&quot;,
+  &quot;other&quot;
+ ],
+ &quot;extra&quot;: [],
+ &quot;plan&quot;: [
+  {
+   &quot;test&quot;: &quot;rest&quot;,
+   &quot;distinguishes&quot;: [
+    &quot;soil&quot;,
+    &quot;leak&quot;,
+    &quot;turn&quot;
+   ],
+   &quot;refutes_if&quot;: &quot;измерено меньше 0.09 ед/с — leak исключается&quot;
+  },
+  {
+   &quot;test&quot;: &quot;spin&quot;,
+   &quot;distinguishes&quot;: [
+    &quot;soil&quot;,
+    &quot;turn&quot;
+   ],
+   &quot;refutes_if&quot;: &quot;измерено меньше 0.35 ед/рад — turn исключается&quot;
+  },
+  {
+   &quot;test&quot;: &quot;straight&quot;,
+   &quot;distinguishes&quot;: [
+    &quot;soil&quot;,
+    &quot;leak&quot;,
+    &quot;turn&quot;
+   ],
+   &quot;refutes_if&quot;: &quot;меньше 4.9 ед/м — soil исключается; больше 4.4 ед/м — leak исключается; больше 3.4 ед/м — turn исключается&quot;
+  }
+ ],
+ &quot;rationale&quot;: &quot;Пороги для опровержения взяты между предсказаниями с учётом их sigma: rest разделяет leak и остальные, spin — turn и soil, straight даёт различимые пары. Порядок по gain_bits/cost: rest, spin, straight; суммарная стоимость 1.15 ед. при бюджете 2.0.&quot;,
+ &quot;source&quot;: &quot;llm&quot;,
+ &quot;error&quot;: null
+}</pre></div>
+ <div><h4>Критик (та же модель в другой роли): что не так с планом</h4><pre class="tall">{
+ &quot;verdict&quot;: &quot;revise&quot;,
+ &quot;issues&quot;: [
+  {
+   &quot;kind&quot;: &quot;no_refutation&quot;,
+   &quot;text&quot;: &quot;В условии нет результата, который исключает объяснение: около 0.15 ед/с говорит лишь, что leak не опровергнуто, а около 0.01 — что оно не подтверждается.&quot;,
+   &quot;fix&quot;: &quot;Указать, при каком измеренном расходе в ед/с объяснение leak исключается.&quot;,
+   &quot;target&quot;: &quot;rest&quot;
+  },
+  {
+   &quot;kind&quot;: &quot;no_refutation&quot;,
+   &quot;text&quot;: &quot;Условие не указывает результат, исключающий объяснение: около 0.12 ед/рад лишь не подтверждает turn, а около 0.5 — не опровергает его.&quot;,
+   &quot;fix&quot;: &quot;Указать измеренный диапазон ед/рад, при котором turn исключается.&quot;,
+   &quot;target&quot;: &quot;spin&quot;
+  },
+  {
+   &quot;kind&quot;: &quot;no_refutation&quot;,
+   &quot;text&quot;: &quot;Условия говорят, какие значения поддерживают объяснения, но не задают результат измерения, который исключит soil, leak или turn.&quot;,
+   &quot;fix&quot;: &quot;Для каждого объяснения указать результат измерения в ед/м, при котором оно исключается.&quot;,
+   &quot;target&quot;: &quot;straight&quot;
+  }
+ ],
+ &quot;source&quot;: &quot;llm&quot;,
+ &quot;error&quot;: null
+}</pre></div>
+</div>
+<h4>Рассказчик (модель): вывод по завершённому расследованию</h4><pre>Расход вырос до 6.8 ед/м при прогнозе 2.6 ед/м. Робот проверил, сколько заряда уходит, пока он стоит: при дорогом грунте или тратах на повороты ожидалось 0.01 ед/с, а при сбое батареи — 0.15 ед/с; измерение показало 0.14 ед/с. Расчёт указывает, что батарея теряет заряд сама по себе (сбой). Дальше робот заложит утечку 0.14 ед/с в запас на возврат и поедет на базу раньше.</pre>
+<p class="after"><b>Что остаётся за кодом.</b> Вероятности объяснений после каждого опыта и итоговый вердикт считает программа по измерениям.
+В ответах модели таких полей нет; если модель напишет в тексте вероятность, которой не было во входе, ответ считается ошибочным.</p>
+</body></html>

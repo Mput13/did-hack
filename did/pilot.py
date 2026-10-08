@@ -45,7 +45,7 @@ from .fastsim import FastSim
 from .judge import Judge
 from .mapping import LIDAR_OFFSET, OccupancyMapper
 from .metrics import run_metrics
-from .nav import INFLATE, CostGraph, Follower, path_length
+from .nav import ESCAPE_STOP, INFLATE, CostGraph, Follower, corridor_room, escape_plan, moved_since, path_length
 from .recorder import Recorder, encode_grid, save_trace
 from .runner import RUNS, make_planner
 from .scenario import generate
@@ -292,7 +292,15 @@ class Pilot:
         self._log(ev.get('t', self.t), 'bad' if kind in ('collision', 'hazard_hit', 'false_collect') else 'ok',
                   text, x=ev.get('x'), y=ev.get('y'))
         if kind == 'collision' and self.mode in ('drive', 'home'):
-            self._escape = {'until': self.t + 1.5, 'v': 0.10 if self._last_cmd[0] < 0 else -0.10}
+            self._escape = {'until': self.t + 1.5, 'v': self._escape_v(back=self._last_cmd[0] >= 0)}
+
+    def _escape_v(self, back):
+        """Отъезд после столкновения — только туда, где лидар видит свободное место (как у агента)."""
+        if not self._scan:
+            return -0.10 if back else 0.10
+        # Скан снят из позы self._scan[:3], робот с тех пор мог повернуться: стороны считаются от нынешнего курса.
+        v, turn = escape_plan(self._scan[3], self._scan[4], back, moved=moved_since(self._scan[:3], self.pose))
+        return 0.0 if turn else v                # оператор рядом: разворот на месте оставляем ему
 
     def _log(self, t, kind, text, **data):
         self.log.append({'t': round(float(t), 1), 'kind': kind, 'text': text,
@@ -314,7 +322,11 @@ class Pilot:
     def _drive(self, obs, x, y, th):
         if self._escape:
             if obs.t < self._escape['until']:
-                return self._command(self._escape['v'], 0.0)
+                v = self._escape['v']
+                if v and self._scan and corridor_room(self._scan[3], self._scan[4], back=v < 0, moved=moved_since(
+                        self._scan[:3], (x, y, th))) < ESCAPE_STOP:
+                    v = self._escape['v'] = 0.0         # преграда уже близко и с этой стороны: дальше стоим
+                return self._command(v, 0.0)
             self._escape = self._stuck = None
             self.follower.set_path([])
         while True:
@@ -375,7 +387,7 @@ class Pilot:
         if obs.t - s[0] >= 4.0:
             if s[3] >= 3.0 and math.hypot(x - s[1], y - s[2]) < 0.03:
                 self._log(obs.t, 'bad', 'Робот не движется: отъезжаю назад и строю путь заново')
-                self._escape = {'until': obs.t + 1.5, 'v': -0.10}
+                self._escape = {'until': obs.t + 1.5, 'v': self._escape_v(back=True)}
             self._stuck = None
 
     def _plan_route(self, points):
