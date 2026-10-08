@@ -63,7 +63,7 @@ class CostGraph:
         self.cost = np.ones(self.n)
         self.set_cost(None)
 
-    def set_cost(self, mult_grid=None, forbidden=None, bias=None):
+    def set_cost(self, mult_grid=None, forbidden=None, bias=None, hard_forbidden=None):
         """mult_grid — оценка множителя расхода по клеткам арены; forbidden — маска запретных клеток;
         bias — во сколько раз клетка нежелательна для маршрута сверх расхода (например, непроверенный пол)."""
         c = np.ones(self.n) if mult_grid is None else np.asarray(mult_grid)[self.iy, self.ix].astype(float)
@@ -75,6 +75,9 @@ class CostGraph:
             c = np.where(np.asarray(forbidden)[self.iy, self.ix], FORBIDDEN_COST, c)
         self.cost = c
         w = self._len * 0.5 * (c[self._eu] + c[self._ev])
+        if hard_forbidden is not None:
+            blocked = np.asarray(hard_forbidden)[self.iy, self.ix]
+            w = np.where(blocked[self._eu] | blocked[self._ev], np.inf, w)
         self._graph = csr_matrix((w[self._perm], self._indices, self._indptr), shape=(self.n, self.n))
 
     def node(self, x, y):

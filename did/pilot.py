@@ -201,6 +201,8 @@ class Pilot:
         self._explore = None                # объезд границ увиденного: {'visited', 'dead', 'done', 't0'}
         self.mode = 'idle'                  # settle | idle | drive | home | mission
         self.route = []                     # [{'x', 'y', 'done', 'pts'}]: точки оператора и путь до каждой
+        self.zones = []                     # ограничения оператора, не скрытые свойства среды
+        self._zone_blocked = np.zeros(arena.free.shape, dtype=bool)
         self.trail = []
         self.log = []                       # события для страницы: [{'t', 'kind', 'text'}]
         self.note = {'tone': 'info', 'text': 'Поставьте точку на карте и нажмите «Ехать»'}
@@ -343,6 +345,8 @@ class Pilot:
             return
         if not had and ver > 1 and self._nav_cache[1] is not None:
             self._say('info', 'Карта от SLAM Toolbox снова пригодна для езды')
+        if self.zones:
+            self._apply_zones()             # новая сетка не отменяет ограничения оператора
         if self.follower.active and not self._path_ok(self.follower.pts[self.follower.i:]):
             self.follower.set_path([])      # цель и путь проверятся заново в _drive
         if self._explore and not self._explore['done']:
@@ -358,13 +362,18 @@ class Pilot:
     def _path_ok(self, pts):
         """Все точки пути и отрезки между ними проходят не ближе INFLATE к преградам нынешней карты."""
         nav = self.nav
+        def safe(px, py):
+            ix, iy = nav.w2g(px, py)
+            return (nav.inside(ix, iy) and nav.clearance(px, py) >= INFLATE
+                    and not self._zone_blocked[iy, ix])
+
         for k, (px, py) in enumerate(pts):
-            if nav.clearance(px, py) < INFLATE:
+            if not safe(px, py):
                 return False
             if k:
                 qx, qy = pts[k - 1]
                 n = int(math.ceil(math.hypot(px - qx, py - qy) / (0.5 * nav.res)))
-                if any(nav.clearance(qx + (px - qx) * j / n, qy + (py - qy) * j / n) < INFLATE for j in range(1, n)):
+                if any(not safe(qx + (px - qx) * j / n, qy + (py - qy) * j / n) for j in range(1, n)):
                     return False
         return True
 
@@ -705,6 +714,9 @@ class Pilot:
                 nx, ny = float(self.graph.xs[node]), float(self.graph.ys[node])
                 notes.append(f'точка {n} сдвинута от стены на {math.dist((x, y), (nx, ny)) * 100:.0f} см')
                 x, y = nx, ny
+            node = self.graph.node(x, y)
+            if self._zone_blocked[self.graph.iy[node], self.graph.ix[node]]:
+                raise Refuse(f'Точка {n} в опасной зоне или слишком близко к ней')
             pts, _ = self.graph.plan(prev, (x, y))
             if pts is None:
                 raise Refuse(f'К точке {n} нет проезда')
@@ -751,6 +763,8 @@ class Pilot:
             self.mode = 'drive' if route else 'idle'
         self._drop_pending_mission()
         self._explore = None
+        if self.mission and self.mission.get('state') not in ('running', 'to_base'):
+            self.mission = self.bot = self.rec = None
         self.route = route
         self.follower.set_path([])
         if not route:
@@ -764,6 +778,62 @@ class Pilot:
             text += ' (' + '; '.join(notes) + ')'
         self.note = {'tone': 'info', 'text': text + ('' if self.mode == 'drive' else '. Нажмите «Ехать»')}
         return text
+
+    def _apply_zones(self):
+        X, Y = self.nav.cell_centers()
+        bias = np.ones(X.shape)
+        blocked = np.zeros(X.shape, dtype=bool)
+        for z in self.zones:
+            if z['kind'] == 'danger':
+                # Запас для корпуса и отклонения от дискретного пути.
+                blocked |= (X - z['x']) ** 2 + (Y - z['y']) ** 2 <= (z['r'] + INFLATE + 0.08) ** 2
+            else:
+                mask = (X - z['x']) ** 2 + (Y - z['y']) ** 2 <= z['r'] ** 2
+                bias[mask] = 4.0
+        self._zone_blocked = blocked
+        self.graph.set_cost(bias=bias, hard_forbidden=blocked)
+
+    def _cmd_zones(self, cmd):
+        self._manual_only()
+        if self.slam_nav:
+            self._need_map()
+        if self.mode != 'idle':
+            raise Refuse('Сначала остановите робота, затем измените зоны')
+        raw = cmd.get('zones')
+        if not isinstance(raw, list) or len(raw) > 20:
+            raise Refuse('Нужно не больше 20 зон')
+        zones = []
+        for z in raw:
+            try:
+                kind = z['kind']
+                x, y, r = float(z['x']), float(z['y']), float(z['r'])
+            except (KeyError, TypeError, ValueError, OverflowError):
+                raise Refuse('Зоне нужны тип, координаты и радиус') from None
+            if kind not in ('yellow', 'danger') or not all(map(math.isfinite, (x, y, r))) or not 0.15 <= r <= 1.2:
+                raise Refuse('Тип зоны: yellow или danger; радиус от 0,15 до 1,2 м')
+            ix, iy = self.nav.w2g(x, y)
+            if not self.nav.inside(ix, iy) or not self.nav.free[iy, ix]:
+                raise Refuse('Центр зоны должен быть на свободном полу')
+            if kind == 'danger' and any(math.dist((x, y), p) <= r + INFLATE + 0.08 for p in (BASE, self.pose[:2])):
+                raise Refuse('Опасная зона не должна перекрывать робота или базу')
+            zones.append({'kind': kind, 'x': x, 'y': y, 'r': r})
+        previous = self.zones
+        self.zones = zones
+        self._apply_zones()
+        try:
+            route, _ = self._plan_route([[p['x'], p['y']] for p in self._pending()])
+            # Обязателен доступный путь домой, даже когда заданных точек нет.
+            back, _ = self.graph.plan(self.pose[:2], BASE)
+            if back is None:
+                raise Refuse('Зоны перекрыли возвращение на базу')
+        except Refuse:
+            self.zones = previous
+            self._apply_zones()
+            raise
+        self.route = route
+        self.follower.set_path([])
+        self._say('info', 'Зоны сохранены, маршрут перестроен' if zones else 'Зоны убраны')
+        return self.note['text']
 
     def _cmd_go(self, cmd):
         self._manual_only()
@@ -848,6 +918,8 @@ class Pilot:
     # ======================================================================================
 
     def _cmd_mission(self, cmd):
+        if self.zones:
+            raise Refuse('Зоны оператора применяются к заданному маршруту. Уберите их перед автономной миссией')
         agent = cmd.get('agent', 'adaptive')
         if agent not in MISSION_AGENTS or agent not in PRESETS:
             raise Refuse(f'Нет агента «{agent}». Есть: {", ".join(MISSION_AGENTS)}')
@@ -883,6 +955,8 @@ class Pilot:
         if self.tracker and cfg.localize:
             self.bot.tracker = self.tracker         # поправка позы не начинается с нуля
         self.route, self.trail = [], []            # на карте остаётся только путь самой миссии
+        self.distance = 0.0                       # ручной маршрут и подъезд к базе не входят в новую миссию
+        self._last_odom = None
         self.follower.set_path([])
         self.mode = 'mission'
         self._finish_at = None
@@ -1009,6 +1083,7 @@ class Pilot:
             'base': list(BASE), 'at_base': math.dist((x, y), BASE) <= BASE_NEAR,
             'trail': [[round(px, 2), round(py, 2)] for px, py in self.trail[::k]] + [[round(x, 2), round(y, 2)]],
             'route': [{'x': p['x'], 'y': p['y'], 'done': p['done']} for p in self.route],
+            'zones': self.zones,
             'path': [[round(px, 2), round(py, 2)] for px, py in _thin(path, 2)],
             'path_len': round(path_length(path), 2) if len(path) > 1 else 0.0,
             'battery': round(float(self.battery), 2), 'battery_start': self.rules.battery_start,

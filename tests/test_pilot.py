@@ -85,6 +85,7 @@ def test_mission_runs_from_base_with_fresh_judge(arena):
     m = pilot.state()['mission']
     assert m['state'] == 'finished' and m['result']['returned']
     assert m['result']['samples_collected'] == m['result']['samples_total'] == 3
+    assert abs(pilot.distance - m['result']['distance']) < 0.3   # без прежнего ручного маршрута и подъезда к базе
     assert m['journal'] and m['belief']['data'] and m['trace_file'].endswith('easy-1.json.gz')
     res = pilot.command({'cmd': 'reset'})
     assert res['ok'] and pilot.mission is None and pilot.mapper.scans == 0
