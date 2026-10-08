@@ -1,0 +1,66 @@
+title: Смена грунта на пути и правка забывания — повтор на нетронутых сценариях
+kind: adaptation
+question: >-
+  Видна ли в счёте реакция на смену грунта, если подорожавший участок лежит на пути между базой и образцами, и
+  что добавляет правка забывания (после тревоги свежие данные не обесцениваются)?
+hypothesis: >-
+  Разность разностей положительна и отличима от нуля: выигрыш агента с правкой над агентом без обнаружения
+  изменений при смене грунта на пути больше, чем без смены. Без смены правка не ухудшает счёт больше чем на 1 очко.
+method: >-
+  Точный повтор E19 на сценариях 2001–2040, которые до этого не использовались ни в одном опыте и ни в одной
+  отладке: сценарии 1001–1040 уже были посчитаны черновой версией этого опыта до переделки генератора.
+  Уровень hard, базовые правила, 40 сценариев. Из событий оставлена только смена грунта. Условия: без
+  смены; прежняя смена в случайном месте; новая зона ×4 на пути (место выбрано по расстановке, а не по поведению
+  агента); то же при батарее 45 и, для сравнения с ним, батарея 45 без смены. Оракул знает настоящую карту грунтов
+  в каждый момент и показывает, сколько очков вообще стоит знание о грунте. Параметры правки подобраны на
+  сценариях 1–80 (E19_pilot).
+expect: >-
+  Агент с правкой после тревоги сразу видит новую цену пола, меньше ездит по подорожавшему участку и закрывает
+  часть разрыва между агентом без обнаружения изменений и оракулом.
+refute: >-
+  Верхняя граница 95% интервала разности разностей не выше нуля — гипотеза опровергнута. Ноль внутри интервала —
+  «различие не показано».
+levels: [hard]
+seeds: 40
+seed_start: 2001
+soil_probe: {control: no_change, oracle: oracle}
+arms:
+  - {id: no_change, label: Без обнаружения изменений, agent: no_change}
+  - {id: adaptive, label: Прежнее забывание, agent: adaptive}
+  - {id: adaptive_fresh, label: С правкой забывания, agent: adaptive_fresh}
+  - {id: oracle, label: Оракул грунта, agent: soil_oracle}
+conditions:
+  - {id: none, label: Без смены грунта, scenario: {events: []}}
+  - {id: random, label: Смена в случайном месте, scenario: {events: [soil_change]}}
+  - {id: route, label: Смена на пути, scenario: {events: [soil_change], soil_change_mode: route}}
+  - {id: none45, label: 'Без смены, батарея 45', scenario: {events: []}, rules: {battery_start: 45}}
+  - {id: route45, label: 'Смена на пути, батарея 45', scenario: {events: [soil_change], soil_change_mode: route},
+     rules: {battery_start: 45}}
+metrics: [score, samples_share, returned, battery_used]
+claims:
+  - {metric: score, a: adaptive_fresh, b: no_change, minus: none, conditions: [route],
+     text: 'Главное: правка против «без обнаружения» — на пути минус без смены'}
+  - {metric: score, a: adaptive_fresh, b: no_change, minus: none45, conditions: [route45],
+     text: 'То же при батарее 45'}
+  - {metric: score, a: adaptive_fresh, b: adaptive, minus: none, conditions: [route],
+     text: 'Правка против прежнего забывания — на пути минус без смены'}
+  - {metric: score, a: adaptive_fresh, b: adaptive, minus: none45, conditions: [route45],
+     text: 'То же при батарее 45'}
+  - {metric: score, a: adaptive, b: no_change, minus: none, conditions: [route],
+     text: 'Прежнее забывание против «без обнаружения» — на пути минус без смены'}
+  - {metric: score, a: adaptive_fresh, b: no_change, minus: none, conditions: [random],
+     text: 'Правка против «без обнаружения» — случайная смена минус без смены'}
+  - {metric: score, a: oracle, b: no_change, minus: none, conditions: [route],
+     text: 'Потолок: оракул против «без обнаружения» — на пути минус без смены'}
+  - {metric: score, a: oracle, b: no_change, minus: none45, conditions: [route45],
+     text: 'Потолок при батарее 45'}
+  - {metric: score, a: adaptive_fresh, b: no_change, text: 'Правка против «без обнаружения» по условиям'}
+  - {metric: score, a: adaptive_fresh, b: adaptive, text: Правка против прежнего забывания по условиям}
+  - {metric: score, a: adaptive_fresh, b: no_change, kind: noninferiority, margin: 1, conditions: [none],
+     text: 'Без смены правка не хуже «без обнаружения» (допуск 1 очко)'}
+  - {metric: score, a: adaptive_fresh, b: adaptive, kind: noninferiority, margin: 1, conditions: [none],
+     text: 'Без смены правка не хуже прежнего забывания (допуск 1 очко)'}
+  - {metric: soil_extra_energy, better: lower, a: adaptive_fresh, b: no_change, conditions: [route, route45],
+     text: 'Лишний заряд на изменившемся полу: правка против «без обнаружения»'}
+  - {metric: soil_extra_energy, better: lower, a: adaptive_fresh, b: adaptive, conditions: [route, route45],
+     text: 'Лишний заряд на изменившемся полу: правка против прежнего забывания'}

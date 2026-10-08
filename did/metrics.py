@@ -109,19 +109,38 @@ def summarize(runs, metric, rng=None):
 
 def paired(runs_a, runs_b, metric, rng=None):
     """Разность a − b на одинаковых сценариях: среднее, 95% интервал, сколько раз кто выиграл."""
+    return _diff_stats(_paired_diffs(runs_a, runs_b, metric).values(), rng)
+
+
+def paired_did(runs_a, runs_b, base_a, base_b, metric, rng=None):
+    """Парная разность разностей: (a − b) в условии с изменением минус (a − b) в условии без него.
+
+    Отвечает на вопрос «помогает ли механизм именно при изменении среды». Берутся только сценарии,
+    пройденные всеми четырьмя группами; в ответе a_higher — в скольких сценариях разность больше нуля.
+    """
+    change, base = _paired_diffs(runs_a, runs_b, metric), _paired_diffs(base_a, base_b, metric)
+    return _diff_stats([change[k] - base[k] for k in change if k in base], rng)
+
+
+def _paired_diffs(runs_a, runs_b, metric):
     by_b = {(r['level'], r['seed']): r for r in runs_b}
-    diffs = []
+    diffs = {}
     for ra in runs_a:
-        rb = by_b.get((ra['level'], ra['seed']))
+        key = (ra['level'], ra['seed'])
+        rb = by_b.get(key)
         if rb is None:
             continue
         va, vb = ra['metrics'].get(metric), rb['metrics'].get(metric)
         if va is None or vb is None:
             continue
-        diffs.append(float(va) - float(vb))
-    if not diffs:
+        diffs[key] = float(va) - float(vb)
+    return diffs
+
+
+def _diff_stats(diffs, rng=None):
+    d = np.array(list(diffs))
+    if len(d) == 0:
         return None
-    d = np.array(diffs)
     rng = rng or np.random.default_rng(0)
     boot = rng.choice(d, size=(4000, len(d)), replace=True).mean(axis=1) if len(d) > 1 else np.array([d[0]] * 2)
     wins, losses = int((d > 1e-9).sum()), int((d < -1e-9).sum())
@@ -141,18 +160,97 @@ def _sign_test(wins, losses):
     return min(1.0, 2 * tail)
 
 
-def verdict(pair, better):
-    """Вывод по одному сравнению: интервал разности целиком по нужную сторону от нуля или нет."""
+def verdict(pair, better, kind=None, margin=None):
+    """Вывод по одному сравнению.
+
+    По умолчанию — «лучше»: интервал разности целиком по нужную сторону от нуля. С заранее названным
+    допуском margin: kind='noninferiority' — «не хуже»: интервал целиком не ниже −margin (в сторону
+    «лучше» не ограничен); kind='equivalence' — «не отличается»: интервал целиком внутри ±margin.
+    Опровергнуто — когда интервал целиком по другую сторону границы.
+    """
     if pair is None:
         return 'no_data'
     lo, hi = pair['ci']
     if better == 'lower':
         lo, hi = -hi, -lo
+    if kind == 'noninferiority':
+        return 'supported' if lo >= -margin else 'refuted' if hi < -margin else 'inconclusive'
+    if kind == 'equivalence':
+        return 'supported' if -margin <= lo and hi <= margin else 'refuted' if hi < -margin or lo > margin \
+            else 'inconclusive'
     if lo > 0:
         return 'supported'
     if hi < 0:
         return 'refuted'
     return 'inconclusive'
+
+
+class SoilProbe:
+    """Разбор смены грунта по скрытой правде: что изменение стоило роботу и верны ли его тревоги.
+
+    Считает судья-наблюдатель в быстром симуляторе, агент этих чисел не видит. «Изменившийся пол» —
+    место, где множитель расхода сейчас не тот, что в начале прогона.
+    """
+
+    NEAR = 0.3        # м: тревога «по делу», если изменившийся пол не дальше этого от места тревоги
+
+    def __init__(self, scenario, rules):
+        from .scenario import soil_mult
+        self._mult = soil_mult
+        self.start = scenario.soils
+        self.changes = [(e['t'], e['soils']) for e in scenario.events if e['type'] == 'soil_change']
+        self.per_m = rules.drain_per_m
+        self.changed_m = self.dearer_m = self.extra = 0.0
+        self.first_t = None           # когда робот впервые оказался на изменившемся полу
+        self.entries = 0              # сколько раз въезжал на подорожавший пол
+        self.entry_known = None       # был ли этот пол знаком агенту при первом въезде
+        self._on_dearer = False
+
+    def step(self, a, b, soils, t, known=None):
+        """Шаг робота из a в b при действующих грунтах soils.
+
+        known(x, y) — считал ли агент перед этим шагом, что знает цену пола в точке: тревогу
+        «модель устарела» он поднимает только на знакомом полу.
+        """
+        ds = math.dist(a, b)
+        if ds <= 0.0 or not self.changes or t < self.changes[0][0]:
+            return
+        mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+        delta = self._mult(soils, mx, my) - self._mult(self.start, mx, my)
+        if delta:
+            self.changed_m += ds
+            self.extra += self.per_m * ds * delta
+            if self.first_t is None:
+                self.first_t = t
+        if delta > 0:
+            self.dearer_m += ds
+            if not self._on_dearer:
+                self.entries += 1
+                if self.entries == 1 and known is not None:
+                    self.entry_known = bool(known(mx, my))
+        self._on_dearer = delta > 0
+
+    def _changed_near(self, x, y, t):
+        soils = self.start
+        for t_change, after in self.changes:
+            if t_change <= t:
+                soils = after
+        if soils is self.start:
+            return False
+        ring = [(0.0, 0.0)] + [(r * math.cos(k * math.pi / 6), r * math.sin(k * math.pi / 6))
+                               for r in (self.NEAR / 2, self.NEAR) for k in range(12)]
+        return any(self._mult(soils, x + dx, y + dy) != self._mult(self.start, x + dx, y + dy) for dx, dy in ring)
+
+    def metrics(self, journal):
+        alarms = [(e['t'], e['data']['x'], e['data']['y']) for e in journal.entries
+                  if e.get('data', {}).get('tag') == 'model_mismatch' and 'x' in e['data']]
+        true = [t for t, x, y in alarms if self._changed_near(x, y, t)]
+        after = [t for t in true if self.first_t is not None and t >= self.first_t]
+        return {'soil_changed_m': round(self.changed_m, 3), 'soil_dearer_m': round(self.dearer_m, 3),
+                'soil_extra_energy': round(self.extra, 3),
+                'soil_dearer_entries': self.entries, 'soil_entry_known': self.entry_known,
+                'soil_alarms': len(alarms), 'soil_alarms_true': len(true), 'soil_alarms_false': len(alarms) - len(true),
+                'soil_alarm_delay': round(min(after) - self.first_t, 1) if after else None}
 
 
 # ---------------------------------------------------------------------------------------------

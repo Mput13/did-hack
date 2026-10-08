@@ -7,17 +7,22 @@ import json
 import time
 from dataclasses import replace
 
+import numpy as np
+
 from . import ROOT
 from .agent import Agent, make_config
 from .arena import load_arena
 from .config import SCIENCE, Rules
 from .fastsim import FastSim
-from .metrics import run_metrics, score_hypotheses, score_inquiries
+from .metrics import SoilProbe, run_metrics, score_hypotheses, score_inquiries
 from .planner import HeuristicPlanner, LLMPlanner
 from .recorder import Recorder, save_trace
 from .scenario import Scenario, generate
 
 RUNS = ROOT / 'runs'
+# Мерило, а не участник: агент no_change, которому быстрый симулятор сообщает настоящую карту грунтов.
+# В PRESETS его нет — в Gazebo и на роботе такой правды взять неоткуда.
+ORACLE = 'soil_oracle'
 
 
 def make_planner(cfg, llm=None, seed=0):
@@ -39,6 +44,8 @@ def make_planner(cfg, llm=None, seed=0):
 def make_agent(name, config=None):
     """Агент по имени: вариант из PRESETS или базовая стратегия из did.baselines. Возвращает (класс, настройки)."""
     from .baselines import BASELINES
+    if name == ORACLE:
+        return Agent, replace(make_config('no_change'), name=ORACLE, **(config or {}))
     if name in BASELINES:
         cls, cfg = BASELINES[name]
         return cls, replace(cfg, **(config or {}))
@@ -48,12 +55,32 @@ def make_agent(name, config=None):
     return Agent, make_config(name, **(config or {}))
 
 
+def _soil_truth(judge, arena):
+    """Правда для оракула — только множитель расхода по клеткам арены на текущий момент.
+
+    Ни будущих изменений, ни образцов, ни опасных зон через эту функцию не узнать. Карта пересчитывается,
+    когда судья применил смену грунта; до тех пор возвращается тот же массив.
+    """
+    X, Y = arena.cell_centers()
+    seen = {}
+
+    def current():
+        if seen.get('soils') is not judge.soils:
+            grid = np.ones(X.shape)
+            for z in judge.soils:
+                grid = np.where(z.mask(X, Y), np.maximum(grid, z.mult), grid)
+            seen.update(soils=judge.soils, grid=grid)
+        return seen['grid']
+    return current
+
+
 def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, scenario=None,
                 scenario_args=None, config=None, rules=None, llm=None, sim=None, save=True, quiet=True,
-                knowledge=None, study=None):
+                knowledge=None, study=None, soil_probe=False):
     """Прогон целиком. Возвращает сводку: идентификаторы, метрики, путь к записи.
 
     study — задание исследования (словарь did.study.StudySpec) для агента 'study'.
+    soil_probe — добавить в метрики разбор смены грунта по скрытой правде (did.metrics.SoilProbe).
     """
     arena = load_arena()
     if rules == 'science':                 # набор правил с несколькими причинами расхода и сбоями
@@ -74,18 +101,28 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
         extra['study'] = prepare(study, arena, rules, scenario)
     if extra and cfg.planner == 'llm':              # та же модель — автор и критик расследований
         extra['roles'] = planner.client
+    if agent == ORACLE:
+        extra['soil_truth'] = _soil_truth(world.judge, arena)
     bot = cls(arena, cfg, n_samples=len(scenario.samples), rules=rules, planner=planner, recorder=rec, **extra)
 
+    probe = SoilProbe(scenario, rules) if soil_probe else None
+    soil, detector = getattr(bot, 'soil', None), getattr(bot, 'change', None)
+    known = (lambda x, y: soil.at(x, y)[1] >= detector.min_confidence) if soil and detector else None
     wall = time.perf_counter()
     while not world.done:
         bot.tick(world.observe(), world)
+        before = (world.x, world.y)
         world.advance()
+        if probe:
+            probe.step(before, (world.x, world.y), world.judge.soils, world.t, known)
     bot.tick(world.observe(), world)       # последнее наблюдение: итоговые события попадают в запись
     wall = time.perf_counter() - wall
 
     judge = world.judge
     score = judge.score()
     metrics = run_metrics(score, rules, bot.journal, judge.world_log, rec.plans, rec.llm)
+    if probe:
+        metrics.update(probe.metrics(bot.journal))
     sh = score_hypotheses(bot.journal.hypotheses, scenario, judge.world_log, events=rec.events)
     metrics['hypotheses_truth'] = sh
     metrics['hyp_correct_share'] = sh['correct_share']

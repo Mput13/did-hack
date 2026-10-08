@@ -30,6 +30,10 @@ class AgentConfig:
     explore: str = 'mass'             # точка разведки: mass — сколько вероятности вокруг; infogain — ожидаемая польза
     learn_soil: bool = True           # оценивать стоимость грунта по расходу батареи и объезжать дорогое
     detect_change: bool = True        # замечать, что модель расхода устарела, и переучиваться
+    fresh_soil: bool = False          # после тревоги стереть местную оценку грунта и заново внести последние отрезки
+    fresh_window_m: float = 0.15      # сколько последнего пути считать свежим свидетельством (подбор — E19_pilot)
+    fresh_radius_m: float = 0.7       # в каком радиусе от места тревоги стирается старое
+    fresh_keep_far: float = 0.6       # вес старых данных дальше этого радиуса (как в прежнем забывании)
     avoid_hazards: bool = True        # запоминать опасные зоны по штрафам и объезжать
     sensor_health: bool = True        # следить за шумом датчика и меньше верить шумным показаниям
     dynamic_reserve: bool = True      # возвращаться по оценке стоимости пути домой, а не по жёсткому порогу
@@ -62,6 +66,8 @@ PRESETS = {
                          avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
     # Полный агент.
     'adaptive': AgentConfig(name='adaptive'),
+    # Он же с правкой забывания: тревога «модель устарела» не обесценивает данные, по которым она поднята.
+    'adaptive_fresh': AgentConfig(name='adaptive_fresh', fresh_soil=True),
     # Тот же агент, но точку разведки выбирает по ожидаемой пользе измерений (did/explore.py).
     'adaptive_ig': AgentConfig(name='adaptive_ig', explore='infogain'),
     'adaptive_llm': AgentConfig(name='adaptive_llm', planner='llm'),
@@ -91,7 +97,7 @@ def make_config(name, **overrides):
 class Agent:
 
     def __init__(self, arena, config, n_samples, rules=None, planner=None, recorder=None, knowledge=None,
-                 roles=None):
+                 roles=None, soil_truth=None):
         self.arena = arena
         self.cfg = config
         self.rules = rules or Rules()
@@ -152,6 +158,10 @@ class Agent:
         self._cands = []
         self._slow_t = -1e9
         self._soil_h = []                                   # гипотезы о грунтах: [{'key', 'x', 'y'}]
+        self._fresh = deque()                               # последние отрезки пути: (x, y, длина, множитель)
+        self._fresh_m = 0.0
+        self._soil_truth = soil_truth                       # оракул (только быстрый симулятор): настоящая карта грунтов
+        self._truth = None
         self._n_sample_h = 0
         self._last_cmd = (0.0, 0.0)
         self._misses = deque(maxlen=6)                      # недавние ложные сборы: (t, x, y)
@@ -273,6 +283,11 @@ class Agent:
             return
         ratio, predicted, conf = self.soil.observe(x0, y0, x1, y1, spent, dt)
         self._cost_dirty = True
+        if self.cfg.fresh_soil:
+            self._fresh.append(((x0 + x1) / 2, (y0 + y1) / 2, ds, ratio))
+            self._fresh_m += ds
+            while self._fresh_m - self._fresh[0][2] >= self.cfg.fresh_window_m:
+                self._fresh_m -= self._fresh.popleft()[2]
         if self.cfg.detect_change:
             verdict = self.change.update(ratio, predicted, conf, ds)
             if verdict:
@@ -287,8 +302,18 @@ class Agent:
             if math.hypot(h['x'] - x, h['y'] - y) <= 0.8:
                 self.journal.close(t, h['key'], 'outdated', 'расход на участке перестал совпадать с оценкой')
         self._soil_h = [h for h in self._soil_h if math.hypot(h['x'] - x, h['y'] - y) > 0.8]
-        # Рядом с местом расхождения старым данным не верим совсем, в остальных местах — меньше.
-        self.soil.forget(x, y, radius=0.7, keep=0.1, keep_elsewhere=0.6)
+        if self.cfg.fresh_soil:
+            # Старое вокруг стирается целиком, а отрезки, на которых расход разошёлся с прогнозом, вносятся
+            # заново с полным весом: оценка сразу показывает новую цену пола, а не возвращается к «обычному».
+            erased = self.soil.forget(x, y, radius=self.cfg.fresh_radius_m, keep=0.0,
+                                      keep_elsewhere=self.cfg.fresh_keep_far)
+            for mx, my, ds, seen in self._fresh:
+                if erased[self.soil.cell(mx, my)]:         # вне круга отрезок и так остался в оценке
+                    self.soil.add(mx, my, ds, seen)
+        else:
+            # Рядом с местом расхождения старым данным не верим совсем, в остальных местах — меньше.
+            # Известная слабость: вместе со старым обесценивается и отрезок, на котором поднята тревога.
+            self.soil.forget(x, y, radius=0.7, keep=0.1, keep_elsewhere=0.6)
         self._cost_dirty = True
         self._cost_t = -1e9
         self._request_plan('model_mismatch')
@@ -342,17 +367,27 @@ class Agent:
     # ======================================================================================
 
     def _refresh_costs(self, obs):
+        if self._soil_truth is not None and self._soil_truth() is not self._truth:
+            first = self._truth is None
+            self._truth = self._soil_truth()               # грунты сменились: оракул узнаёт об этом сразу
+            self._cost_dirty = True
+            self._cost_t = -1e9
+            if not first:
+                self._request_plan('soil_truth')
         if self._grace[1] is not None and obs.t >= self._grace[0]:
             self._grace = (-1e9, None)                     # выезд закончен: зона снова учитывается в маршрутах
             self._sync_hazards(obs.t)
         if not self._cost_dirty or obs.t - self._cost_t < 1.0:
             return
         mult = self.soil.mult_grid() if self.cfg.learn_soil else None
+        if self._truth is not None:
+            mult = self._truth
         # Риск опасной зоны — штраф к стоимости клетки: чем вероятнее зона, тем дальше её объезжать.
         danger = 1.0 + self.cfg.hazard_weight * self._risk if self.hazards else None
         self.graph.set_cost(mult, bias=danger)
         # Домой — по проверенному: там, где робот уже ездил, нет ни опасных зон, ни сюрпризов с грунтом.
-        if self.cfg.learn_soil:
+        # Оракулу грунт известен везде, и надбавка за непроверенный пол ему не нужна.
+        if self.cfg.learn_soil and self._truth is None:
             unknown = 1.0 + self.cfg.unknown_risk * (1.0 - self.soil.confidence_grid())
             danger = unknown if danger is None else danger * unknown
         self.home_graph.set_cost(mult, bias=danger)

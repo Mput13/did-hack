@@ -320,7 +320,10 @@ class SoilModel:
         return out
 
     def forget(self, x, y, radius, keep=0.1, keep_elsewhere=1.0):
-        """Модель устарела: вокруг (x, y) почти забыть накопленное, в остальных местах — ослабить."""
+        """Модель устарела: вокруг (x, y) почти забыть накопленное, в остальных местах — ослабить.
+
+        Возвращает маску клеток внутри радиуса.
+        """
         ys = self.y0 + (np.arange(self.h) + 0.5) * self.res
         xs = self.x0 + (np.arange(self.w) + 0.5) * self.res
         near = np.hypot(xs[None, :] - x, ys[:, None] - y) <= radius
@@ -329,6 +332,7 @@ class SoilModel:
         self.drain *= scale
         self.version += 1
         self._cache = None
+        return near
 
     def zones(self, threshold=1.45, min_evidence=0.12):
         """Связные участки дорогого грунта, по которым агент уже ездил."""
