@@ -63,7 +63,7 @@ class CostGraph:
         self.cost = np.ones(self.n)
         self.set_cost(None)
 
-    def set_cost(self, mult_grid=None, forbidden=None, bias=None):
+    def set_cost(self, mult_grid=None, forbidden=None, bias=None, hard_forbidden=None):
         """mult_grid — оценка множителя расхода по клеткам арены; forbidden — маска запретных клеток;
         bias — во сколько раз клетка нежелательна для маршрута сверх расхода (например, непроверенный пол)."""
         c = np.ones(self.n) if mult_grid is None else np.asarray(mult_grid)[self.iy, self.ix].astype(float)
@@ -75,6 +75,9 @@ class CostGraph:
             c = np.where(np.asarray(forbidden)[self.iy, self.ix], FORBIDDEN_COST, c)
         self.cost = c
         w = self._len * 0.5 * (c[self._eu] + c[self._ev])
+        if hard_forbidden is not None:
+            blocked = np.asarray(hard_forbidden)[self.iy, self.ix]
+            w = np.where(blocked[self._eu] | blocked[self._ev], np.inf, w)
         self._graph = csr_matrix((w[self._perm], self._indices, self._indptr), shape=(self.n, self.n))
 
     def node(self, x, y):
@@ -107,6 +110,20 @@ class CostGraph:
                 * 0.5 * (self.mult[node] + self.mult[prev])
             node = prev
         return total
+
+    def span(self, dist, pred, x, y):
+        """То же, что energy, и длина этого пути в метрах: (расход в метрах обычного пола, метры)."""
+        node = self.node(x, y)
+        if not math.isfinite(dist[node]):
+            return math.inf, math.inf
+        total = meters = 0.0
+        while pred[node] >= 0:
+            prev = pred[node]
+            step = math.hypot(self.xs[node] - self.xs[prev], self.ys[node] - self.ys[prev])
+            total += step * 0.5 * (self.mult[node] + self.mult[prev])
+            meters += step
+            node = prev
+        return total, meters
 
     def trace(self, pred, x, y):
         """Путь из источника поля в (x, y): список точек, включая конечную."""
@@ -264,3 +281,79 @@ class Follower:
 
 def _wrap(a):
     return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+def _crossed_cells(arena, a, b):
+    """Клетки, которых касается отрезок a–b, и длина отрезка в каждой: (iy, ix, метры).
+
+    Обход точный, а не по точкам с шагом: отрезок делится линиями сетки, каждый кусок лежит в одной клетке.
+    Клетки, которых отрезок касается только углом или стороной, тоже входят — с нулевой длиной.
+    """
+    res = arena.res
+    ax, ay = (a[0] - arena.x0) / res, (a[1] - arena.y0) / res
+    bx, by = (b[0] - arena.x0) / res, (b[1] - arena.y0) / res
+    ts = [np.array([0.0, 1.0])]
+    for p, q in ((ax, bx), (ay, by)):
+        if abs(q - p) > 1e-12:
+            lines = np.arange(math.ceil(min(p, q)), math.floor(max(p, q)) + 1)
+            ts.append((lines - p) / (q - p))
+    t = np.unique(np.clip(np.concatenate(ts), 0.0, 1.0))
+    mid = 0.5 * (t[1:] + t[:-1])
+    iy = [np.floor(ay + mid * (by - ay))]
+    ix = [np.floor(ax + mid * (bx - ax))]
+    length = [np.diff(t) * math.hypot(bx - ax, by - ay) * res]
+    px, py = ax + t * (bx - ax), ay + t * (by - ay)
+    for dx in (-1e-7, 1e-7):                 # вокруг каждой точки на линии сетки — до четырёх клеток
+        for dy in (-1e-7, 1e-7):
+            ix.append(np.floor(px + dx))
+            iy.append(np.floor(py + dy))
+            length.append(np.zeros(len(t)))
+    iy = np.clip(np.concatenate(iy).astype(int), 0, arena.h - 1)
+    ix = np.clip(np.concatenate(ix).astype(int), 0, arena.w - 1)
+    return iy, ix, np.concatenate(length)
+
+
+def straighten(graph, pts, spacing=0.05):
+    """Спрямить путь по клеткам: кусок заменяется прямой, если она проходима и по стоимости не дороже.
+
+    Кратчайший путь на сетке с восемью направлениями идёт «коленом» и бывает длиннее прямой до 8%.
+    Прямая проверяется по всем клеткам, которых она касается (_crossed_cells): ни одна не может быть
+    запрещённой, даже задетая углом. Стоимость прямой считается по той же карте стоимостей клеток, поэтому
+    дорогой грунт, стены и опасные зоны она не срезает. Точки результата идут с шагом spacing, как у
+    исходного пути. В пресеты агента спрямление не включено (research/findings/P1.md).
+    """
+    if len(pts) < 3:
+        return pts
+    arena = graph.arena
+    cost = graph.grid(graph.cost, fill=np.inf)
+    p = np.asarray(pts, dtype=float)
+    ix = ((p[:, 0] - arena.x0) / arena.res).astype(int)
+    iy = ((p[:, 1] - arena.y0) / arena.res).astype(int)
+    c = cost[iy, ix]
+    seg = np.hypot(*np.diff(p, axis=0).T) * 0.5 * (c[1:] + c[:-1])
+    along = np.concatenate(([0.0], np.cumsum(seg)))           # стоимость пути по клеткам до каждой точки
+
+    def line(i, j):
+        cy, cx, length = _crossed_cells(arena, pts[i], pts[j])
+        cells = cost[cy, cx]
+        if not np.isfinite(cells).all():
+            return math.inf
+        return float((cells * length).sum())
+    keep, i = [0], 0
+    while i < len(pts) - 1:
+        j = best = i + 1
+        while j < len(pts) - 1:
+            j = min(len(pts) - 1, j + 2)
+            if line(i, j) <= (along[j] - along[i]) * (1.0 + 1e-6):
+                best = j
+            elif j - best > 12:                               # прямая давно не проходит: дальше не ищем
+                break
+        keep.append(best)
+        i = best
+    out = [pts[0]]
+    for a, b in zip(keep, keep[1:]):
+        d = math.dist(pts[a], pts[b])
+        n = max(1, int(round(d / spacing)))
+        out += [(pts[a][0] + (pts[b][0] - pts[a][0]) * k / n, pts[a][1] + (pts[b][1] - pts[a][1]) * k / n)
+                for k in range(1, n + 1)]
+    return out

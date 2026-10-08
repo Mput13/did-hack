@@ -1,0 +1,50 @@
+title: Подбор настроек новых устройств агента (отладочные сценарии)
+kind: adaptation
+question: Какие настройки плана на остаток прогона и какая длина обзорного объезда лучше на отладочных сценариях?
+hypothesis: >-
+  Подбор, а не проверка: по этой серии выбраны настройки вариантов adaptive_tour и adaptive_survey для опыта E23.
+method: >-
+  Сценарии 1–80 (на них разрешено подбирать), уровни medium и hard, базовые правила. Перебираются: «спешка»
+  плана (во сколько раз обесценивается дальняя цель), удержание начатой цели, разведка в одном объезде с
+  кандидатами или по правилу, заряд на обзорный объезд и его густота, порог уверенности для кандидата.
+expect: Настройки, близкие к прежнему правилу «сначала ближнее», не хуже adaptive; далёкие от него — хуже.
+refute: Не проверка гипотезы; итоговое сравнение — опыт E23 на сценариях 6001–6040.
+arms:
+  - {id: adaptive, label: С адаптацией (нынешний), agent: adaptive}
+  - {id: tour_h2, label: 'План: спешка 2', agent: adaptive_tour, config: {scheme_opts: {explore: rule, haste: 2.0, switch_gain: 0.0}}}
+  - {id: tour_h4, label: 'План: спешка 4', agent: adaptive_tour, config: {scheme_opts: {explore: rule, haste: 4.0, switch_gain: 0.0}}}
+  - {id: tour_h8, label: 'План: спешка 8 (выбран, adaptive_tour)', agent: adaptive_tour}
+  - {id: tour_h10, label: 'План: спешка 10', agent: adaptive_tour, config: {scheme_opts: {explore: rule, haste: 10.0, switch_gain: 0.0}}}
+  - {id: tour_h4_keep, label: 'План: спешка 4, начатую цель держать (2 очка)', agent: adaptive_tour, config: {scheme_opts: {explore: rule, haste: 4.0}}}
+  - {id: tour_h0, label: 'План: без спешки, разведка по правилу', agent: adaptive_tour, config: {scheme_opts: {explore: rule}}}
+  - {id: tour_full, label: 'План в чистом виде (adaptive_tour_full)', agent: adaptive_tour_full}
+  - {id: tour_full_h4, label: 'План в чистом виде, спешка 4', agent: adaptive_tour_full, config: {scheme_opts: {haste: 4.0}}}
+  - {id: tour_full_unknown, label: 'План в чистом виде, непроверенный пол дороже на 30%', agent: adaptive_tour_full, config: {scheme_opts: {unknown_mult: 0.3}}}
+  - {id: survey6, label: 'Разведка 6 ед. (выбрана, adaptive_survey)', agent: adaptive_survey}
+  - {id: survey10, label: 'Разведка 10 ед.', agent: adaptive_survey, config: {scheme_opts: {targets: rule, survey_cover: 1.8, survey_budget: 10.0}}}
+  - {id: survey15, label: 'Разведка 15 ед.', agent: adaptive_survey, config: {scheme_opts: {targets: rule, survey_cover: 1.8, survey_budget: 15.0}}}
+  - {id: survey25_dense, label: 'Разведка 25 ед., густой объезд (покрытие 1,5 м)', agent: adaptive_survey, config: {scheme_opts: {targets: rule, survey_cover: 1.5, survey_budget: 25.0}}}
+  - {id: pickup, label: 'Возврат с попутным сбором (adaptive_pickup)', agent: adaptive_pickup}
+  - {id: picky50, label: 'Порог кандидата 50% (adaptive_picky)', agent: adaptive_picky}
+  - {id: picky65, label: 'Порог кандидата 65%', agent: adaptive_picky, config: {candidate_mass: 0.65}}
+levels: [medium, hard]
+seeds: 80
+seed_start: 1
+metrics: [score, samples_share, returned, penalties, battery_used]
+claims:
+  - {metric: score, a: tour_h2, b: adaptive, text: 'План, спешка 2'}
+  - {metric: score, a: tour_h4, b: adaptive, text: 'План, спешка 4'}
+  - {metric: score, a: tour_h8, b: adaptive, text: 'План, спешка 8'}
+  - {metric: score, a: tour_h10, b: adaptive, text: 'План, спешка 10'}
+  - {metric: score, a: tour_h4_keep, b: adaptive, text: 'План, спешка 4, держать начатую цель'}
+  - {metric: score, a: tour_h0, b: adaptive, text: 'План без спешки, разведка по правилу'}
+  - {metric: score, a: tour_full, b: adaptive, text: 'План в чистом виде'}
+  - {metric: score, a: tour_full_h4, b: adaptive, text: 'План в чистом виде, спешка 4'}
+  - {metric: score, a: tour_full_unknown, b: adaptive, text: 'План в чистом виде, непроверенный пол дороже'}
+  - {metric: score, a: survey6, b: adaptive, text: 'Разведка 6 ед.'}
+  - {metric: score, a: survey10, b: adaptive, text: 'Разведка 10 ед.'}
+  - {metric: score, a: survey15, b: adaptive, text: 'Разведка 15 ед.'}
+  - {metric: score, a: survey25_dense, b: adaptive, text: 'Разведка 25 ед., густой объезд'}
+  - {metric: score, a: pickup, b: adaptive, text: 'Возврат с попутным сбором'}
+  - {metric: score, a: picky50, b: adaptive, text: 'Порог кандидата 50%'}
+  - {metric: score, a: picky65, b: adaptive, text: 'Порог кандидата 65%'}
