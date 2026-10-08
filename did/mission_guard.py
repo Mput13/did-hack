@@ -22,7 +22,9 @@
 
 Запасной режим (fallback): если Jev недоступен — сеть, таймаут, потолок расходов, чужая модель в ответе, ответ не
 по схеме (любая JevError) — сторож отключается до конца миссии, дальше решает одно правило, а причина пишется в
-журнал решений: «сторож миссии отключён: …; миссия словами дальше не гарантируется». Для показа режим включён
+журнал решений: «сторож миссии отключён: …; миссия словами дальше не гарантируется». Причина — код из закрытого
+списка (DISABLE_REASONS) и постоянное пояснение к нему; текст исключения в журнал решений и в запись прогона не
+попадает вовсе (в нём могли бы оказаться строки сервера или транспорта). Для показа режим включён
 (make_guarded без указаний), в исследовательских прогонах выключен (tools/jev_eval.py передаёт fallback=False):
 там отказ Jev останавливает прогон, и числа не смешиваются с ездой по правилу. Промах кэша (CacheMiss) в режиме
 «только кэш» останавливает прогон всегда: это не сбой модели, а неполный повтор.
@@ -82,6 +84,24 @@ PROFILES['v5'] = {**PROFILES['v3'], 'own_position': False}
 RESERVE_MARGIN, RESERVE_ABS = 1.1, 4.0
 ACTIONS = {'investigate': 'drive to the target and collect a sample there',
            'explore': 'drive to the target to look for samples around it'}
+# Причины отключения сторожа: код (JevError.code) -> постоянное пояснение. Других текстов в журнал решений нет.
+DISABLE_REASONS = {
+    'network': 'нет связи с сервером Jev',
+    'timeout': 'Jev не ответил в срок',
+    'server': 'сервер Jev отказал',
+    'budget': 'потолок расходов на Jev достигнут или работа с Jev остановлена',
+    'journal': 'журнала расходов на Jev нет или он негоден',
+    'wrong_model': 'на запрос ответила не Jev 1.13',
+    'bad_reply': 'ответ Jev не по схеме',
+    'key': 'ключ доступа к Jev не задан или не читается',
+    'other': 'сбой обращения к Jev',
+}
+
+
+def disable_reason(error):
+    """Код причины из закрытого списка по ошибке клиента; всё незнакомое — 'other'."""
+    code = getattr(error, 'code', None)
+    return code if isinstance(code, str) and code in DISABLE_REASONS else 'other'
 
 
 def options(state):
@@ -271,12 +291,14 @@ class GuardedPlanner:
 
     def _disable(self, first, error):
         """Jev недоступен: сторож выключается до конца миссии, это и следующие решения принимает правило."""
-        # Текст ошибки клиента уже без ключа и без сырых строк сервера; здесь он ещё и обрезается.
-        self.disabled = f'{type(error).__name__}: {str(error)[:200]}'
+        # В журнал решений и запись прогона идёт только код причины и постоянное пояснение: текст исключения
+        # сюда не копируется, даже очищенный.
+        code = disable_reason(error)
+        self.disabled = f'{code}: {DISABLE_REASONS[code]}'
         note = (f' Сторож миссии отключён: {self.disabled}; миссия словами дальше не гарантируется, до конца '
                 f'миссии решает правило.')
         return {**first, 'reasoning': first['reasoning'] + note,
-                'guard': {'mode': self.mode, 'profile': self.profile, 'decision': 'disabled',
+                'guard': {'mode': self.mode, 'profile': self.profile, 'decision': 'disabled', 'reason': code,
                           'disabled': self.disabled}, 'wait_s': 0.0}
 
     def _escalate(self, state, log, wait_s, why):
