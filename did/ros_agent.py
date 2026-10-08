@@ -55,6 +55,7 @@ class RosIO(Node):
         self.odom = None
         self.battery = None
         self.sensor = None
+        self.sensor_stamp = None
         self.scan = None
         self.scan_stamp = self.scan_step = None
         self.odom_log = deque(maxlen=150)       # (время, x, y, курс, v, w): поза на момент скана
@@ -103,6 +104,7 @@ class RosIO(Node):
     def _on_sensor(self, msg):
         with self.lock:
             self.sensor = float(msg.data)
+            self.sensor_stamp = self.sim_time      # у сообщения нет времени измерения: берём время получения
 
     def _on_events(self, msg):
         with self.lock:
@@ -128,12 +130,13 @@ class RosIO(Node):
         with self.lock:
             x, y, th, v, w = self.odom
             sensor, self.sensor = self.sensor, None
+            age = self.sim_time - self.sensor_stamp if sensor is not None and self.sensor_stamp is not None else 0.0
             scan, self.scan = self.scan, None
             events, self.events = self.events, []
             scan_pose = self._odom_at(self.scan_stamp) if scan is not None else None
         return Observation(t=self.now(), x=x, y=y, th=th, v=v, w=w, battery=self.battery, sensor=sensor,
                            scan=scan, events=events, done=bool(self.score.get('finished')),
-                           scan_pose=scan_pose, scan_step=self.scan_step)
+                           scan_pose=scan_pose, scan_step=self.scan_step, sensor_age=max(0.0, age))
 
     def _odom_at(self, t):
         """Поза по одометрии на момент t. Скан приходит позже, чем снят, а робот за это время успевает

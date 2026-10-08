@@ -6,6 +6,7 @@
     pixi run demo --fast                   # то же без Gazebo, на быстром симуляторе
     pixi run demo --open                   # ещё и открыть страницу в браузере
     pixi run demo --slam                   # рядом с нашей картой — карта от SLAM Toolbox
+    pixi run demo --slam-map               # без готовой карты: робот едет по карте SLAM Toolbox
 
 Что происходит: поднимается сервер лаборатории (если он ещё не запущен), стенд (мир, робот, судья),
 затем пульт (did/pilot.py). Пульт сам ждёт, пока робот осядет на колёса, — на странице виден
@@ -135,6 +136,8 @@ def main():
     ap.add_argument('--open', action='store_true', help='открыть страницу пульта в браузере')
     ap.add_argument('--slam', action='store_true',
                     help='запустить ещё и SLAM Toolbox: его карта появится на странице рядом с нашей')
+    ap.add_argument('--slam-map', action='store_true',
+                    help='без готовой карты: SLAM Toolbox строит карту, робот планирует путь и едет по ней')
     ap.add_argument('--launch-arg', action='append', default=[], metavar='ИМЯ:=ЗНАЧЕНИЕ',
                     help='дополнительный аргумент для stand.launch.py (можно несколько раз)')
     args = ap.parse_args()
@@ -149,6 +152,8 @@ def main():
     try:
         url, server = ensure_server(args.port)
         page = f'{url}/#/pilot'
+        if args.fast and args.slam_map:
+            raise SystemExit('--slam-map работает только в Gazebo: в быстром симуляторе SLAM Toolbox нет')
         if args.fast:
             status, res = http(f'{url}/api/pilot/start', {'backend': 'fastsim', 'level': args.level,
                                                           'seed': args.seed, 'rules': args.rules}, timeout=15.0)
@@ -166,12 +171,14 @@ def main():
             say('стенд: ' + ' '.join(launch))
             stand = spawn(launch, 'demo-stand.log')
             pilot = spawn([sys.executable, '-m', 'did.pilot', '--ros', '--level', args.level, '--seed', str(args.seed),
-                           '--rules', args.rules], 'demo-pilot.log', echo='пульт:')
-            if args.slam:
+                           '--rules', args.rules, *(['--slam-map'] if args.slam_map else [])],
+                          'demo-pilot.log', echo='пульт:')
+            if args.slam or args.slam_map:
                 # Своя тема и свой кадр карты (env/slam_demo.yaml): /map и кадр map заняты эталонной картой судьи.
                 slam = spawn(['ros2', 'launch', 'slam_toolbox', 'online_async_launch.py', 'use_sim_time:=true',
                               f'slam_params_file:={ROOT / "env" / "slam_demo.yaml"}'], 'demo-slam.log')
-                say('SLAM Toolbox запущен: карта появится на странице, переключатель под картой')
+                say('SLAM Toolbox запущен: робот едет по его карте, готовая карта ему не даётся' if args.slam_map
+                    else 'SLAM Toolbox запущен: карта появится на странице, переключатель под картой')
         say(f'страница пульта: {page}')
         say('Ctrl+C — остановить показ')
         if args.open:
@@ -188,6 +195,13 @@ def main():
                     + tail(LOGS / 'demo-pilot.log'))
                 code = 1
                 break
+            if slam is not None and slam.poll() is not None:
+                say(f'SLAM Toolbox остановился сам (код {slam.returncode}). Последние строки журнала:\n'
+                    + tail(LOGS / 'demo-slam.log'))
+                if args.slam_map:
+                    code = 1
+                    break
+                slam = None
             if server is not None and server.poll() is not None:
                 say('сервер интерфейса остановился сам')
                 code = 1
