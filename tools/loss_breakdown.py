@@ -463,8 +463,9 @@ def main():
     for folder in folders:
         for level in levels:
             rows = breakdown(folder, level, min(args.jobs, 3))
-            dump[f'{folder.name}/{level}'] = {'summary': summarize(rows), 'runs': rows}
-            print(render(f'{folder.parent.name}/{folder.name}, {level}', dump[f'{folder.name}/{level}']['summary']))
+            key = f'{folder.parent.name}/{folder.name}/{level}'
+            dump[key] = {'summary': summarize(rows), 'runs': rows}
+            print(render(f'{folder.parent.name}/{folder.name}, {level}', dump[key]['summary']))
     if args.json:
         Path(args.json).write_text(json.dumps(dump, ensure_ascii=False, indent=1), encoding='utf-8')
 
