@@ -45,9 +45,9 @@ def find(exp, a='gain', b='random'):
                 qa, qb, ca, cb = fork
                 print(f"{cond['id']:8} {level:6} {seed}  {qa['id']} t={qa['t_open']:6.1f}  {qa['anomaly']['text'][:44]:44}"
                       f" | {a}: {'→'.join(x['chosen'] for x in ca['steps'] if x['chosen']):12} {qa.get('verdict'):12}"
-                      f" {sum(x['cost'] for x in qa['tests'] if x.get('measured')):.2f} ед."
+                      f" {ca['spent']:.2f} ед."
                       f" | {b}: {'→'.join(x['chosen'] for x in cb['steps'] if x['chosen']):14} {qb.get('verdict'):12}"
-                      f" {sum(x['cost'] for x in qb['tests'] if x.get('measured')):.2f} ед. ({cb['stop']})"
+                      f" {cb['spent']:.2f} ед. ({cb['stop']})"
                       f" | правда {qa.get('truth')} | счёт {ta['result']['score']:.1f} / {tb['result']['score']:.1f}")
 
 

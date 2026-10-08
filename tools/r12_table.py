@@ -15,9 +15,13 @@
     одной и той же паузы выбором не считаются: пауза даёт оба сразу, какой бы из них ни был назван);
   правда есть — сверка нашла хотя бы одну настоящую причину; расследования расхода, в которых нет ни утечки,
     ни дорогого грунта, сверить нечем, они идут отдельной строкой и в доли верных не входят;
-  верный вывод — причина названа и она настоящая (в том числе одна из двух настоящих).
-Интервалы — 95%, бутстреп по сценариям (уровень × номер), парно: оба варианта берутся на одних и тех же
-сценариях в каждой выборке.
+  верный вывод — названа хотя бы одна настоящая причина (в том числе одна из двух настоящих: вывод называет
+    одну причину, так что при двух настоящих назвать обе нельзя); строка «названы все причины» — строже:
+    настоящая причина одна и названа именно она;
+  заряд расследования — накопленный расход на его опыты (choices.spent). Сумма цен опытов из inquiries.tests
+    для этого не годится: при повторе опыта там остаётся цена только последнего замера.
+Интервалы — 95%, бутстреп по сценариям (уровень × номер), парно: в каждой выборке сценарий берётся целиком —
+со всеми вариантами и, в срезе «оба набора правил», с обоими наборами правил (сценарий у них один и тот же).
 """
 import argparse
 import json
@@ -29,6 +33,7 @@ from did.recorder import load_trace
 from did.runner import RUNS
 
 RUN_METRICS = ('score', 'samples_share', 'returned', 'battery_used')
+BOOT = 4000
 RULES = ('gain', 'bits', 'cheapest', 'fixed', 'worst')
 KIND = {'rest': 'pause', 'listen_std': 'pause', 'listen_shift': 'pause', 'straight': 'straight', 'spin': 'spin'}
 
@@ -36,6 +41,24 @@ KIND = {'rest': 'pause', 'listen_std': 'pause', 'listen_shift': 'pause', 'straig
 def _kinds(step):
     """Сколько разных манёвров среди допустимых опытов шага."""
     return len({x.get('kind') or KIND.get(x['id'], x['id']) for x in step['options']})
+
+
+def inquiry_row(q, c):
+    """Строка таблицы по одному расследованию: q — запись расследования, c — запись его выбора (choices)."""
+    steps = [x for x in c['steps'] if x['chosen']]
+    closed = bool(q.get('conclusion'))
+    return {
+        'id': q['id'], 'topic': q['topic'], 'trigger': q['anomaly'].get('trigger'), 'closed': closed,
+        'maneuvers': c['maneuvers'], 'energy': float(c['spent']),      # накопленный расход, повторы учтены
+        'time': (q['t_close'] - q['t_open']) if closed else None,
+        'verdict': q.get('verdict'), 'truth': q.get('truth'), 'stop': c['stop'] or 'instant',
+        'best': (q.get('conclusion') or {}).get('best'),
+        'choice': any(_kinds(x) >= 2 for x in c['steps']), 'steps': c['steps'],
+        'first': steps[0]['chosen'] if steps else None,
+        'start': (q['id'], q['t_open'], q['anomaly']),
+        'order': [x['id'] for x in sorted((x for x in q['tests'] if x.get('measured')),
+                                          key=lambda x: x['measured']['t'])],
+    }
 
 
 def load(exp):
@@ -47,22 +70,7 @@ def load(exp):
     for r in s['runs']:
         tr = load_trace(RUNS / r['file'])
         how = {c['id']: c for c in tr.get('choices', [])}
-        qs = []
-        for q in tr.get('inquiries', []):
-            c = how[q['id']]
-            steps = [x for x in c['steps'] if x['chosen']]
-            closed = bool(q.get('conclusion'))
-            qs.append({
-                'id': q['id'], 'topic': q['topic'], 'trigger': q['anomaly'].get('trigger'), 'closed': closed,
-                'maneuvers': c['maneuvers'], 'energy': sum(x['cost'] for x in q['tests'] if x.get('measured')),
-                'time': (q['t_close'] - q['t_open']) if closed else None,
-                'verdict': q.get('verdict'), 'truth': q.get('truth'), 'stop': c['stop'] or 'instant',
-                'best': (q.get('conclusion') or {}).get('best'),
-                'choice': any(_kinds(x) >= 2 for x in c['steps']), 'steps': c['steps'],
-                'first': steps[0]['chosen'] if steps else None,
-                'order': [x['id'] for x in sorted((x for x in q['tests'] if x.get('measured')),
-                                                  key=lambda x: x['measured']['t'])],
-            })
+        qs = [inquiry_row(q, how[q['id']]) for q in tr.get('inquiries', [])]
         out.setdefault((r['condition'], r['arm']), {})[(r['level'], r['seed'])] = {'m': r['metrics'], 'q': qs}
     return s, out
 
@@ -96,7 +104,8 @@ def per_run(num):
     return lambda run: (num(run), 1)
 
 
-CORRECT = lambda q: q['verdict'] in ('correct', 'partial')       # noqa: E731
+CORRECT = lambda q: q['verdict'] in ('correct', 'partial')       # noqa: E731  названа хотя бы одна настоящая причина
+FULL = lambda q: q['verdict'] == 'correct'                       # noqa: E731  настоящая причина одна, и названа она
 STATS = {
     # id: (подпись, функция прогона → (числитель, знаменатель))
     'inq_per_run': ('закрытых расследований на прогон', per_run(lambda r: len(list(_sel(r))))),
@@ -110,7 +119,11 @@ STATS = {
     'budget': ('оборвано по бюджету заряда, доля расследований с опытом или попыткой выбора',
                lambda run: (sum(q['stop'] == 'budget' for q in _sel(run) if q['steps']),
                             sum(1 for q in _sel(run) if q['steps']))),
-    'correct': ('верных выводов, доля закрытых расследований с правдой', ratio(CORRECT, truth=True)),
+    'correct': ('названа хотя бы одна настоящая причина, доля закрытых расследований с правдой',
+                ratio(CORRECT, truth=True)),
+    'full': ('названы все настоящие причины (причина одна и названа она), та же доля', ratio(FULL, truth=True)),
+    'partial': ('названа одна настоящая причина из нескольких, та же доля',
+                ratio(lambda q: q['verdict'] == 'partial', truth=True)),
     'wrong': ('ошибочных выводов, та же доля', ratio(lambda q: q['verdict'] == 'wrong', truth=True)),
     'insufficient': ('«данных недостаточно», та же доля', ratio(lambda q: q['verdict'] == 'insufficient', truth=True)),
     'named_correct': ('верных среди названных причин (без «данных недостаточно»), расследования с правдой',
@@ -140,8 +153,21 @@ STATS = {
 }
 
 
+def clusters(data, conds, arm):
+    """Прогоны варианта по сценариям: {(уровень, номер): [прогон при каждом наборе правил из conds]}.
+
+    Сценарий — единица перевыборки. У базовых и научных правил он один и тот же (та же арена, те же образцы и
+    сбои), поэтому оба прогона перевыбираются вместе, а не как два независимых наблюдения."""
+    out = {}
+    for cond in conds:
+        for key, run in data[(cond, arm)].items():
+            out.setdefault(key, []).append(run)
+    return {k: v for k, v in out.items() if len(v) == len(conds)}
+
+
 def _table(runs, keys, f):
-    return np.array([f(runs[k]) for k in keys], dtype=float)        # (сценарии, 2)
+    """(сценарии, 2): числитель и знаменатель, сложенные по всем прогонам сценария."""
+    return np.array([np.sum([f(r) for r in runs[k]], axis=0) for k in keys], dtype=float)
 
 
 def _value(t):
@@ -187,11 +213,59 @@ def _rule_pick(rule, options):
     return options[0]['id']       # fixed
 
 
+def _flat(runs):
+    return [r for group in runs.values() for r in group]
+
+
+def _trail(steps):
+    """Шаги выбора без оценок: что было допустимо и что выбрано."""
+    return [([x['id'] for x in s['options']], s['chosen']) for s in steps]
+
+
+def first_forks(runs_a, runs_b):
+    """Первое расхождение выбора в каждой паре прогонов: до него расследования вариантов совпадают (та же
+    странность, те же допустимые опыты и тот же выбор), на нём первый опыт выбран разный. Это одно и то же
+    расследование в двух вариантах — в отличие от долей по всем расследованиям, у которых после расхождения
+    разный состав. Поля *_m — только расхождения с разным манёвром (два замера одной паузы манёвром не
+    различаются). Заранее этот подсчёт не заявлялся."""
+    out = Counter()
+    for key in sorted(set(runs_a) & set(runs_b)):
+        for ra, rb in zip(runs_a[key], runs_b[key]):
+            for qa, qb in zip(ra['q'], rb['q']):
+                if qa['start'] != qb['start']:
+                    break
+                sa, sb = _trail(qa['steps']), _trail(qb['steps'])
+                if sa and sb and sa[0][1] != sb[0][1]:
+                    ok_a, ok_b = CORRECT(qa), CORRECT(qb)
+                    out['n'] += 1
+                    out['a_correct'] += ok_a
+                    out['b_correct'] += ok_b
+                    out['a_full'] += FULL(qa)
+                    out['b_full'] += FULL(qb)
+                    out['both'] += ok_a and ok_b
+                    out['only_a'] += ok_a and not ok_b
+                    out['only_b'] += ok_b and not ok_a
+                    out['neither'] += not ok_a and not ok_b
+                    out['a_energy'] += qa['energy']
+                    out['b_energy'] += qb['energy']
+                    if KIND.get(sa[0][1], sa[0][1]) != KIND.get(sb[0][1], sb[0][1]):
+                        out['n_m'] += 1
+                        out['a_correct_m'] += ok_a
+                        out['b_correct_m'] += ok_b
+                    break
+                if sa != sb:
+                    break
+    keys = ('n', 'a_correct', 'b_correct', 'a_full', 'b_full', 'both', 'only_a', 'only_b', 'neither',
+            'n_m', 'a_correct_m', 'b_correct_m')
+    return {**{k: int(out[k]) for k in keys}, 'a_energy': round(float(out['a_energy']), 3),
+            'b_energy': round(float(out['b_energy']), 3)}
+
+
 def structure(runs):
     """По шагам выбора одного варианта: сколько было допустимых опытов и что выбрало бы каждое правило."""
     n_opts, by_topic, sets, agree, steps, first = Counter(), {}, Counter(), Counter(), 0, Counter()
     stops, kinds, no_closed = Counter(), Counter(), 0
-    for run in runs.values():
+    for run in _flat(runs):
         for q in run['q']:
             if not q['closed']:
                 no_closed += 1
@@ -224,12 +298,12 @@ def structure(runs):
 def verdicts(runs):
     """Исходы сверки: с правдой и без неё — разными строками, отдельно расследования с опытом."""
     out = {}
-    for run in runs.values():
+    for run in _flat(runs):
         for q in run['q']:
             if not q['closed']:
                 continue
             for group in ('все', 'с опытом' if q['maneuvers'] else 'мгновенные',
-                          *((f'расход, с опытом',) if q['topic'] == 'energy' and q['maneuvers'] else ()),
+                          *(('расход, с опытом',) if q['topic'] == 'energy' and q['maneuvers'] else ()),
                           *(('с выбором',) if q['choice'] else ())):
                 cell = out.setdefault(group, {'правда есть': Counter(), 'правды нет': Counter()})
                 cell['правда есть' if q['truth'] else 'правды нет'][q['verdict']] += 1
@@ -239,7 +313,7 @@ def verdicts(runs):
 def causes(runs):
     """Расследования расхода с опытом: настоящая причина × вывод, первый опыт, число опытов."""
     out = {}
-    for run in runs.values():
+    for run in _flat(runs):
         for q in _sel(run, exp=True, topic='energy'):
             key = '+'.join(q['truth']) or 'правды нет'
             c = out.setdefault(key, {'n': 0, 'maneuvers': 0, 'energy': 0.0, 'verdict': Counter(), 'order': Counter()})
@@ -258,17 +332,16 @@ def build(exp, ref='random', main='gain'):
     arms = [a['id'] for a in s['spec']['arms']]
     rng = np.random.default_rng(0)
     out = {'experiment': exp, 'generated': s['generated'], 'seed_start': s['spec']['seed_start'], 'seeds': s['seeds'],
-           'levels': s['spec']['levels'], 'labels': {k: v[0] for k, v in STATS.items()}, 'conditions': {}}
+           'levels': s['spec']['levels'], 'labels': {k: v[0] for k, v in STATS.items()},
+           'resampling': 'сценарий (уровень, номер) целиком: все варианты и оба набора правил вместе',
+           'conditions': {}}
     for cond in conds + ['all']:
-        runs = {}
-        for arm in arms:
-            if cond == 'all':             # оба набора правил вместе: сценарий — (правила, уровень, номер)
-                runs[arm] = {(c, *k): v for c in conds for k, v in data[(c, arm)].items()}
-            else:
-                runs[arm] = data[(cond, arm)]
+        # оба набора правил вместе: сценарий — по-прежнему (уровень, номер), прогонов в нём два
+        runs = {arm: clusters(data, conds if cond == 'all' else [cond], arm) for arm in arms}
         keys = sorted(set.intersection(*(set(r) for r in runs.values())))
-        idx = rng.integers(len(keys), size=(4000, len(keys)))
-        block = {'scenarios': len(keys), 'arms': {}, 'vs_' + ref: {}, 'vs_' + main: {}}
+        idx = rng.integers(len(keys), size=(BOOT, len(keys)))
+        block = {'scenarios': len(keys), 'runs': sum(len(runs[main][k]) for k in keys),
+                 'arms': {}, 'vs_' + ref: {}, 'vs_' + main: {}}
         for arm in arms:
             block['arms'][arm] = {'stats': {k: stat(runs[arm], keys, f, idx) for k, (_, f) in STATS.items()},
                                   'structure': structure(runs[arm]), 'verdicts': verdicts(runs[arm]),
@@ -277,6 +350,7 @@ def build(exp, ref='random', main='gain'):
                 block['vs_' + ref][arm] = {k: diff(runs[arm], runs[ref], keys, f, idx) for k, (_, f) in STATS.items()}
             if arm != main:
                 block['vs_' + main][arm] = {k: diff(runs[arm], runs[main], keys, f, idx) for k, (_, f) in STATS.items()}
+        block['first_fork'] = {f'{main}_vs_{arm}': first_forks(runs[main], runs[arm]) for arm in arms if arm != main}
         out['conditions'][cond] = block
     return out
 
@@ -284,7 +358,7 @@ def build(exp, ref='random', main='gain'):
 def show(out, ref='random'):
     for cond, block in out['conditions'].items():
         arms = list(block['arms'])
-        print(f'\n=== правила: {cond}; сценариев {block["scenarios"]} ===')
+        print(f'\n=== правила: {cond}; сценариев {block["scenarios"]}, прогонов на вариант {block["runs"]} ===')
         print(f'{"величина":<18}' + ''.join(f'{a:>16}' for a in arms))
         for k in STATS:
             cells = [block['arms'][a]['stats'][k] for a in arms]
@@ -302,6 +376,7 @@ def show(out, ref='random'):
             st = block['arms'][a]['structure']
             print(f'[{a}] шагов выбора {st["choice_steps"]}, разных манёвров на шаг {st["maneuvers_per_step"]}, '
                   f'первый опыт {st["first_choice"]}, остановки {st["stops"]}')
+        print('первое расхождение выбора (a = gain):', json.dumps(block['first_fork'], ensure_ascii=False))
         st = block['arms']['gain']['structure']
         print('gain: наборы допустимых', st['option_sets'])
         print('gain: манёвров на шаг по темам', st['maneuvers_per_step_by_topic'])
