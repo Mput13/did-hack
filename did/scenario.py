@@ -12,6 +12,10 @@ from .config import BASE, FAULT_KINDS, LEVELS
 
 SOIL_MULTS = {'easy': [3.0], 'medium': [2.0, 3.0, 4.0], 'hard': [2.0, 2.5, 3.0, 4.0]}
 ALL_EVENTS = ('soil_change', 'new_hazard', 'sensor_fault')
+# При нескольких сменах грунта или новых зонах события разнесены не меньше чем на столько. Это шаг округления
+# времён и такт быстрого симулятора: меньшего достаточно, чтобы события не совпали, а больший разнос сдвигает
+# заметно больше сценариев (0,5 с — 17 из 40 в условии «3 смены и 3 зоны» опыта E15 против 3 при 0,1 с).
+MIN_EVENT_GAP_S = 0.1
 
 
 @dataclass
@@ -164,6 +168,31 @@ def _hazard_on_soil(zid, arena, rng, soils, samples, base, others):
     return None
 
 
+def _separate_events(timeline, t0, t1):
+    """Развести события по времени не меньше чем на MIN_EVENT_GAP_S (времена — с шагом 0,1 с, как при округлении).
+
+    События перебираются в порядке создания: первое остаётся на месте, каждое следующее при совпадении или
+    слишком тесном соседстве сдвигается в ближайший свободный момент окна. Смены грунта строятся одна из
+    другой, поэтому каждая следующая смена обязана остаться позже предыдущей. Случайные числа не тратятся.
+    """
+    gap = round(MIN_EVENT_GAP_S * 10)
+    lo, hi = math.ceil(t0 * 10 - 1e-9), math.floor(t1 * 10 + 1e-9)
+    taken, last_soil = [], None
+    for e in timeline:
+        want = round(e['t'] * 10)
+        after = last_soil if e['type'] == 'soil_change' and last_soil is not None else -10 ** 9
+        for shift in sorted(range(lo - want, hi - want + 1), key=lambda d: (abs(d), d < 0)):
+            k = want + shift
+            if k > after and all(abs(k - q) >= gap for q in taken):
+                break
+        else:
+            raise RuntimeError('не удалось развести события сценария по времени: слишком тесное окно')
+        e['t'] = round(k / 10, 1)
+        taken.append(k)
+        if e['type'] == 'soil_change':
+            last_soil = k
+
+
 def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, events=None,
              event_window=(20.0, 70.0), fault_kinds=None, hazard_on_soil=False, soil_mults=None,
              n_soil_changes=1, n_new_hazards=1):
@@ -237,9 +266,9 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
             timeline.append({'t': round(float(rng_extra.uniform(t_low, t_high)), 1), 'type': 'soil_change',
                              'soils': changed})
 
-    extra_hazards = []
+    new_zone, extra_hazards = None, []
     if 'new_hazard' in events and n_new_hazards >= 1:
-        zone = _hazard_zone(f'X{len(hazards) + 1}', arena, rng, samples, base, hazards)
+        zone = new_zone = _hazard_zone(f'X{len(hazards) + 1}', arena, rng, samples, base, hazards)
         timeline.append({'t': round(float(rng.uniform(t0 + 0.2 * span, t0 + 0.7 * span)), 1), 'type': 'new_hazard',
                          'zone': zone})
         if n_new_hazards > 1:
@@ -256,7 +285,14 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
     if 'sensor_fault' in events:
         timeline.append({'t': round(float(rng.uniform(t0 + 0.4 * span, t1)), 1), 'type': 'sensor_fault',
                          'duration': round(float(rng.uniform(25, 40)), 1), 'sigma': 0.25})
+    if rng_extra is not None:
+        # Несколько смен или зон: интервалы событий независимы и после округления времена могли совпасть.
+        # Сценарии по умолчанию не трогаются — на них посчитаны прежние серии (tests/test_generator_stable.py).
+        _separate_events(timeline, t0, t1)
     timeline.sort(key=lambda e: e['t'])
+    if rng_extra is not None:
+        times = [e['t'] for e in timeline]
+        assert all(b - a >= MIN_EVENT_GAP_S - 1e-9 for a, b in zip(times, times[1:])), times
 
     if hazard_on_soil and soils:
         # Отдельный генератор: остальная расстановка совпадает со сценарием без ловушки.
@@ -270,7 +306,9 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
     # Виды сбоев назначаются отдельным генератором случайных чисел: расстановка прежних серий не меняется.
     rng2 = np.random.default_rng([seed, sum(level.encode()), 2])
     kinds = list(fault_kinds) if fault_kinds else list(FAULT_KINDS)
-    for z in hazards + ([e['zone'] for e in timeline if e['type'] == 'new_hazard'][:1] if 'new_hazard' in events and n_new_hazards >= 1 else []):
+    # Исходная новая зона берётся по сохранённой ссылке, а не «первой по времени»: дополнительная зона может
+    # появиться раньше неё. Дополнительным зонам сбой назначается ниже, из их собственного генератора, один раз.
+    for z in hazards + ([new_zone] if new_zone is not None else []):
         z.fault = str(rng2.choice(kinds))
         z.fault_s = round(float(rng2.uniform(20, 30)), 1)
     for e in timeline:
