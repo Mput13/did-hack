@@ -22,7 +22,7 @@ import yaml
 from . import ROOT
 from .config import SCIENCE
 from .memory import KnowledgeBase
-from .metrics import METRICS, paired, paired_did, summarize, verdict
+from .metrics import LATE_METRICS, METRICS, SIDE_METRICS, paired, paired_did, summarize, verdict
 from .runner import RUNS, run_episode
 from .scenario import ROUTE_VERSION
 
@@ -51,11 +51,20 @@ def _job(args, knowledge=None, soil_probe=False):
     spec_id, arm, cond, level, seed = args
     folder = arm['id'] if cond['id'] == 'base' else f"{arm['id']}@{cond['id']}"
     try:
+        if arm.get('team'):               # прогон команды роботов (did/team_runner.py): solo | pair | pair_lidar | team
+            from .team_runner import run_team_episode
+            s = run_team_episode(level, seed, arm['team'], agent=arm.get('agent', 'adaptive'), experiment=spec_id,
+                                 arm=folder, scenario_args={**cond.get('scenario', {})}, config=arm.get('config'),
+                                 rules=cond.get('rules'), team=arm.get('team_config'), sim=cond.get('sim'))
+            s['arm'], s['condition'] = arm['id'], cond['id']
+            return s
         s = run_episode(level, seed, arm['agent'], experiment=spec_id, arm=folder,
                         scenario_args={**cond.get('scenario', {})},
                         config=arm.get('config'), rules=cond.get('rules'),
                         # knows_rules — вариант-ориентир: ему правила мира сообщены, что бы ни значилось в условии
-                        agent_rules=None if arm.get('knows_rules') else cond.get('agent_rules'), llm=arm.get('llm'),
+                        agent_rules=None if arm.get('knows_rules') else cond.get('agent_rules'),
+                        # условие может дополнить настройки модели варианта (например, характер имитатора)
+                        llm={**arm['llm'], **(cond.get('llm') or {})} if arm.get('llm') else None,
                         sim=cond.get('sim'), knowledge=knowledge, study=arm.get('study'),
                         soil_probe=soil_probe)
         s.pop('study', None)              # отчёт исследования лежит в записи прогона, в сводку идут только метрики
@@ -126,6 +135,11 @@ def summarize_experiment(spec, results, n_seeds, wall_s):
     runs = [r for r in results if 'error' not in r]
     errors = [{k: r[k] for k in ('arm', 'condition', 'level', 'seed', 'error')} for r in results if 'error' in r]
     rng = np.random.default_rng(0)
+    side = np.random.default_rng(1)       # для SIDE_METRICS: основной ряд случайных чисел они не трогают
+    late = np.random.default_rng(2)       # для LATE_METRICS: то же, и ряд SIDE_METRICS они не трогают
+
+    def gen(m):
+        return late if m in LATE_METRICS else side if m in SIDE_METRICS else rng
 
     def pick(arm, cond=None, level=None):
         return [r for r in runs if r['arm'] == arm and (cond is None or r['condition'] == cond)
@@ -139,7 +153,7 @@ def summarize_experiment(spec, results, n_seeds, wall_s):
                 if not sel:
                     continue
                 groups.append({'arm': arm['id'], 'condition': cond['id'], 'level': level, 'n': len(sel),
-                               'stats': {m: summarize(sel, m, rng) for m in METRICS}})
+                               'stats': {m: summarize(sel, m, gen(m)) for m in METRICS}})
 
     claims = []
     for c in spec['claims']:

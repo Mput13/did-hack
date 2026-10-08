@@ -1,0 +1,26 @@
+title: 'Два робота: отладка координации (сценарии 1–80)'
+kind: team
+question: >-
+  Отладочная серия опыта E25: что даёт каждая часть координации и как влияет порог уверенности для сбора.
+  По этим сценариям подбиралось поведение, выводов о гипотезе по ним не делается.
+hypothesis: Не проверяется; серия служит для отладки и подбора параметров координации.
+method: >-
+  Варианты опыта E25, варианты с выключенной частью координации и варианты с порогом сбора 0,7 вместо 0,85.
+  Сценарии 1–40 уровней medium и hard, базовые правила.
+levels: [medium, hard]
+seeds: 40
+seed_start: 1
+arms:
+  - {id: solo, label: Один робот, team: solo}
+  - {id: pair, label: Двое без координации, team: pair}
+  - {id: pair_lidar, label: 'Двое без связи, объезд по лидару', team: pair_lidar}
+  - {id: team, label: Двое с координацией, team: team}
+  - {id: no_sectors, label: Без участков, team: team, team_config: {sectors: false}}
+  - {id: no_claims, label: Без «эту взял я», team: team, team_config: {claims: false}}
+  - {id: info_only, label: Только обмен сведениями, team: team, team_config: {claims: false, sectors: false}}
+  - {id: no_readings, label: Без обмена показаниями, team: team, team_config: {share_readings: false}}
+  - {id: assist, label: С помощником, team: team, team_config: {assist: true}}
+  - {id: solo07, label: 'Один робот, порог 0,7', team: solo, config: {collect_confidence: 0.7}}
+  - {id: pair_lidar07, label: 'Двое без связи, порог 0,7', team: pair_lidar, config: {collect_confidence: 0.7}}
+  - {id: team07, label: 'Двое с координацией, порог 0,7', team: team, config: {collect_confidence: 0.7}}
+metrics: [samples_share, mean_sample_time, t_last_collect, time, score, score_per_robot, returned, battery_used, penalties, robot_contacts, same_target_s]

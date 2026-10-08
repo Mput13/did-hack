@@ -13,10 +13,16 @@
 - по команде оператора планирует путь через заданные точки (CostGraph) и ведёт по нему (Follower);
 - по команде запускает автономную миссию: управление переходит к Agent.tick, пульт только показывает.
 
+Режим карты SLAM (pixi run demo --slam-map, Pilot(slam_nav=True)): готовой карты у робота нет. Стены и
+запас вокруг них берутся из сетки SLAM Toolbox (did/slam_map.py::SlamArena), поправка позы — из его
+же преобразования «карта → одометрия». Путь строится только по полу, который SLAM уже увидел.
+Готовая карта остаётся только для двух чисел на экране (сколько увидено, насколько совпало).
+
 Команды оператора — словари {'cmd': ...}:
   route {points: [[x, y], ...]}  задать маршрут          go      ехать по маршруту
   stop                           остановиться            home    вернуться на базу
   reset                          стереть карту и след, начать прогон судьи заново
+  explore                        достроить карту: ехать к границам увиденного (только режим карты SLAM)
   mission {agent}                автономная миссия       finish  завершить миссию
   speed {value}                  скорость времени (только быстрый симулятор)
 
@@ -45,10 +51,11 @@ from .fastsim import FastSim
 from .judge import Judge
 from .mapping import LIDAR_OFFSET, OccupancyMapper
 from .metrics import run_metrics
-from .nav import INFLATE, CostGraph, Follower, path_length
+from .nav import ESCAPE_STOP, INFLATE, CostGraph, Follower, corridor_room, escape_plan, moved_since, path_length
 from .recorder import Recorder, encode_grid, save_trace
 from .runner import RUNS, make_planner
 from .scenario import generate
+from .slam_map import SlamArena, SlamPose, compare, frontiers, resample
 
 try:                                    # поправка позы по лидару: без неё пульт работает по одометрии
     from .localize import PoseTracker
@@ -65,6 +72,13 @@ STATE_S = 0.25                 # как часто обновляется сос
 LAG_S = 0.35                   # такт пришёл с таким опозданием — управление запаздывает (машина перегружена)
 SLOW_V = 0.08                  # м/с: с такой скоростью едем, пока управление запаздывает
 MAX_POINTS = 20
+EXPLORE_MAX = 40               # столько подъездов к границам увиденного — и объезд заканчивается в любом случае
+EXPLORE_NEAR = 0.40            # м: граница «та же», если её центр сдвинулся меньше
+# Сроки езды в режиме карты SLAM: карта может обмануть (цель оказалась преградой, пол — столбом), а лидар у
+# преграды обнуляет скорость — без срока робот стоял бы с режимом «еду» сколько угодно.
+PROGRESS_M, NO_PROGRESS_S = 0.05, 10.0     # робот не сдвинулся на 5 см за 10 с — езда прекращается
+LEG_BASE_S, LEG_S_PER_M = 30.0, 15.0       # срок одного подъезда: 30 с и по 15 с на метр пути (вдвое медленнее обычного)
+SNAP_MAX = 0.15                # м: дальше цель после смены карты не передвигается — оператор ставит её заново
 BASE_NEAR = 0.25               # м: ближе — робот «на базе»
 # Агенты, которым не нужна языковая модель: их можно запускать с пульта.
 MISSION_AGENTS = {'adaptive': 'С адаптацией', 'scientist': 'Исследователь', 'fixed': 'Фиксированный план'}
@@ -161,15 +175,34 @@ class FastWorld:
 
 class Pilot:
 
-    def __init__(self, arena, world, level, seed):
+    def __init__(self, arena, world, level, seed, slam_nav=False):
+        # arena — готовая карта. В режиме карты SLAM она нужна только mapper'у для чисел на экране;
+        # всё, по чему робот едет, — self.nav.
         self.arena, self.world, self.level, self.seed = arena, world, level, int(seed)
         self.rules = world.rules
-        self.graph = CostGraph(arena)
+        self.slam_nav = bool(slam_nav)
         self.follower = Follower()
         self.mapper = OccupancyMapper(arena)
-        self.tracker = PoseTracker(arena) if PoseTracker else None
+        if self.slam_nav:
+            self.nav = SlamArena()              # пусто, пока SLAM не прислал первую сетку
+            self.graph = None
+            self.tracker = SlamPose(self._slam_reading, clock=lambda: self.t)
+        else:
+            self.nav = arena
+            self.graph = CostGraph(arena)
+            self.tracker = PoseTracker(arena) if PoseTracker else None
+        self._nav_ver = 0
+        self._nav_ms = 0.0
+        self._grid_ver = 0                  # последняя сетка SLAM, проверенная во время миссии
+        self._grid_bad = False              # она непригодна: в миссии это запрет на движение
+        self._slam_fault = None             # что не так со SLAM (текст), пока он молчит
+        self._slam_jumps = 0                # сколько скачков позы от SLAM уже учтено
+        self._progress = None               # срок текущего подъезда: {'leg', 't0', 'limit', 'x', 'y', 'still'}
+        self._explore = None                # объезд границ увиденного: {'visited', 'dead', 'done', 't0'}
         self.mode = 'idle'                  # settle | idle | drive | home | mission
         self.route = []                     # [{'x', 'y', 'done', 'pts'}]: точки оператора и путь до каждой
+        self.zones = []                     # ограничения оператора, не скрытые свойства среды
+        self._zone_blocked = np.zeros(arena.free.shape, dtype=bool)
         self.trail = []
         self.log = []                       # события для страницы: [{'t', 'kind', 'text'}]
         self.note = {'tone': 'info', 'text': 'Поставьте точку на карте и нажмите «Ехать»'}
@@ -190,6 +223,7 @@ class Pilot:
         self._stuck = None
         self._last_cmd = (0.0, 0.0)
         self._map_cache = (-1, None)
+        self._nav_cache = (-1, None)
         self._belief_cache = (-1e9, None)
         self._finish_at = None
         self._last_odom = None
@@ -219,6 +253,8 @@ class Pilot:
             self._on_event(ev)
 
         if self.mode == 'mission' and self.bot:
+            if self.slam_nav:
+                self._check_grid()                  # до команды агента: по непригодной новой карте ехать нельзя
             self.bot.tick(obs, self._guard)         # агент сам поправляет позу (трекер у нас общий)
             x, y, th = self._to_map(obs.x, obs.y, obs.th)
         elif self.tracker:
@@ -234,6 +270,12 @@ class Pilot:
             self.mapper.update(sx + shift[0], sy + shift[1], sth, obs.scan, obs.scan_step)
             self._scan = (sx, sy, sth, obs.scan, obs.scan_step)
             self._front = float(min(obs.scan[:20].min(), obs.scan[-20:].min()))
+
+        if self.slam_nav:
+            self._watch_slam()
+            if self.mode != 'mission':
+                self._grid_bad = False      # вне миссии пригодность сетки проверяет _refresh_nav
+                self._refresh_nav()         # в миссии агент едет по снимку карты, сделанному на её старте
 
         if self._last_odom is not None:
             self.distance += math.hypot(obs.x - self._last_odom[0], obs.y - self._last_odom[1])
@@ -259,6 +301,128 @@ class Pilot:
                 self._fresh_run()
             return self._drive(obs, x, y, th)
         self._command(0.0, 0.0)
+
+    def _slam_reading(self):
+        """Что SLAM сообщает SlamPose: поправка позы и возрасты от стенда плюс пригодность последней сетки."""
+        r = self.world.slam_tf()
+        if not self._grid_bad or r is None:
+            return r
+        r = dict(r) if isinstance(r, dict) else {'tf': r, 'tf_age': 0.0, 'grid_age': None}
+        r['grid_ok'] = False
+        return r
+
+    def _check_grid(self):
+        """В миссии агент едет по снимку карты, но каждая свежая сетка проверяется: если на ней роботу негде
+        стоять, SlamPose сообщает о потере положения, и защита агента останавливает езду, как при молчании SLAM."""
+        ver, values = self.world.slam_grid()
+        if values is None or ver == self._grid_ver:
+            return
+        self._grid_ver = ver
+        self._grid_bad = not bool((SlamArena(values, near=self.pose[:2]).clear >= INFLATE).any())
+
+    def _refresh_nav(self):
+        """Свежая сетка SLAM → новая арена и граф путей. Путь, который перестал быть проходимым, строится заново.
+
+        Принятая версия, арена, граф и то, что видит оператор, меняются вместе. Если на новой сетке роботу
+        негде встать, прежняя карта не остаётся в силе: графа нет, путь стёрт, езда остановлена.
+        """
+        ver, values = self.world.slam_grid()
+        if values is None or ver == self._nav_ver:
+            return
+        t0 = time.perf_counter()
+        nav = SlamArena(values, near=self.pose[:2])
+        had = self.graph is not None
+        usable = bool((nav.clear >= INFLATE).any())
+        self._nav_ver, self.nav, self.graph = ver, nav, CostGraph(nav) if usable else None
+        if not usable:
+            self.follower.set_path([])
+            text = 'Новая карта от SLAM Toolbox непригодна для езды: на ней нет места, где робот может стоять'
+            if self.mode in ('drive', 'home'):
+                self._halt(f'{text}. Робот остановлен; когда карта восстановится, нажмите «Ехать» снова')
+            elif had:
+                self._say('bad', f'{text}. Ехать нельзя, пока не придёт пригодная')
+            self._nav_ms = (time.perf_counter() - t0) * 1e3
+            return
+        if not had and ver > 1 and self._nav_cache[1] is not None:
+            self._say('info', 'Карта от SLAM Toolbox снова пригодна для езды')
+        if self.zones:
+            self._apply_zones()             # новая сетка не отменяет ограничения оператора
+        if self.follower.active and not self._path_ok(self.follower.pts[self.follower.i:]):
+            self.follower.set_path([])      # цель и путь проверятся заново в _drive
+        if self._explore and not self._explore['done']:
+            # Границу, к которой ехали, уже видно издалека — незачем доезжать.
+            now = frontiers(nav)
+            for leg in self._pending():
+                f = leg.get('frontier')
+                if f and all(math.dist(f, g[:2]) > EXPLORE_NEAR for g in now):
+                    leg['done'] = True
+                    self.follower.set_path([])
+        self._nav_ms = (time.perf_counter() - t0) * 1e3
+
+    def _path_ok(self, pts):
+        """Все точки пути и отрезки между ними проходят не ближе INFLATE к преградам нынешней карты."""
+        nav = self.nav
+        def safe(px, py):
+            ix, iy = nav.w2g(px, py)
+            return (nav.inside(ix, iy) and nav.clearance(px, py) >= INFLATE
+                    and not self._zone_blocked[iy, ix])
+
+        for k, (px, py) in enumerate(pts):
+            if not safe(px, py):
+                return False
+            if k:
+                qx, qy = pts[k - 1]
+                n = int(math.ceil(math.hypot(px - qx, py - qy) / (0.5 * nav.res)))
+                if any(not safe(qx + (px - qx) * j / n, qy + (py - qy) * j / n) for j in range(1, n)):
+                    return False
+        return True
+
+    def _watch_slam(self):
+        """Здоровье SLAM каждый такт: замолчал — езда прекращается, вернулся или передумал — путь строится заново.
+
+        Признаки считает SlamPose (did/slam_map.py). В миссии по lost и unsure останавливается сам агент
+        (did/agent.py::_guard — та же защита, что при потере положения по лидару; она же сообщает сторожам
+        простоя, что это ожидание), пульт только показывает причину оператору.
+        """
+        st = self.tracker.stats
+        fault = st['fault']
+        if fault and not self._slam_fault:
+            if self.mode in ('drive', 'home'):
+                self._halt(f'{fault}. Робот остановлен; когда SLAM восстановится, нажмите «Ехать» снова')
+            elif self.mode == 'mission':
+                self._say('bad', f'{fault}. Агент стоит и ждёт; не дождётся — вернётся на базу медленно, по лидару')
+            else:
+                self._say('bad', f'{fault}. Ехать нельзя, пока он не восстановится')
+        elif self._slam_fault and not fault:
+            self.follower.set_path([])
+            self._say('info', 'SLAM Toolbox снова на связи: путь строится заново'
+                      + ('' if self.mode == 'mission' else '. Можно ехать'))
+        self._slam_fault = fault
+        if st['relocations'] != self._slam_jumps:
+            self._slam_jumps = st['relocations']
+            self.follower.set_path([])
+            self._progress = None
+            self._log(self.t, 'bad', 'SLAM Toolbox сдвинул позу скачком: пережидаю и строю путь заново')
+
+    def _halt(self, text):
+        """Прекратить ручную езду по причине, которую оператор должен увидеть."""
+        self._command(0.0, 0.0)
+        self.mode = 'idle'
+        self.follower.set_path([])
+        self._escape = self._stuck = self._progress = None
+        self._drop_pending_mission()
+        if self._explore and not self._explore['done']:
+            self._explore, self.route = None, []
+        self._say('bad', text)
+
+    def _need_map(self):
+        if self.graph is None:
+            raise Refuse('Пригодной карты от SLAM Toolbox пока нет: подождите несколько секунд')
+        st = self.tracker.stats
+        if not st['ready']:
+            raise Refuse('SLAM Toolbox ещё не прислал поправку позы: подождите несколько секунд')
+        if st['fault']:
+            raise Refuse(f"{st['fault']}. Ехать нельзя, пока он не восстановится")
 
     def _fresh_run(self):
         """Ручная езда судье не подотчётна: если его прогон закончился (заряд, время), начинаем новый."""
@@ -292,7 +456,15 @@ class Pilot:
         self._log(ev.get('t', self.t), 'bad' if kind in ('collision', 'hazard_hit', 'false_collect') else 'ok',
                   text, x=ev.get('x'), y=ev.get('y'))
         if kind == 'collision' and self.mode in ('drive', 'home'):
-            self._escape = {'until': self.t + 1.5, 'v': 0.10 if self._last_cmd[0] < 0 else -0.10}
+            self._escape = {'until': self.t + 1.5, 'v': self._escape_v(back=self._last_cmd[0] >= 0)}
+
+    def _escape_v(self, back):
+        """Отъезд после столкновения — только туда, где лидар видит свободное место (как у агента)."""
+        if not self._scan:
+            return -0.10 if back else 0.10
+        # Скан снят из позы self._scan[:3], робот с тех пор мог повернуться: стороны считаются от нынешнего курса.
+        v, turn = escape_plan(self._scan[3], self._scan[4], back, moved=moved_since(self._scan[:3], self.pose))
+        return 0.0 if turn else v                # оператор рядом: разворот на месте оставляем ему
 
     def _log(self, t, kind, text, **data):
         self.log.append({'t': round(float(t), 1), 'kind': kind, 'text': text,
@@ -312,28 +484,59 @@ class Pilot:
         return [p for p in self.route if not p['done']]
 
     def _drive(self, obs, x, y, th):
+        if self.slam_nav and self._overdue(obs, x, y):
+            return
         if self._escape:
             if obs.t < self._escape['until']:
-                return self._command(self._escape['v'], 0.0)
+                v = self._escape['v']
+                if v and self._scan and corridor_room(self._scan[3], self._scan[4], back=v < 0, moved=moved_since(
+                        self._scan[:3], (x, y, th))) < ESCAPE_STOP:
+                    v = self._escape['v'] = 0.0         # преграда уже близко и с этой стороны: дальше стоим
+                return self._command(v, 0.0)
             self._escape = self._stuck = None
             self.follower.set_path([])
+        if self.slam_nav and self.tracker.stats['unsure']:
+            self._stuck = None
+            return self._command(0.0, 0.0)              # SLAM только что передумал, где робот: ждём новую карту
         while True:
             todo = self._pending()
+            exploring = bool(self._explore) and not self._explore['done']
+            if not todo and exploring and self._next_frontier(x, y):
+                continue
             if not todo:
                 self._command(0.0, 0.0)
                 self.mode = 'idle'
+                if exploring:
+                    self._explore_done(obs)
                 return
             leg = todo[0]
+            if self.slam_nav and not self.follower.active and not self._target_ok(leg):
+                # Карта изменилась: цель теперь в преграде или вне увиденного пола. Ехать «к ближайшему месту» нельзя.
+                if exploring:
+                    self._explore['dead'].append(leg['frontier'])
+                    leg['done'] = True
+                    continue
+                return self._halt(f'Точка {self.route.index(leg) + 1} на новой карте SLAM оказалась в преграде или вне '
+                                  'увиденного пола: маршрут остановлен. Поставьте точку заново')
             target = (leg['x'], leg['y'])
             if not self.follower.active:
                 pts, _ = self.graph.plan((x, y), target)
+                if pts is not None and self.slam_nav:
+                    if not self._path_ok(pts + [target]):
+                        pts = None
+                    elif self._progress and self._progress['leg'] is leg and self._progress['limit'] is None:
+                        self._progress['limit'] = LEG_BASE_S + LEG_S_PER_M * path_length([(x, y)] + pts + [target])
+                if pts is None and exploring:
+                    self._explore['dead'].append(leg['frontier'])   # карта изменилась, проезда туда больше нет
+                    leg['done'] = True
+                    continue
                 if pts is None:
                     self._command(0.0, 0.0)
                     self.mode = 'idle'
                     return self._say('bad', 'Пути к точке нет: маршрут остановлен')
                 self.follower.set_path(pts + [target])
                 leg['pts'] = pts + [target]
-            last = len(todo) == 1
+            last = len(todo) == 1 and not exploring
             v, w, arrived = self.follower.step(x, y, th, tol=0.05 if last else 0.12,
                                                v_max=SLOW_V if time.monotonic() < self._slow_until else V_MAX)
             if not arrived:
@@ -347,11 +550,68 @@ class Pilot:
             if last:
                 self._command(0.0, 0.0)
                 return self._arrived(obs, x, y, target)
+            if exploring:
+                self._explore['dead'].append(leg['frontier'])       # доехали, а граница осталась — второй раз не едем
+                continue
             self._log(obs.t, 'info', f'Точка {self.route.index(leg) + 1} пройдена')     # и сразу к следующей
         if v > 0.0 and self._front < 0.15:
             v = 0.0                                     # лидар видит преграду вплотную по курсу
         self._watch_stuck(obs, x, y, v)
         self._command(v, w)
+
+    def _target_ok(self, leg):
+        """Цель подъезда на нынешней карте SLAM: свободна и не ближе INFLATE к преграде.
+
+        Цель, оказавшуюся чуть ближе к стене (карта уточнилась на клетку), передвигаем на ближайшее разрешённое
+        место, как при постановке точки; занятую, неувиденную или далёкую от разрешённого — отклоняем.
+        """
+        nav = self.nav
+        ix, iy = nav.w2g(leg['x'], leg['y'])
+        if not nav.inside(ix, iy) or not nav.free[iy, ix]:
+            return False
+        if nav.clear[iy, ix] >= INFLATE:
+            return True
+        node = self.graph.node(leg['x'], leg['y'])
+        nx, ny = float(self.graph.xs[node]), float(self.graph.ys[node])
+        if math.dist((leg['x'], leg['y']), (nx, ny)) > SNAP_MAX:
+            return False
+        leg['x'], leg['y'] = round(nx, 3), round(ny, 3)
+        return True
+
+    def _overdue(self, obs, x, y):
+        """Сроки подъезда в режиме карты SLAM. True — езда прекращена (сообщение оператору уже показано).
+
+        Два срока: робот не сдвинулся на PROGRESS_M за NO_PROGRESS_S (стоит перед преградой, которой нет на
+        карте: лидар обнуляет скорость, и сторож застревания по времени команды «вперёд» молчит) и весь
+        подъезд дольше LEG_BASE_S + LEG_S_PER_M на метр пути. В объезде такая граница бросается, и робот едет
+        к следующей; у точки оператора езда останавливается.
+        """
+        todo = self._pending()
+        leg = todo[0] if todo else None
+        p = self._progress
+        if leg is None:
+            self._progress = None
+            return False
+        if p is None or p['leg'] is not leg or obs.t < p['t0']:
+            p = self._progress = {'leg': leg, 't0': obs.t, 'limit': None, 'x': x, 'y': y, 'still': obs.t}
+        if math.hypot(x - p['x'], y - p['y']) >= PROGRESS_M:
+            p['x'], p['y'], p['still'] = x, y, obs.t
+        if obs.t - p['still'] >= NO_PROGRESS_S:
+            why = f'робот {NO_PROGRESS_S:.0f} с не продвигается (преграда, которой нет на карте, или путь не проходим)'
+        elif obs.t - p['t0'] >= (p['limit'] or LEG_BASE_S):
+            why = f"подъезд занял больше {p['limit'] or LEG_BASE_S:.0f} с"
+        else:
+            return False
+        self._progress = None
+        if self._explore and not self._explore['done']:
+            self._log(obs.t, 'bad', f'Граница увиденного брошена: {why}')
+            self._explore['dead'].append(leg['frontier'])
+            leg['done'] = True
+            self._escape = self._stuck = None
+            self.follower.set_path([])
+            return False
+        self._halt(f'Езда остановлена: {why}. Поставьте точку заново или нажмите «Ехать»')
+        return True
 
     def _arrived(self, obs, x, y, target):
         err = math.dist((x, y), target)
@@ -375,11 +635,65 @@ class Pilot:
         if obs.t - s[0] >= 4.0:
             if s[3] >= 3.0 and math.hypot(x - s[1], y - s[2]) < 0.03:
                 self._log(obs.t, 'bad', 'Робот не движется: отъезжаю назад и строю путь заново')
-                self._escape = {'until': obs.t + 1.5, 'v': -0.10}
+                self._escape = {'until': obs.t + 1.5, 'v': self._escape_v(back=True)}
             self._stuck = None
+
+    # --- объезд: достроить карту SLAM ---------------------------------------------------------
+
+    def _next_frontier(self, x, y):
+        """Выбрать ближайшую по пути границу увиденного и поставить её целью. False — ехать больше некуда."""
+        ex = self._explore
+        if ex['visited'] >= EXPLORE_MAX:
+            return False
+        dist, _ = self.graph.field(x, y)
+        best = None
+        for fx, fy, _n in frontiers(self.nav):
+            if any(math.dist((fx, fy), d) <= EXPLORE_NEAR for d in ex['dead']):
+                continue
+            node = self.graph.node(fx, fy)
+            if node < 0 or not math.isfinite(dist[node]):
+                continue
+            tx, ty = float(self.graph.xs[node]), float(self.graph.ys[node])
+            if math.dist((tx, ty), (x, y)) < 0.15:
+                ex['dead'].append((fx, fy))             # стоим вплотную, а границу не видно: её не достроить
+                continue
+            if best is None or dist[node] < best[0]:
+                best = (dist[node], tx, ty, (fx, fy))
+        if best is None:
+            return False
+        ex['visited'] += 1
+        self.route = [{'x': round(best[1], 3), 'y': round(best[2], 3), 'done': False, 'pts': [], 'frontier': best[3]}]
+        self.follower.set_path([])
+        return True
+
+    def _explore_done(self, obs):
+        ex = self._explore
+        ex['done'] = True
+        ex['seconds'] = round(obs.t - ex['t0'], 1)
+        ex['left'] = len(frontiers(self.nav))
+        self.route = []
+        self._say('ok', f"Карта построена по SLAM: {ex['visited']} {_plural(ex['visited'], 'подъезд', 'подъезда', 'подъездов')} "
+                  f"к границам увиденного за {_num(ex['seconds'], 0)} с. Поставьте точку — поеду по этой карте")
+
+    def _cmd_explore(self, cmd):
+        if not self.slam_nav:
+            raise Refuse('Достраивать карту нужно только в режиме карты SLAM: pixi run demo --slam-map')
+        self._manual_only()
+        self._need_map()
+        self._fresh_run()
+        self._drop_pending_mission()
+        self._explore = {'visited': 0, 'dead': [], 'done': False, 't0': self.t}
+        self.route = []
+        self.follower.set_path([])
+        self.mode = 'drive'
+        self._say('info', 'Строю карту: еду к границам того, что уже видел')
+        return 'Строю карту'
 
     def _plan_route(self, points):
         """Проверить точки и построить путь через них от текущей позы. Возвращает маршрут и заметки."""
+        if self.slam_nav:
+            self._need_map()
+        arena = self.nav
         route, notes = [], []
         prev = self.pose[:2]
         for n, p in enumerate(points, 1):
@@ -387,17 +701,22 @@ class Pilot:
                 x, y = float(p[0]), float(p[1])
             except (TypeError, ValueError, IndexError):
                 raise Refuse(f'Точка {n}: нужны два числа — x и y в метрах') from None
-            ix, iy = self.arena.w2g(x, y)
-            if not (math.isfinite(x) and math.isfinite(y)) or not self.arena.inside(ix, iy):
+            ix, iy = arena.w2g(x, y)
+            if not (math.isfinite(x) and math.isfinite(y)) or not arena.inside(ix, iy):
                 raise Refuse(f'Точка {n} за пределами арены')
-            if not self.arena.free[iy, ix]:
+            if self.slam_nav and not arena.free[iy, ix] and not arena.occupied[iy, ix]:
+                raise Refuse(f'Точка {n} там, где SLAM ещё не видел пола: сначала достройте карту')
+            if not arena.free[iy, ix]:
                 raise Refuse(f'Точка {n} попала в стену или столб: поставьте её на свободный пол')
-            if self.arena.clear[iy, ix] < INFLATE:
+            if arena.clear[iy, ix] < INFLATE:
                 # Центр робота не подходит к стене ближе 17 см: берём ближайшее разрешённое место.
                 node = self.graph.node(x, y)
                 nx, ny = float(self.graph.xs[node]), float(self.graph.ys[node])
                 notes.append(f'точка {n} сдвинута от стены на {math.dist((x, y), (nx, ny)) * 100:.0f} см')
                 x, y = nx, ny
+            node = self.graph.node(x, y)
+            if self._zone_blocked[self.graph.iy[node], self.graph.ix[node]]:
+                raise Refuse(f'Точка {n} в опасной зоне или слишком близко к ней')
             pts, _ = self.graph.plan(prev, (x, y))
             if pts is None:
                 raise Refuse(f'К точке {n} нет проезда')
@@ -443,6 +762,9 @@ class Pilot:
         if self.mode == 'home':
             self.mode = 'drive' if route else 'idle'
         self._drop_pending_mission()
+        self._explore = None
+        if self.mission and self.mission.get('state') not in ('running', 'to_base'):
+            self.mission = self.bot = self.rec = None
         self.route = route
         self.follower.set_path([])
         if not route:
@@ -457,11 +779,70 @@ class Pilot:
         self.note = {'tone': 'info', 'text': text + ('' if self.mode == 'drive' else '. Нажмите «Ехать»')}
         return text
 
+    def _apply_zones(self):
+        X, Y = self.nav.cell_centers()
+        bias = np.ones(X.shape)
+        blocked = np.zeros(X.shape, dtype=bool)
+        for z in self.zones:
+            if z['kind'] == 'danger':
+                # Запас для корпуса и отклонения от дискретного пути.
+                blocked |= (X - z['x']) ** 2 + (Y - z['y']) ** 2 <= (z['r'] + INFLATE + 0.08) ** 2
+            else:
+                mask = (X - z['x']) ** 2 + (Y - z['y']) ** 2 <= z['r'] ** 2
+                bias[mask] = 4.0
+        self._zone_blocked = blocked
+        self.graph.set_cost(bias=bias, hard_forbidden=blocked)
+
+    def _cmd_zones(self, cmd):
+        self._manual_only()
+        if self.slam_nav:
+            self._need_map()
+        if self.mode != 'idle':
+            raise Refuse('Сначала остановите робота, затем измените зоны')
+        raw = cmd.get('zones')
+        if not isinstance(raw, list) or len(raw) > 20:
+            raise Refuse('Нужно не больше 20 зон')
+        zones = []
+        for z in raw:
+            try:
+                kind = z['kind']
+                x, y, r = float(z['x']), float(z['y']), float(z['r'])
+            except (KeyError, TypeError, ValueError, OverflowError):
+                raise Refuse('Зоне нужны тип, координаты и радиус') from None
+            if kind not in ('yellow', 'danger') or not all(map(math.isfinite, (x, y, r))) or not 0.15 <= r <= 1.2:
+                raise Refuse('Тип зоны: yellow или danger; радиус от 0,15 до 1,2 м')
+            ix, iy = self.nav.w2g(x, y)
+            if not self.nav.inside(ix, iy) or not self.nav.free[iy, ix]:
+                raise Refuse('Центр зоны должен быть на свободном полу')
+            if kind == 'danger' and any(math.dist((x, y), p) <= r + INFLATE + 0.08 for p in (BASE, self.pose[:2])):
+                raise Refuse('Опасная зона не должна перекрывать робота или базу')
+            zones.append({'kind': kind, 'x': x, 'y': y, 'r': r})
+        previous = self.zones
+        self.zones = zones
+        self._apply_zones()
+        try:
+            route, _ = self._plan_route([[p['x'], p['y']] for p in self._pending()])
+            # Обязателен доступный путь домой, даже когда заданных точек нет.
+            back, _ = self.graph.plan(self.pose[:2], BASE)
+            if back is None:
+                raise Refuse('Зоны перекрыли возвращение на базу')
+        except Refuse:
+            self.zones = previous
+            self._apply_zones()
+            raise
+        self.route = route
+        self.follower.set_path([])
+        self._say('info', 'Зоны сохранены, маршрут перестроен' if zones else 'Зоны убраны')
+        return self.note['text']
+
     def _cmd_go(self, cmd):
         self._manual_only()
         if not self._pending():
             raise Refuse('Сначала поставьте точку на карте')
+        if self.slam_nav:
+            self._need_map()
         self._fresh_run()
+        self._progress = None
         self.mode = 'drive'
         self._drop_pending_mission()
         self.follower.set_path([])
@@ -483,6 +864,10 @@ class Pilot:
         if self.mode in ('drive', 'home'):
             self.mode = 'idle'
             self.follower.set_path([])
+            if self._explore and not self._explore['done']:
+                self._explore, self.route = None, []
+                self._say('info', 'Стоп: объезд прерван, карта остаётся какая есть')
+                return 'Робот стоит'
             self._say('info', 'Стоп: робот остановлен, маршрут сохранён')
         return 'Робот стоит'
 
@@ -494,6 +879,7 @@ class Pilot:
 
     def _go_home(self, after=None):
         self._fresh_run()
+        self._explore = None
         route, _ = self._plan_route([BASE])
         self.route, self.mode, self._after_home = route, 'home', after
         self.follower.set_path([])
@@ -504,18 +890,21 @@ class Pilot:
         self._command(0.0, 0.0)
         self.mode = 'idle'
         self.route, self.trail, self.arrivals = [], [], []
-        self.mission = self.bot = self.rec = self._after_home = self._escape = self._stuck = None
+        self.mission = self.bot = self.rec = self._after_home = self._escape = self._stuck = self._explore = None
+        self._progress = None
         self.follower.set_path([])
         self.mapper.reset()
         self.distance = 0.0
         if getattr(w, 'can_respawn', False):
             w.respawn()
-            self.tracker = PoseTracker(self.arena) if PoseTracker else None
+            if not self.slam_nav:
+                self.tracker = PoseTracker(self.arena) if PoseTracker else None
             self._last_odom = None
             text = 'Сброс: робот на базе, карта и след стёрты, прогон начат заново'
         else:
             ok, msg = w.new_run()
-            text = 'Сброс: карта и след стёрты' + (', судья начал прогон заново' if ok else f' (судья: {msg})')
+            text = ('Сброс: след стёрт, карта SLAM Toolbox остаётся' if self.slam_nav else 'Сброс: карта и след стёрты') \
+                + (', судья начал прогон заново' if ok else f' (судья: {msg})')
             if math.dist(self.pose[:2], BASE) > BASE_NEAR:
                 text += '. Робот не на базе — нажмите «Домой»'
         self._say('info', text)
@@ -529,12 +918,22 @@ class Pilot:
     # ======================================================================================
 
     def _cmd_mission(self, cmd):
+        if self.zones:
+            raise Refuse('Зоны оператора применяются к заданному маршруту. Уберите их перед автономной миссией')
         agent = cmd.get('agent', 'adaptive')
         if agent not in MISSION_AGENTS or agent not in PRESETS:
             raise Refuse(f'Нет агента «{agent}». Есть: {", ".join(MISSION_AGENTS)}')
         if self.mode == 'mission':
             raise Refuse('Миссия уже идёт')
         self._manual_only()
+        if self.slam_nav:
+            self._need_map()
+            cfg = make_config(agent)
+            if not (cfg.guard and cfg.localize):
+                # Остановку при молчании SLAM в миссии исполняет защита агента: без неё в этом режиме не едем.
+                raise Refuse(f'Агент «{MISSION_AGENTS[agent]}» работает без защиты от потери положения: '
+                             'в режиме карты SLAM его запускать нельзя')
+        self._explore = None
         self.mission = {'agent': agent, 'label': MISSION_AGENTS[agent], 'state': 'to_base',
                         'total': LEVELS[self.level]['samples'], 'collected': 0}
         if math.dist(self.pose[:2], BASE) > BASE_NEAR:
@@ -550,11 +949,14 @@ class Pilot:
         ok, msg = w.new_run()                       # чистый прогон: полный заряд, время с нуля, все образцы на месте
         cfg = make_config(agent)
         self.rec = Recorder()
-        self.bot = Agent(self.arena, cfg, n_samples=LEVELS[self.level]['samples'], rules=self.rules,
+        # В режиме карты SLAM агент получает снимок арены, собранной из сетки SLAM на эту секунду.
+        self.bot = Agent(self.nav, cfg, n_samples=LEVELS[self.level]['samples'], rules=self.rules,
                          planner=make_planner(cfg, None, self.seed), recorder=self.rec)
         if self.tracker and cfg.localize:
             self.bot.tracker = self.tracker         # поправка позы не начинается с нуля
         self.route, self.trail = [], []            # на карте остаётся только путь самой миссии
+        self.distance = 0.0                       # ручной маршрут и подъезд к базе не входят в новую миссию
+        self._last_odom = None
         self.follower.set_path([])
         self.mode = 'mission'
         self._finish_at = None
@@ -674,13 +1076,14 @@ class Pilot:
             'mode': self.mode, 'settle_left': round(left, 1), 'note': self.note,
             'pose': [round(x, 3), round(y, 3), round(th, 4)],
             'odom': [round(ox, 3), round(oy, 3), round(oth, 4)],
-            'fix': {'source': 'lidar' if self.tracker else 'odom', 'dx': round(fix[0], 4), 'dy': round(fix[1], 4),
+            'fix': {'source': 'slam' if self.slam_nav else 'lidar' if self.tracker else 'odom', 'dx': round(fix[0], 4), 'dy': round(fix[1], 4),
                     'dth': round(fix[2], 4), 'shift': round(math.hypot(fix[0], fix[1]), 4),
                     'scans': stats.get('scans', 0), 'fixes': stats.get('fixes', 0),
                     'inliers': round(float(stats.get('inliers') or 0.0), 3)},
             'base': list(BASE), 'at_base': math.dist((x, y), BASE) <= BASE_NEAR,
             'trail': [[round(px, 2), round(py, 2)] for px, py in self.trail[::k]] + [[round(x, 2), round(y, 2)]],
             'route': [{'x': p['x'], 'y': p['y'], 'done': p['done']} for p in self.route],
+            'zones': self.zones,
             'path': [[round(px, 2), round(py, 2)] for px, py in _thin(path, 2)],
             'path_len': round(path_length(path), 2) if len(path) > 1 else 0.0,
             'battery': round(float(self.battery), 2), 'battery_start': self.rules.battery_start,
@@ -692,7 +1095,26 @@ class Pilot:
             'agents': [{'id': k, 'label': v} for k, v in MISSION_AGENTS.items() if k in PRESETS],
             'truth': w.truth(),
             'slam': w.slam_view() if hasattr(w, 'slam_view') else None,
+            'slam_nav': self.slam_nav,
+            'nav': self._nav_view() if self.slam_nav else None,
         }
+
+    def _nav_view(self):
+        """Что робот знает о карте в режиме SLAM: сколько пола, сколько границ неувиденного, как идёт объезд,
+        жив ли сам SLAM (возраст последней поправки позы и последней сетки)."""
+        key = (self._nav_ver, self.graph is not None, self._grid_bad)
+        if self._nav_cache[0] != key:
+            self._nav_cache = (key, {
+                'version': self._nav_ver, 'ready': self.graph is not None and not self._grid_bad,
+                'free_m2': round(float(self.nav.free.sum()) * self.nav.res ** 2, 2),
+                'frontiers': len(frontiers(self.nav)), 'ms': round(self._nav_ms, 1)})
+        ex = self._explore
+        st = self.tracker.stats
+        age = lambda v: None if v is None or not math.isfinite(v) else round(v, 2)      # noqa: E731
+        return {**self._nav_cache[1],
+                'slam': {'ok': st['ready'] and not st['fault'], 'ready': st['ready'], 'fault': st['fault'],
+                         'tf_age': age(st['tf_age']), 'grid_age': age(st['grid_age']), 'jumps': st['relocations']},
+                'explore': None if ex is None else {k: ex[k] for k in ('visited', 'done', 'seconds', 'left') if k in ex}}
 
 
 class _Guard:
@@ -942,13 +1364,18 @@ HUB = PilotHub()
 # Gazebo: отдельный процесс поверх ROS 2
 # =================================================================================================
 
-def run_ros(level, seed, rules='base', wait_s=600.0):
+SLAM_FRAME = 'slam_map'        # кадр карты SLAM Toolbox (env/slam_demo.yaml): /map и кадр map заняты судьёй
+WORLD_FRAME = 'map'            # мировой кадр по одометрии: его SLAM Toolbox и поправляет (odom_frame в том же файле)
+
+
+def run_ros(level, seed, rules='base', wait_s=600.0, slam_nav=False):
     """Пульт при запущенном стенде (pixi run stand-gui / pixi run demo). Работает до Ctrl+C."""
     import rclpy
     from nav_msgs.msg import OccupancyGrid
     from rclpy.executors import SingleThreadedExecutor
     from rclpy.qos import DurabilityPolicy, QoSProfile
     from std_srvs.srv import Trigger
+    from tf2_msgs.msg import TFMessage
 
     from .ros_agent import SETTLE_UNTIL_S, RosIO
 
@@ -957,15 +1384,32 @@ def run_ros(level, seed, rules='base', wait_s=600.0):
             super().__init__()
             self.reset_cli = self.create_client(Trigger, '/did/reset')
             self.clock_wall = 0.0
-            self.slam = None                    # последняя карта SLAM Toolbox: (номер, клетка, x0, y0, сетка)
+            # Последняя карта SLAM Toolbox: (номер, клетка, x0, y0, сетка, время симуляции при получении).
+            self.slam = None
+            # Его поправка позы: (dx, dy, поворот, время симуляции при получении) «мир по одометрии → карта SLAM».
+            # Время — получения, а не из заголовка: SLAM ставит в заголовок время скана с запасом вперёд.
+            self.slam_tf = None
+            self.slam_alien = 0                 # сообщений карты не в том кадре (отброшены)
             latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
             self.create_subscription(OccupancyGrid, '/slam/map', self._on_slam, latched)
+            self.create_subscription(TFMessage, '/tf', self._on_tf, 100)
+
+        def _on_tf(self, msg):
+            for tr in msg.transforms:
+                if tr.header.frame_id.lstrip('/') == SLAM_FRAME and tr.child_frame_id.lstrip('/') == WORLD_FRAME:
+                    t, q = tr.transform.translation, tr.transform.rotation
+                    v = (t.x, t.y, math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)))
+                    if all(math.isfinite(c) for c in v):
+                        self.slam_tf = (*v, self.sim_time if self.sim_time is not None else -math.inf)
 
         def _on_slam(self, msg):
             i = msg.info
+            if msg.header.frame_id.lstrip('/') != SLAM_FRAME or i.width * i.height != len(msg.data) or not msg.data:
+                self.slam_alien += 1            # чужой кадр или битая сетка: по такой карте ехать нельзя
+                return
             grid = np.asarray(msg.data, dtype=np.int8).reshape(i.height, i.width)
             self.slam = ((self.slam[0] + 1) if self.slam else 1, i.resolution, i.origin.position.x,
-                         i.origin.position.y, grid)
+                         i.origin.position.y, grid, self.sim_time if self.sim_time is not None else -math.inf)
 
         def _on_clock(self, msg):
             super()._on_clock(msg)
@@ -983,6 +1427,7 @@ def run_ros(level, seed, rules='base', wait_s=600.0):
             self.rules = Rules(**SCIENCE) if rules == 'science' else Rules()
             self.scenario = generate(level, seed, load_arena())    # только для подписи записи, если нет /did/truth
             self._slam = (0, None)
+            self._grid = (0, None)              # сетка SLAM на решётке арены: (номер, значения)
             self._still = None                  # (поза, с какого времени симуляции она не меняется)
             self._settled = False
             self._t_spawn = None                # время симуляции, когда судья увидел робота
@@ -1032,26 +1477,38 @@ def run_ros(level, seed, rules='base', wait_s=600.0):
         def score(self):
             return self.io.score or {}
 
-        def slam_view(self):
-            """Карта SLAM Toolbox на сетке арены — для показа рядом с нашей. None, если SLAM не запущен.
+        def slam_grid(self):
+            """Сетка SLAM Toolbox на решётке арены: (номер, значения) — −1 не видел, 0 свободно, 100 занято.
 
-            Кадр карты SLAM начинается там, где робот стоял при запуске, то есть на базе.
+            Кадр карты SLAM совпадает с мировым (env/slam_demo.yaml), поэтому начало сетки берётся из
+            сообщения как есть. Готовая карта здесь не участвует.
             """
             m = self.io.slam
-            if m is None or m[0] == self._slam[0]:
+            if m is not None and m[0] != self._grid[0]:
+                ver, res, ox, oy, grid, _ = m
+                self._grid = (ver, resample(grid, res, ox, oy))
+            return self._grid
+
+        def slam_tf(self):
+            """Поправка позы от SLAM Toolbox и возраст его данных по часам симуляции (см. did/slam_map.py::SlamPose).
+
+            Возраст меньше нуля бывает, если часы симуляции пошли заново: такое сообщение — из прошлого запуска.
+            """
+            tf, m, now = self.io.slam_tf, self.io.slam, self.io.sim_time
+            if tf is None:
+                return None
+            return {'tf': tf[:3], 'tf_age': now - tf[3], 'grid_age': None if m is None else now - m[5]}
+
+        def slam_view(self):
+            """Карта SLAM Toolbox для страницы и её сверка с готовой картой. None, если SLAM не запущен."""
+            ver, v = self.slam_grid()
+            if v is None or ver == self._slam[0]:
                 return self._slam[1]
-            ver, res, ox, oy, grid = m
-            X, Y = arena.cell_centers()
-            ix = np.floor((X - BASE[0] - ox) / res).astype(np.intp)
-            iy = np.floor((Y - BASE[1] - oy) / res).astype(np.intp)
-            ok = (ix >= 0) & (ix < grid.shape[1]) & (iy >= 0) & (iy < grid.shape[0])
-            v = np.full(arena.free.shape, -1, dtype=np.int16)
-            v[ok] = grid[iy[ok], ix[ok]]
             seen, occ = v >= 0, v > 50
+            c = compare(v, arena)               # сверка с готовой картой — только числа на экране
             view = {'res': arena.res, 'x0': arena.x0, 'y0': arena.y0, 'w': arena.w, 'h': arena.h, 'enc': 'occ',
                     'version': ver, 'data': encode_grid(np.where(seen, np.where(occ, 255, 1), 0)),
-                    'coverage': round(float(seen[arena.free].mean()), 4),
-                    'agreement': round(float((occ == arena.solid)[seen].mean()), 4) if seen.any() else 0.0}
+                    'coverage': round(c['coverage'], 4), 'agreement': round(c['agreement'], 4)}
             self._slam = (ver, view)
             return view
 
@@ -1098,8 +1555,9 @@ def run_ros(level, seed, rules='base', wait_s=600.0):
             if pilot is None:
                 if io.ready() and not (io.score or {}).get('finished'):
                     world = RosWorld(io)
-                    pilot = Pilot(arena, world, level, seed)
-                    print('пульт: стенд на связи, робот оседает', flush=True)
+                    pilot = Pilot(arena, world, level, seed, slam_nav=slam_nav)
+                    print('пульт: стенд на связи, робот оседает' + (
+                        '; режим карты SLAM — готовая карта роботу не даётся' if slam_nav else ''), flush=True)
                     continue
                 if io.ready() and wall - last_state >= 2.0 and io.reset_cli.service_is_ready():
                     io._call(io.reset_cli)      # стенд остался от прошлого показа, прогон судьи уже закончен
@@ -1170,11 +1628,13 @@ def main():
     ap.add_argument('--level', default='medium', choices=list(LEVELS), help='уровень, с которым запущен стенд')
     ap.add_argument('--seed', type=int, default=3, help='номер сценария, с которым запущен стенд')
     ap.add_argument('--rules', default='base', choices=['base', 'science'])
+    ap.add_argument('--slam-map', action='store_true',
+                    help='ехать по карте SLAM Toolbox, без готовой карты (SLAM должен быть запущен)')
     args = ap.parse_args()
     if not args.ros:
         ap.error('быстрый симулятор запускается со страницы «Пульт» или командой pixi run demo --fast; '
                  'для Gazebo добавьте --ros')
-    run_ros(args.level, args.seed, args.rules)
+    run_ros(args.level, args.seed, args.rules, slam_nav=args.slam_map)
 
 
 if __name__ == '__main__':

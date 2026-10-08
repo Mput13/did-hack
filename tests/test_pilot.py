@@ -85,6 +85,7 @@ def test_mission_runs_from_base_with_fresh_judge(arena):
     m = pilot.state()['mission']
     assert m['state'] == 'finished' and m['result']['returned']
     assert m['result']['samples_collected'] == m['result']['samples_total'] == 3
+    assert abs(pilot.distance - m['result']['distance']) < 0.3   # без прежнего ручного маршрута и подъезда к базе
     assert m['journal'] and m['belief']['data'] and m['trace_file'].endswith('easy-1.json.gz')
     res = pilot.command({'cmd': 'reset'})
     assert res['ok'] and pilot.mission is None and pilot.mapper.scans == 0
@@ -109,3 +110,16 @@ def test_hub_reports_clear_errors():
         assert state['active'] and state['backend'] == 'fastsim' and len(state['route']) == 1
     finally:
         assert hub.start({'backend': 'off'})[0] == 200
+
+
+def test_escape_side_is_counted_from_current_heading(arena):
+    """Ревью G2: пульт выбирает сторону отъезда от нынешнего курса, а не от курса в момент скана."""
+    import numpy as np
+    _, pilot = _pilot(arena)
+    scan = np.full(360, np.inf)
+    scan[170:191] = 0.15                                   # преграда вплотную позади — в момент скана
+    pilot._scan = (0.0, 0.0, 0.0, scan, None)
+    pilot.pose = (0.0, 0.0, 0.0)
+    assert pilot._escape_v(back=True) == 0.10              # назад нельзя: вперёд
+    pilot.pose = (0.0, 0.0, math.pi)                       # робот развернулся: преграда теперь спереди
+    assert pilot._escape_v(back=True) == -0.10

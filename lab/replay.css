@@ -710,3 +710,13 @@
 @media (prefers-reduced-motion: reduce) {
   .rp-flash, .rp-live-on::before, .rp-badge-live::before { animation: none; }
 }
+
+/* Команда роботов: лента переговоров (lab/replay.js, createTeamFeed) */
+.rp-team-who { font-weight: 700; margin-right: 6px; }
+.rp-team-msg .rp-j-kind { background: rgba(42, 120, 214, 0.13); color: var(--rp-blue-ink); }
+.rp-team-collected .rp-j-kind { background: rgba(27, 175, 122, 0.15); color: var(--rp-green-ink); }
+.rp-team-hazard .rp-j-kind { background: var(--rp-red); color: #fff; }
+.rp-team-sector .rp-j-kind { background: var(--rp-ink); color: #fff; }
+.rp-team-foot { font-size: 12px; color: var(--rp-ink-3); padding-top: 6px; }
+.rp-team .rp-j-list { min-height: 170px; }
+@media (min-width: 0px) { .rp-full .rp-team { flex: 1.2 1 auto; min-height: 250px; } }

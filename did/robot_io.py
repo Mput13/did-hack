@@ -20,6 +20,7 @@ class Observation:
     done: bool = False             # судья завершил прогон
     scan_pose: Optional[tuple] = None   # поза по одометрии в момент скана (x, y, th); None — текущая
     scan_step: Optional[float] = None   # угол между лучами скана, рад; None — 2π / число лучей
+    sensor_age: float = 0.0        # сколько секунд назад получено показание sensor (в быстром симуляторе — 0)
 
 
 class RobotIO(Protocol):
