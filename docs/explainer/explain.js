@@ -1083,6 +1083,30 @@
     sl.oninput = draw; onResize(draw);
   })();
 
+  /* ------------------------------------------------------- журнал исследований */
+
+  (() => {
+    const root = $('research-log'); if (!root) return;
+    const R = D.research;
+    if (!R || !(R.studies || []).length) { root.innerHTML = '<p class="warn">План исследований пуст.</p>'; return; }
+    const ST = { idea: ['inconclusive', 'в очереди'], assigned: ['partial', 'в работе'], submitted: ['partial', 'сдано, перепроверяется'], returned: ['partial', 'возвращено на доработку'],
+      verified: ['supported', 'перепроверено'], published: ['supported', 'готово'], rejected: ['refuted', 'снято'] };
+    const esc = t => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
+    const count = k => R.studies.filter(s => (ST[s.status] || [])[1] === k).length;
+    root.appendChild(el('p', null, `Состояние на ${R.built}: исследований в плане <b>${R.studies.length}</b>, готово <b>${R.studies.filter(s => s.status === 'published' || s.status === 'verified').length}</b>, в работе <b>${R.studies.filter(s => ['assigned', 'submitted', 'returned'].includes(s.status)).length}</b>, в очереди <b>${count('в очереди')}</b>.`));
+    R.studies.forEach(s => {
+      const st = ST[s.status] || ST.idea;
+      const card = el('div', 'study', `<div class="study-head"><span class="study-id">${esc(s.id)}</span><b>${esc(s.title)}</b><span class="chip ${st[0]}">${st[1]}</span></div>
+        <div class="study-meta">${esc(s.criterion || '')}${s.experiment ? ' · опыт ' + esc(s.experiment) : ''}</div>
+        ${s.why ? `<p>${esc(s.why)}</p>` : ''}
+        ${s.question ? `<div class="exp-meta"><div><span>Вопрос</span>${esc(s.question)}</div>${s.hypothesis ? `<div><span>Гипотеза</span>${esc(s.hypothesis)}</div>` : ''}${s.refute ? `<div><span>Что опровергнет</span>${esc(s.refute)}</div>` : ''}</div>` : ''}
+        ${s.conclusion ? `<div class="read"><b>Вывод</b><p style="margin:0">${md(s.conclusion)}</p>${s.limits ? `<p style="margin:8px 0 0;color:var(--ink-2)"><i>Ограничения.</i> ${md(s.limits)}</p>` : ''}</div>` : ''}
+        ${s.note && !s.conclusion ? `<p style="color:var(--ink-2);font-size:14.5px">${esc(s.note)}</p>` : ''}`);
+      root.appendChild(card);
+    });
+  })();
+
   /* ------------------------------------------------------------- карта кода */
 
   (() => {

@@ -1270,6 +1270,29 @@ class RobotIO(Protocol):         <span class="c"># что агент может 
 </section>
 
 <!-- ===================================================================================== -->
+<section id="s-research-log">
+<h2 data-short="Журнал исследований"><span class="n">0</span>Журнал исследований: что проверяется прямо сейчас</h2>
+<p class="sub">Проект продолжает исследовать сам себя. Новые гипотезы проверяются автоматически, а этот раздел пополняется по мере готовности результатов.</p>
+
+<p>Опыты E1–E14 выше ставились вручную, по одному. С 8 октября работает исследовательский контур: вопросы из плана раздаются исполнителям, каждый ведёт одно исследование от гипотезы до отчёта, результат перепроверяется и только потом попадает сюда.</p>
+<div class="fig">
+<svg class="diagram" viewBox="0 0 900 230" role="img" aria-label="Исследовательский контур">
+  <rect class="box" x="10" y="70" width="170" height="90" rx="10"/><text class="t" x="95" y="98" text-anchor="middle">План</text><text class="s" x="95" y="119" text-anchor="middle">вопрос, гипотеза,</text><text class="s" x="95" y="136" text-anchor="middle">что её опровергнет</text>
+  <rect class="box hl" x="230" y="70" width="190" height="90" rx="10"/><text class="t" x="325" y="98" text-anchor="middle">Исследователь</text><text class="s" x="325" y="119" text-anchor="middle">своя ветка кода: опыт,</text><text class="s" x="325" y="136" text-anchor="middle">серия прогонов, отчёт</text>
+  <rect class="box" x="470" y="70" width="190" height="90" rx="10"/><text class="t" x="565" y="98" text-anchor="middle">Перепроверка</text><text class="s" x="565" y="119" text-anchor="middle">проверки кода, пересчёт,</text><text class="s" x="565" y="136" text-anchor="middle">сверка чисел с отчётом</text>
+  <rect class="box" x="710" y="70" width="180" height="90" rx="10"/><text class="t" x="800" y="98" text-anchor="middle">Эта страница</text><text class="s" x="800" y="119" text-anchor="middle">вывод и числа —</text><text class="s" x="800" y="136" text-anchor="middle">в журнал ниже</text>
+  <path class="arr" d="M180,115 L228,115"/><path class="arr" d="M420,115 L468,115"/><path class="arr" d="M660,115 L708,115"/>
+  <path class="arr acc" d="M565,160 L565,200 L325,200 L325,162"/><text class="s" x="445" y="218" text-anchor="middle" style="fill:#b8481b">числа не сошлись или проверки не проходят — возврат</text>
+  <rect class="box dim" x="10" y="8" width="410" height="42" rx="8"/><text x="215" y="34" text-anchor="middle" style="font-size:13px">Советники: куда направить исследования — редко, по важному</text>
+  <path class="arr" d="M95,50 L95,68"/>
+</svg>
+<div class="cap">Исследователи — недорогие языковые модели (Gemini 3.8 Flash); каждый работает в отдельной копии кода и не может сломать то, что готово к показу. Числа в отчёте принимаются только после независимого пересчёта. Направление исследований проверяют две сильные модели-советника. Правила контура — в файле <code>research/PROTOCOL.md</code>, план — в <code>research/agenda.yaml</code>.</div>
+</div>
+
+<div id="research-log"></div>
+</section>
+
+<!-- ===================================================================================== -->
 <section id="s-decisions" data-part="Справка">
 <h2 data-short="Двенадцать решений"><span class="n">0</span>Двенадцать решений, которые определили проект</h2>
 <p class="sub">Что мы выбрали, от чего отказались и чем за это заплатили. Удобно для вопросов на защите.</p>
