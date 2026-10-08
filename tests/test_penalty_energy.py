@@ -136,12 +136,12 @@ def test_reviewer_example_exact_split():
     led.reading(at(0.0, 0.0, 60.0), win)
     led.event(0.4)
     led.reading(at(0.4, 0.06, 60.0 - 0.604 - 3.0), win)
-    assert win == {'b0': 57.0} and not led.hold
+    assert win == {'b0': 57.0} and not led.pending
     led.reading(at(0.5, 0.075, 60.0 - 0.604 - 3.0 - 0.151 - 1.0), win)       # второй скачок, события нет
     assert win == {'b0': 57.0}
-    assert led.hold                                # скачок без события: окно ждёт, не придёт ли событие
+    assert led.pending                              # скачок без события: окно ждёт, не придёт ли событие
     led.reading(at(1.1, 0.165, 60.0 - 0.604 - 3.0 - 0.151 - 1.0 - 0.9), win)
-    assert win == {'b0': 57.0} and not led.hold and led.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+    assert win == {'b0': 57.0} and not led.pending and led.stats == {'hit': 1, 'bad': 0, 'lost': 0}
 
 
 def test_second_jump_without_event_is_not_swallowed():
@@ -163,7 +163,82 @@ def test_two_penalties_in_one_reading():
     led.event(0.1)
     led.event(0.1)
     led.reading(at(0.1, 0.015, 60.0 - 0.04 - 6.0), win)
-    assert win == {'b0': 54.0} and led.stats == {'hit': 2, 'bad': 0, 'lost': 0} and not led.hold
+    assert win == {'b0': 54.0} and led.stats == {'hit': 2, 'bad': 0, 'lost': 0} and not led.pending
+
+
+# --- третий круг ревью: каждый отрезок решается один раз и в свой срок -------------------------------------------
+
+def test_later_jumps_do_not_hold_windows_that_are_ready():
+    """Находка третьего круга: скачки заряда идут один за другим без событий. Окно ждёт только свои отрезки,
+    поэтому тревога открывается в тот же момент, что и от одного скачка. Прежде общий флаг ожидания держал
+    все окна, пока скачки не прекратятся: расследований не было вовсе."""
+    alone, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={40: 1.0})
+    many, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={k: 1.0 for k in range(40, 90, 3)})
+    some, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={k: 1.0 for k in range(40, 68, 3)})
+    assert len(_energy(alone)) == 1
+    for bot in (many, some):
+        assert [(q.t_open, q.anomaly['text']) for q in _energy(bot)] == \
+               [(q.t_open, q.anomaly['text']) for q in _energy(alone)]
+        assert len(bot.inv._held) <= 1
+    assert 4.0 <= _energy(alone)[0].t_open <= 4.0 + 0.6 + 1e-9      # не позже срока скачка
+
+
+def test_end_of_run_settles_what_was_waiting():
+    """Прогон кончился раньше срока скачка: по сигналу done агент досчитывает отложенное, окно не пропадает."""
+    class IO:
+        def command(self, v, w):
+            pass
+    bot, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={40: 1.0}, steps=44)
+    assert bot.inv.inquiries == [] and len(bot.inv._held) == 1 and bot.inv.penalty.pending
+    bot.tick(Observation(t=4.4, x=BASE[0], y=BASE[1], th=0.0, v=0.0, w=0.0,
+                         battery=50.0, sensor=None, scan=None, events=[], done=True), IO())
+    assert bot.inv._held == [] and not bot.inv.penalty.pending
+    assert bot.inv.penalty.early == 1                          # решено до срока — и это отмечено
+    assert [q.anomaly['text'] for q in _energy(bot)] == ['расход 10.0 ед/м при прогнозе 2.6']
+
+
+def test_jump_that_does_not_fit_does_not_take_the_event():
+    """Находка третьего круга: событие на 4,0 с, настоящий скачок без события на 4,1 с, показание штрафа
+    на 4,3 с. Скачок с правилами не сходится, но событие за это не списывается: его получает показание штрафа.
+    Тревога о настоящем скачке та же, что в поездке без штрафа. Прежде: hit=0, bad=1 и «расход 27,6 ед/м»."""
+    bot, _, _ = _drive(3.0, lag=3, jumps={41: 1.0})
+    alone, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={41: 1.0})
+    assert bot.inv.penalty.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+    assert len(_energy(alone)) == 1
+    assert [(q.t_open, q.anomaly['text']) for q in _energy(bot)] == \
+           [(q.t_open, q.anomaly['text']) for q in _energy(alone)]
+    assert bot.inv._held == []
+
+
+@pytest.mark.parametrize('events', [(0.5, 0.6), (0.5, 0.5), (0.0, 0.4), (0.4, 1.0)])
+def test_two_penalties_in_one_piled_up_reading(events):
+    """Находка третьего круга: показание за 0,4 с несёт два штрафа (падение 6,154), события приходят врозь.
+    Одного события мало — отрезок ждёт второго до своего срока и вычитает ровно 6. Прежде первое событие
+    списывалось как несошедшееся, второе терялось."""
+    from did.penalty import PenaltyLedger
+    led, win = PenaltyLedger(3.0, lambda ds, dth, dt, t: 7.0 * 2.6 * ds + 0.01 * dt), {'b0': 60.0}
+    at = lambda t, b: Observation(t=t, x=0.15 * t, y=0.0, th=0.0, v=0.15, w=0.0, battery=b, sensor=None, scan=None)  # noqa: E731
+    b = 60.0
+    for k in range(13):
+        t = k * 0.1
+        for e in events:
+            if abs(e - t) < 1e-9:
+                led.event(t)
+        if k == 4:
+            b -= 6.154
+        elif k > 4:
+            b -= 0.04
+        led.reading(at(t, b), win if k <= 4 else None)
+        if k < 4:
+            assert win == {'b0': 60.0}
+    assert win == {'b0': 54.0} and led.stats == {'hit': 2, 'bad': 0, 'lost': 0} and not led.pending
+
+
+def test_jump_and_penalty_in_one_reading_spoil_the_window():
+    """В одном показании и штраф, и настоящий скачок: разделить их нельзя, окно явно помечено испорченным."""
+    bot, (hx, hy), world = _drive(3.0, jumps={40: 1.0})
+    _quiet(bot, hx, hy, world)
+    assert bot.inv.penalty.stats == {'hit': 0, 'bad': 1, 'lost': 0}
 
 
 def test_expected_loss_that_never_shows_spoils_the_neighbourhood():
@@ -241,3 +316,15 @@ def test_study_agent_floor_keeps_a_jump_without_event():
     """Без события штрафа скачок остаётся в окне: поправка действует только рядом с событием."""
     bot = _study_drive(3.0, 20, 10 ** 6)
     assert any(z['mult'] >= 1.4 for z in bot.soil.zones())
+
+
+def test_study_agent_settles_at_the_end_of_run():
+    """Скачок за три такта до конца прогона: по сигналу done отложенное досчитывается, очередь пуста."""
+    class IO:
+        def command(self, v, w):
+            pass
+    bot = _study_drive(3.0, 57, 10 ** 6)
+    assert bot._hits.pending
+    bot.tick(Observation(t=6.0, x=BASE[0], y=BASE[1], th=0.0, v=0.0, w=0.0, battery=50.0, sensor=None, scan=None,
+                         events=[], done=True), IO())
+    assert not bot._hits.pending and bot._floor_held == [] and bot._hits.early == 1

@@ -53,7 +53,7 @@ class Investigator:
         self.reserve_until = (0.0, -1e9)
         self.durations = []            # длительности закончившихся сбоев: [(вид, секунды)]
         self._win = None
-        self._held = []                # закрытые окна, которые ждут, пока решится вопрос о потере заряда при штрафе
+        self._held = []                # закрытые окна, которые ждут решения по своим отрезкам (did/penalty.py)
         # Разовая потеря заряда при штрафе — не расход на путь (did/penalty.py). Её размер берётся из правил,
         # в которые верит агент; расход на самом дорогом грунте — из модели расхода.
         self.penalty = PenaltyLedger(r.hazard_battery_hit, lambda ds, dth, dt, t: self.model.predict(
@@ -89,7 +89,7 @@ class Investigator:
         if self._trail_xy is None or math.hypot(obs.x - self._trail_xy[0], obs.y - self._trail_xy[1]) >= 0.06:
             self._trail_xy = (obs.x, obs.y)
             a._trail_point(obs.x, obs.y, obs.t)
-        # Потеря заряда при штрафе сопоставляется с событием штрафа; пока вопрос не решён, окна придержаны.
+        # Потеря заряда при штрафе сопоставляется с событием штрафа; окно ждёт решения только по своим отрезкам.
         self.penalty.reading(obs, self._win if self.run is None else None,
                              dth=abs(_wrap(obs.th - self._th)) if self._th is not None else 0.0)
         self._th = obs.th
@@ -111,14 +111,21 @@ class Investigator:
     def _release(self, obs):
         """Разобрать закрытые окна по порядку. Обычно окно разбирается в том же такте, в котором закрылось.
 
-        Задержка бывает только рядом со штрафом, когда показание батареи и событие пришли врозь: тогда окно
-        ждёт не дольше, чем они могут разойтись. Загрязнённое окно (потеря заряда не сошлась с правилами,
+        Задержка бывает только у окна, в котором есть необъяснённый скачок заряда или рядом с которым событие
+        штрафа ещё не нашло своей потери: такое окно ждёт не дольше, чем показание и событие могут разойтись.
+        Более поздние скачки его не держат. Загрязнённое окно (потеря заряда не сошлась с правилами,
         см. did/penalty.py) в тревогу, карту грунта и модель расхода не идёт.
         """
-        while self._held and not self.penalty.hold:
+        while self._held and not self.penalty.waits(self._held[0]):
             w = self._held.pop(0)
             if not w.get('bad'):
                 self._window(w, obs)
+
+    def finish(self, obs):
+        """Прогон закончен: всё, что ждало решения о потере заряда, досчитывается по тому, что известно."""
+        if self.penalty.pending or self._held:
+            self.penalty.flush(obs.t)
+            self._release(obs)
 
     def _open(self, obs):
         self._win = {'x0': obs.x, 'y0': obs.y, 'x': obs.x, 'y': obs.y, 'th': obs.th, 't0': obs.t, 'b0': obs.battery,

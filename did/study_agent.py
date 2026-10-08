@@ -213,9 +213,10 @@ class StudyAgent(LawMixin, Agent):
         self._win = None
 
     def _floor_release(self):
-        """Разобрать закрытые отрезки дороги. Рядом со штрафом отрезок ждёт, пока потеря заряда и событие
-        штрафа не найдут друг друга; отрезок, где они не сошлись, в оценки не идёт."""
-        while self._floor_held and not self._hits.hold:
+        """Разобрать закрытые отрезки дороги. Отрезок ждёт решения только по своим показаниям батареи: рядом
+        со штрафом — пока потеря заряда и событие штрафа не найдут друг друга; отрезок, где они не сошлись,
+        в оценки не идёт."""
+        while self._floor_held and not self._hits.waits(self._floor_held[0]):
             w = self._floor_held.pop(0)
             if w.get('bad'):
                 continue
@@ -228,6 +229,12 @@ class StudyAgent(LawMixin, Agent):
             if ratio < 1.6:
                 self._travel[0] += spent
                 self._travel[1] += w['ds']
+
+    def _wrap_up(self, obs):
+        super()._wrap_up(obs)
+        if self._hits.pending or self._floor_held:
+            self._hits.flush(obs.t)
+            self._floor_release()
 
     def _per_m(self):
         """Заряд на метр дороги: модель плюс то, что на деле уходит на повороты и простой."""

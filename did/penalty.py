@@ -2,23 +2,37 @@
 
 Судья при штрафе отнимает заряд одним скачком и сообщает о штрафе событием. Показание батареи и событие
 приходят разными путями: в быстром симуляторе — одним наблюдением, в ROS — двумя темами, и батарея может
-оказаться как раньше события, так и позже. Поэтому здесь ведётся короткая память: отрезки между соседними
-показаниями батареи и недавние события штрафа. Событию сопоставляется ровно один отрезок.
+оказаться как раньше события, так и позже, не больше чем на WAIT_S.
 
-- Агент знает из своих правил, сколько заряда стоит штраф. Если падение заряда на отрезке сходится с этим
-  числом (остаток — правдоподобный расход на путь), из окна расхода вычитается именно оно.
-- Если рядом с событием есть скачок, которого не объяснить даже самым дорогим грунтом, и он с этим числом
-  не сходится, судья штрафует иначе. Из одного падения нельзя отделить неизвестный штраф от неизвестного
-  расхода на грунт, поэтому окно с таким отрезком помечается загрязнённым: в оценки оно не идёт.
-- Скачок без события остаётся странностью, но разбирается на WAIT_S позже: событие могло отстать.
+Устройство:
 
-Пока вопрос не решён (hold), закрытые окна расхода нужно придержать и не разбирать.
+1. Путь режется на отрезки «от показания батареи до следующего показания». Отрезки стоят в очереди по
+   времени и решаются строго по порядку, каждый — один раз.
+2. Отрезок, чьё падение заряда сходится с одним, двумя… штрафами из правил агента (остаток — правдоподобный
+   расход на путь), забирает столько самых ранних свободных событий рядом с собой и решается сразу:
+   из окна расхода вычитается ровно столько потерь, сколько событий он забрал.
+3. Отрезок со скачком, которого не объяснить и самым дорогим грунтом, без подходящих событий ждёт WAIT_S
+   после своего конца: к этому сроку все события, которые могли к нему относиться, уже пришли. До срока
+   ничего не списывается. В срок: рядом осталось событие, которое не заберёт ни один из следующих известных
+   отрезков, — судья штрафует иначе, чем думает агент, отрезок испорчен (окно в оценки не идёт);
+   события рядом нет — это настоящая странность, расход идёт в оценки целиком.
+4. Обычный отрезок решается сразу. Ждёт он (тоже не дольше WAIT_S) только пока рядом есть уже пришедшее
+   событие, которому не нашлось ни подходящего падения, ни необъяснённого скачка: потеря спрятана где-то
+   рядом, и если она так и не нашлась, отрезок испорчен.
+5. Событие живёт, пока к нему может относиться хоть один нерешённый или будущий отрезок, и отдаётся только
+   одному отрезку. Окно расхода готово, когда решены все его отрезки (waits); более поздние скачки его
+   не держат. В конце прогона flush решает всё оставшееся по тому, что известно.
+
+Почему события раздаются правильно. У соседних отрезков границы «рядом» (t0 − WAIT_S, t1 + WAIT_S) идут по
+возрастанию, поэтому если события вообще можно раздать так, чтобы каждому подходящему отрезку хватило, то
+раздача «по порядку, самые ранние» тоже всем хватит: событие, взятое раньше, чем было нужно, всегда можно
+обменять на более позднее, которое следующему отрезку подходит не хуже.
 """
 from collections import deque
 
 WAIT_S = 0.6     # на сколько показание батареи и событие штрафа могут разойтись во времени
-STALE_S = 3.0    # дольше этого решения не ждём, даже если показания батареи перестали приходить
 TOL = 0.15       # допуск на шум показаний батареи: пять разбросов разности двух показаний
+EPS = 1e-9       # времена — суммы десятых долей секунды: сравнение не должно зависеть от округления
 
 
 class PenaltyLedger:
@@ -26,18 +40,24 @@ class PenaltyLedger:
     def __init__(self, hit, most):
         self.hit = float(hit)          # сколько заряда отнимает штраф по правилам, в которые верит агент
         self.most = most               # most(ds, dth, dt, t): расход отрезка на самом дорогом грунте
-        self.stats = {'hit': 0, 'bad': 0, 'lost': 0}    # штраф вычтен; не сошёлся; ожидался, но не найден
+        # События: потеря вычтена; рядом был скачок, который с правилами не сошёлся; потеря ожидалась, но не найдена.
+        self.stats = {'hit': 0, 'bad': 0, 'lost': 0}
+        self.early = 0                 # отрезки, решённые до срока принудительно (flush)
         self._tick = None              # последнее показание батареи и путь после него
-        self._ticks = deque()          # недавние отрезки между показаниями
-        self._events = []              # события штрафа, которым отрезок ещё не сопоставлен
+        self._segs = deque()           # нерешённые отрезки между показаниями, по порядку
+        self._events = []              # события штрафа, не отданные ни одному отрезку, по порядку
 
     def event(self, t):
-        self._events.append({'t': t})
+        self._events.append({'t': t, 'bad': False})
 
     @property
-    def hold(self):
-        """Есть нерешённый вопрос: необъяснённый скачок ждёт события или событие ждёт своей потери заряда."""
-        return any(k['state'] == 'odd' for k in self._ticks) or (self.hit > 0 and bool(self._events))
+    def pending(self):
+        """Есть нерешённые отрезки."""
+        return bool(self._segs)
+
+    def waits(self, win):
+        """Окно расхода ещё ждёт решения по своим отрезкам."""
+        return any(k['win'] is win for k in self._segs)
 
     def reading(self, obs, win, dth=0.0):
         """Каждый такт. win — окно расхода (словарь с ключом 'b0'), в которое попадёт это показание, или None."""
@@ -51,62 +71,80 @@ class PenaltyLedger:
         if obs.battery != k['b']:      # показание не обновилось — путь копится до следующего показания
             drop = k['b'] - obs.battery
             most = self.most(k['ds'], k['dth'], obs.t - k['t'], obs.t)
-            self._ticks.append({'t0': k['t'], 't1': obs.t, 'drop': drop, 'most': most, 'win': win,
-                                'state': 'odd' if drop > most + TOL else 'plain'})
+            self._segs.append({'t0': k['t'], 't1': obs.t, 'drop': drop, 'most': most, 'win': win,
+                               'odd': drop > most + TOL})
             k.update(t=obs.t, b=obs.battery, ds=0.0, dth=0.0)
         self._settle(obs.t)
 
+    def flush(self, now):
+        """Конец прогона или принудительный сброс: решить всё, что осталось, по тому, что известно."""
+        self._settle(now, force=True)
+
     def _near(self, k, e):
-        return k['t1'] >= e['t'] - WAIT_S and k['t0'] <= e['t'] + WAIT_S
+        return k['t1'] >= e['t'] - WAIT_S - EPS and k['t0'] <= e['t'] + WAIT_S + EPS
 
-    def _settle(self, now):
-        for e in list(self._events):
-            if not any(e is x for x in self._events):
-                continue               # событие уже учтено вместе с соседним: два штрафа в одном отрезке
-            free = sorted((k for k in self._ticks if k['state'] in ('plain', 'odd') and self._near(k, e)),
-                          key=lambda k: (abs(k['t1'] - e['t']), -k['t1']))
-            for k in free:
-                m = self._fits(k)
-                if m:
-                    self._mark(k, 'hit', m * self.hit, sorted((x for x in self._events if self._near(k, x)),
-                                                              key=lambda x: abs(x['t'] - e['t']))[:m])
-                    break
-            else:
-                odd = next((k for k in free if k['state'] == 'odd'), None)
-                if odd is not None:
-                    self._mark(odd, 'bad', 0.0, [e])
-                elif self._tick['t'] >= e['t'] + WAIT_S or now >= e['t'] + STALE_S:
-                    # Ждать больше нечего. Если потеря ожидалась и не нашлась, она спрятана где-то рядом
-                    # и неизвестна: все отрезки вокруг события загрязнены.
-                    if self.hit > 0:
-                        self.stats['lost'] += 1
-                        for k in free:
-                            self._mark(k, 'bad', 0.0, [])
-                    self._drop(e)
-        for k in self._ticks:
-            if k['state'] == 'odd' and now >= k['t1'] + WAIT_S:
-                k['state'] = 'plain'   # событие так и не пришло: это настоящая странность, а не штраф
-        while self._ticks and self._ticks[0]['t1'] < now - 2 * WAIT_S - STALE_S:
-            self._ticks.popleft()
-
-    def _fits(self, k):
-        """Сколько штрафов сразу объясняют падение заряда на отрезке (0 — ни один)."""
+    def _count(self, k, n):
+        """Сколько штрафов (из n возможных) объясняют падение заряда на отрезке; 0 — нисколько."""
         if self.hit <= 0:
             return 0
-        n = sum(1 for e in self._events if self._near(k, e))
         return next((m for m in range(1, n + 1) if -TOL <= k['drop'] - m * self.hit <= k['most'] + TOL), 0)
 
-    def _mark(self, k, state, loss, events):
-        k['state'] = state
-        if state in self.stats:
-            self.stats[state] += len(events)
-        if k['win'] is not None:
-            if state == 'hit':
-                k['win']['b0'] -= loss
-            else:
-                k['win']['bad'] = True
-        for e in events:
-            self._drop(e)
+    def _plan(self):
+        """Раздать события подходящим отрезкам очереди: по порядку, каждому — самые ранние свободные рядом.
+        Возвращает {номер отрезка в очереди: его события} и события, оставшиеся свободными."""
+        free, fits = list(self._events), {}
+        for i, k in enumerate(self._segs):
+            near = [e for e in free if self._near(k, e)]
+            m = self._count(k, len(near))
+            if m:
+                fits[i] = near[:m]
+                free = [e for e in free if all(e is not x for x in near[:m])]
+        return fits, free
 
-    def _drop(self, e):
-        self._events = [x for x in self._events if x is not e]
+    def _spare(self, fits, free):
+        """События рядом с первым отрезком очереди, которые делают его испорченным."""
+        k = self._segs[0]
+        near = [e for e in free if self._near(k, e)]
+        if k['odd']:
+            return near
+        if self.hit <= 0:
+            return []
+        # Обычный отрезок портит только событие, которое пришло не позже его показания (потеря такого события
+        # обязана объявиться до срока отрезка) и у которого нет своего необъяснённого скачка.
+        jumps = [q for i, q in enumerate(self._segs) if q['odd'] and i not in fits]
+        return [e for e in near if e['t'] <= k['t1'] + EPS and not e['bad']
+                and not any(self._near(q, e) for q in jumps)]
+
+    def _settle(self, now, force=False):
+        while self._segs:
+            k = self._segs[0]
+            fits, free = self._plan() if self._events else ({}, [])
+            taken, spare = fits.get(0, []), []
+            if not taken:
+                spare = self._spare(fits, free)
+                in_time = now >= k['t1'] + WAIT_S - EPS or not (k['odd'] or spare)
+                if not in_time and not force:
+                    break              # срок не наступил: ничего не списывается и не помечается
+                self.early += not in_time
+            self._segs.popleft()
+            if taken:
+                self.stats['hit'] += len(taken)
+                self._events = [e for e in self._events if all(e is not x for x in taken)]
+                if k['win'] is not None:
+                    k['win']['b0'] -= len(taken) * self.hit
+            elif spare:
+                if k['odd']:
+                    for e in spare:
+                        e['bad'] = True
+                if k['win'] is not None:
+                    k['win']['bad'] = True
+        # Событие больше никому не нужно: рядом нет ни нерешённого отрезка, ни того, что копится сейчас.
+        alive = [e for e in self._events if not force and (self._tick['t'] <= e['t'] + WAIT_S + EPS
+                                                           or any(self._near(k, e) for k in self._segs))]
+        for e in self._events:
+            if all(e is not x for x in alive):
+                if e['bad']:
+                    self.stats['bad'] += 1
+                elif self.hit > 0:
+                    self.stats['lost'] += 1
+        self._events = alive
