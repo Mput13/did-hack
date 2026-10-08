@@ -49,7 +49,10 @@ def main():
     failed = []
 
     def state():
-        return call(base + '/state', timeout=5.0)
+        try:
+            return call(base + '/state', timeout=5.0)
+        except OSError:                     # сервер интерфейса ещё поднимается
+            return {}
 
     def command(**cmd):
         res = call(base + '/command', cmd)

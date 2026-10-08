@@ -78,7 +78,7 @@ def stop(proc, name, grace=12.0):
         say(f'останавливаю: {name}')
     try:
         os.killpg(proc.pid, signal.SIGINT)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
@@ -87,10 +87,12 @@ def stop(proc, name, grace=12.0):
             os.killpg(proc.pid, 0)              # в группе ещё кто-то жив (launch иногда оставляет детей)
         except ProcessLookupError:
             return
+        except PermissionError:             # macOS: в группе остался только завершившийся, но ещё не убранный процесс
+            pass
         time.sleep(0.2)
     try:
         os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         pass
 
 

@@ -159,6 +159,25 @@ def line(row):
             f"гипотез {row['hyp']} (подтв. {row['hyp_confirmed']}, опроверг. {row['hyp_refuted']})")
 
 
+def md_row(row):
+    """Строка таблицы отчёта (Markdown)."""
+    f, h, s = row['fault'] or {}, row['hazard'] or {}, row['soil'] or {}
+    fault = '—' if not f.get('in_run') else ('не заметил' if f['noticed_after'] is None else
+                                             f"заметил через {f['noticed_after']:.0f} с, " + (f"ждал {f['wait_s']} с" if f['wait_s'] else 'не ждал'))
+    hazard = '—' if not h.get('in_run') else (f"въезд на {h['hit_t']:.0f}-й с" + (', гипотеза о зоне, объезд' if h['hypothesis_t'] else '')
+                                              if h['hits'] else 'не встретил')
+    soil = '—' if not s.get('in_run') else ('не въезжал' if s['entered_t'] is None else
+                                            ('въехал, тревоги нет' if s['noticed_after'] is None else f"тревога через {s['reaction_after_entry']:.0f} с после въезда"))
+    num = lambda v: f'{v:.1f}'.replace('.', ',')      # noqa: E731
+    return (f"| {row['agent']} | {row['level']}-{row['seed']} | {num(row['score'])} | {row['collected']} из {row['total']} | "
+            f"{'да' if row['returned'] else 'НЕТ'} | {row['collisions']} | {row['hazard_hits']} | {row['time']:.0f} | {row['stop_s']:.0f} | "
+            f"{row['stuck']} / {row['blocked']} | {fault} | {soil} | {hazard} | {row['inquiries']} / {row['hyp']} | {row['lag']:.1%} |".replace('.', ','))
+
+
+MD_HEAD = ('| Агент | Сценарий | Счёт | Собрано | Возврат | Столкн. | Заезды в зоны | Время, с | Наиб. простой, с | Отъезды: не движется / преграда | '
+           'Сбой датчика | Смена грунта | Новая опасная зона | Вопросов / гипотез | Опоздавших тактов |\n' + '|---' * 15 + '|')
+
+
 def showy(row):
     """Годится ли прогон для показа адаптации: вернулся, ничего не задел, и на экране есть реакция на изменение."""
     f, h, s = row['fault'] or {}, row['hazard'] or {}, row['soil'] or {}
@@ -198,6 +217,7 @@ def main():
     ap.add_argument('--story', action='store_true', help='напечатать журнал записи по секундам вместе со скрытыми событиями')
     ap.add_argument('--between', type=float, nargs=2, default=(0.0, 1e9), metavar=('С', 'ПО'))
     ap.add_argument('--json', help='куда сохранить строки таблицы')
+    ap.add_argument('--md', action='store_true', help='напечатать таблицу в Markdown')
     ap.add_argument('--only-showy', action='store_true', help='печатать только прогоны, годные для показа адаптации')
     args = ap.parse_args()
 
@@ -217,8 +237,14 @@ def main():
                 s = run_episode(args.level, seed, agent, experiment='F1scan')
                 rows.append(summarize(load(RUNS / s['file'])))
                 rows[-1]['file'] = 'runs/' + s['file']
+    if args.md:
+        print(MD_HEAD)
     for row in rows:
         clean, reacted = showy(row)
+        if args.md:
+            row['clean'], row['reacted'] = clean, reacted
+            print(md_row(row))
+            continue
         row['clean'], row['reacted'] = clean, reacted
         if not args.only_showy or (clean and reacted >= 2):
             print(line(row) + f"\n      для показа: {'чисто' if clean else 'не чисто'}, реакций на изменения {reacted} из 3")
