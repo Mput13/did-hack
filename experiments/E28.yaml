@@ -12,9 +12,8 @@ hypothesis: >-
   изменений на среднем уровне. Это ниже порога приёмки в 1,5 очка: по разбору причин порог одной маленькой
   правкой не берётся.
 method: >-
-  Четыре агента (adaptive_v2, adaptive_v4, scientist_v2, scientist_v4) и проба adaptive_v4r (v4 с точным
-  пересчётом карты после сбора, в приёмку не входит) проходят одни и те же сценарии 13001–13040 уровней medium
-  и hard при трёх условиях: базовые правила, «научные» правила и базовые правила без событий среды. Отладка и
+  Четыре агента (adaptive_v2, adaptive_v4, scientist_v2, scientist_v4) проходят одни и те же сценарии
+  13001–13040 уровней medium и hard при трёх условиях: базовые правила, «научные» правила и базовые правила без событий среды. Отладка и
   подбор шли на сценариях 1–80; сценарии 13001–13040 до этого опыта не запускались и не просматривались; код
   заморожен коммитом до запуска, запуск один. Сравниваются парные разности «v4 − v2».
 expect: >-
@@ -31,7 +30,6 @@ arms:
   - {id: adaptive_v4, label: Адаптивный v4, agent: adaptive_v4}
   - {id: scientist_v2, label: Исследователь v2, agent: scientist_v2}
   - {id: scientist_v4, label: Исследователь v4, agent: scientist_v4}
-  - {id: adaptive_v4r, label: Адаптивный v4 с точным пересчётом карты (проба), agent: adaptive_v4, config: {exact_replay: true}}
 levels: [medium, hard]
 seeds: 40
 seed_start: 13001
@@ -59,5 +57,3 @@ claims:
      text: Исследователь v4 набирает больше v2}
   - {metric: returned, a: scientist_v4, b: scientist_v2, focus: hard, better: higher, kind: noninferiority, margin: 0.05,
      conditions: [base, science], text: Исследователь v4 возвращается не реже v2}
-  - {metric: score, a: adaptive_v4r, b: adaptive_v4, focus: hard, conditions: [base, science],
-     text: Проба — точный пересчёт карты после сбора добавляет очков к v4}
