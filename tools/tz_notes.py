@@ -73,6 +73,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith('/api/state'):
             return self._send(json.dumps({'blocks': blocks(), 'questions': notes()}, ensure_ascii=False))
+        if self.path.startswith('/check'):          # сверка с требованиями — отдельная страница рядом с текстом условия
+            return self._send((ROOT / 'docs' / 'requirements_check.html').read_bytes(), 'text/html; charset=utf-8')
         if self.path.split('?')[0] in ('/', '/index.html'):
             return self._send(PAGE, 'text/html; charset=utf-8')
         self._send('{}', code=404)
@@ -125,7 +127,7 @@ PAGE = r'''<!doctype html>
  #ask { position: absolute; z-index: 9; display: none; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
  textarea { width: 100%; box-sizing: border-box; min-height: 70px; font: inherit; font-size: 14.5px; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
 </style></head><body>
-<div class="bar"><span><b>Условие задачи DID Hack</b> · вопросов: <b id="count">0</b>, с ответом: <b id="answered">0</b></span><button id="copy">Скопировать все вопросы</button></div>
+<div class="bar"><span><b>Условие задачи DID Hack</b> · вопросов: <b id="count">0</b>, с ответом: <b id="answered">0</b></span><a href="/check" style="color:var(--acc)">Сверка с требованиями →</a><button id="copy">Скопировать все вопросы</button></div>
 <main>
 <div class="hint"><b>Как пользоваться.</b> Выделите мышью любое место текста — рядом появится кнопка «Вопрос к этому месту». Напишите вопрос и сохраните: он останется под выделенной строкой. Когда вопросы готовы, напишите в чате любое слово (например, «вопросы») — ассистент прочитает их отсюда и ответит здесь же, под каждым вопросом. Цифры слева — номера строк текста: на них удобно ссылаться.</div>
 <div id="text"></div>
