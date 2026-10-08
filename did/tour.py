@@ -7,7 +7,9 @@
 запасом. Целей не больше десяти, поэтому перебор точный — динамическое программирование по подмножествам.
 План пересчитывается после каждого нового сведения (сбор, промах, новый кандидат, штраф, смена грунта),
 исполняется всегда только его начало. Возврат на базу — это конец плана, а не отдельный порог: пока в
-плане есть цель по заряду, робот к ней едет, даже если «по дороге домой».
+плане есть цель по заряду, робот к ней едет, даже если «по дороге домой». Объезд сравнивается с немедленным
+возвратом: если ни один не прибавляет ожидаемых очков, план — база. Раз в секунду проверяется, что текущая
+цель всё ещё по заряду вместе с остановкой, грузом и дорогой домой от неё.
 
 Вторая схема в этом же классе — «сначала разведка, потом сбор» (survey_cover > 0): короткий обзорный
 объезд по заранее посчитанным точкам (did/route.py) с попутным сбором того, что оказалось рядом, затем
@@ -41,12 +43,13 @@ class Settings:
     switch_gain: float = 2.0          # очки: начатую цель план бросает, только если другой порядок лучше на столько
     explore_min: float = 0.03         # участки с меньшей ценностью (в образцах) в план не идут
     dwell: float = 0.3                # ед. заряда на подъезд вплотную, остановку и сбор
-    commit_slack: float = 1.0         # к уже выбранной цели робот едет, пока запаса не хватает не больше чем на столько
+    commit_slack: float = 1.0         # ед. заряда: к уже выбранной цели робот едет, пока на неё (с остановкой, грузом,
+    #                                   дорогой домой и запасом) не хватает не больше чем столько; проверка — раз в секунду
     true_rates: bool = False          # только оракул: расход на груз и повороты берётся из правил, а не из оценки агента
     turn_rate: float = 1.3            # рад на метр пути (для true_rates)
     # --- «сначала разведка, потом сбор»
     survey_cover: float = 0.0         # м: радиус покрытия обзорного объезда; 0 — без объезда
-    survey_budget: float = 0.0        # ед. заряда на объезд, считая от старта
+    survey_budget: float = 0.0        # ед. заряда на объезд, считая от старта; вышел в пути — остаток объезда снимается
     survey_detour: float = 3.0        # ед. заряда: на столько можно отклониться от объезда за найденным образцом
     survey_pick: float = 0.5          # с какой уверенности кандидат подбирается по пути
     survey_found: float = 1.0         # объезд кончается раньше, если уверенных кандидатов уже столько (доля оставшихся образцов)
@@ -59,6 +62,7 @@ class TourScheme:
         self.s = Settings(**dict(agent.cfg.scheme_opts))
         self.log = []                                   # решения прогона: для проверок и разбора
         self._plan_t = -1e9
+        self._mine = self.s.targets == 'tour'           # текущую цель выбрал перебор (а не правило и не объезд)
         self._wps = list(survey_route(agent.arena, self.s.survey_cover)) if self.s.survey_cover > 0 else []
         self._survey = bool(self._wps)
 
@@ -149,19 +153,23 @@ class TourScheme:
 
     # --- перебор -----------------------------------------------------------------------------------
 
-    def solve(self, nodes, metres, battery, rates, reserve, pts_sample, pts_left, first=None):
-        """Лучший объезд: (порядок номеров целей, сводка). Пустой порядок — ни одна цель не по заряду.
-        first — номер цели, с которой объезд обязан начаться.
+    def solve(self, nodes, metres, battery, rates, reserve, pts_sample, pts_left, first=None, home=0.0):
+        """Лучший объезд: (порядок номеров целей, сводка). first — номер цели, с которой объезд обязан начаться.
+        home — заряд на дорогу домой из нынешней точки: с ней сравнивается любой объезд.
 
         Заряд на объезд: дорога до первой цели, переезды, остановки, дорога домой от последней; груз
         удорожает метр после каждого кандидата. Условие: (объезд + дорога домой) × запас + постоянный запас
         не больше заряда. Среди годных — наибольший ожидаемый счёт: очки за образцы плюс очки за остаток.
+        Счёт считается относительно немедленного возвращения: у пустого порядка он равен нулю, и объезд
+        выбирается, только если его счёт выше. Пустой порядок: why = 'charge' — ни одна цель не по заряду,
+        'gain' — по заряду есть, но ни один объезд не прибавляет очков, 'none' — целей нет.
         """
         n = len(nodes)
+        stay = {'value': 0.0, 'cost': home, 'score': 0.0, 'gain': 0.0, 'why': 'none'}
         if n == 0:
-            return [], {'value': 0.0, 'cost': 0.0, 'score': -np.inf}
+            return [], stay
         if self.s.haste > 0.0:
-            return self._solve_haste(nodes, metres, battery, rates, reserve, pts_sample, pts_left, first)
+            return self._solve_haste(nodes, metres, battery, rates, reserve, pts_sample, pts_left, first, home)
         per_m, per_load = rates
         margin, absolute = reserve
         full = 1 << n
@@ -189,25 +197,29 @@ class TourScheme:
                 if c < dp[mask | 1 << nxt, nxt]:
                     dp[mask | 1 << nxt, nxt] = c
                     par[mask | 1 << nxt, nxt] = last[nxt]
-        home = back_m[None, :] * pm[:, None]
-        ok = (dp + home) * margin + absolute <= battery
+        back = back_m[None, :] * pm[:, None]
+        ok = (dp + back) * margin + absolute <= battery
         if not ok.any():
-            return [], {'value': 0.0, 'cost': 0.0, 'score': -np.inf}
-        score = np.where(ok, pts_sample * value[:, None] - pts_left * (dp + home), -np.inf)
+            return [], {**stay, 'why': 'charge'}
+        score = np.where(ok, pts_sample * value[:, None] - pts_left * (dp + back - home), -np.inf)
         mask, last = np.unravel_index(int(score.argmax()), score.shape)
-        info = {'value': float(value[mask]), 'cost': float(dp[mask, last] + home[mask, last]),
-                'score': float(score[mask, last])}
+        if score[mask, last] <= 0.0:
+            return [], {**stay, 'why': 'gain'}           # немедленный возврат не хуже любого объезда
+        info = {'value': float(value[mask]), 'cost': float(dp[mask, last] + back[mask, last]),
+                'score': float(score[mask, last]), 'gain': float(score[mask, last]), 'why': ''}
         order = []
         while last >= 0:
             order.append(int(last))
             mask, last = mask & ~(1 << last), int(par[mask, last])
         return order[::-1], info
 
-    def _solve_haste(self, nodes, metres, battery, rates, reserve, pts_sample, pts_left, first):
+    def _solve_haste(self, nodes, metres, battery, rates, reserve, pts_sample, pts_left, first, home=0.0):
         """То же с убыванием ценности по ходу объезда: перебор порядков в глубину с отсечением по заряду.
 
         Датчик слышит только ближайший образец, поэтому новые кандидаты появляются по мере сбора ближних;
-        чем позже цель стоит в плане, тем вероятнее, что план до неё успеет измениться.
+        чем позже цель стоит в плане, тем вероятнее, что план до неё успеет измениться. «Спешка» выбирает
+        порядок, а не оценивает выгоду: с немедленным возвратом объезд сравнивается по ожидаемому счёту без
+        убывания (gain), и среди объездов, которые его прибавляют, берётся лучший по счёту с убыванием.
         """
         n = min(len(nodes), self.s.haste_nodes)
         per_m, per_load = rates
@@ -218,8 +230,9 @@ class TourScheme:
         to_m = [nd['to_m'] for nd in nodes]
         back_m = [nd['back_m'] for nd in nodes]
         m = metres.tolist()
-        best = {'score': -math.inf, 'order': [], 'value': 0.0, 'cost': 0.0}
+        best = {'score': -math.inf, 'order': [], 'value': 0.0, 'cost': home, 'gain': 0.0}
         order = []
+        fits = [False]
 
         def visit(last, used, cost, gain, total, load):
             pm = per_m + per_load * load
@@ -228,14 +241,16 @@ class TourScheme:
                     continue
                 c = cost + (to_m[nxt] if last < 0 else m[last][nxt]) * pm + dwell
                 pm2 = pm + per_load * carry[nxt]
-                home = back_m[nxt] * pm2
-                if (c + home) * margin + absolute > battery:
+                back = back_m[nxt] * pm2
+                if (c + back) * margin + absolute > battery:
                     continue
+                fits[0] = True
                 g = gain + pts_sample * value[nxt] * math.exp(-c / tau)
                 order.append(nxt)
-                score = g - pts_left * (c + home)
-                if score > best['score']:
-                    best.update(score=score, order=list(order), value=total + value[nxt], cost=c + home)
+                spent = pts_left * (c + back - home)
+                score, real = g - spent, pts_sample * (total + value[nxt]) - spent
+                if real > 0.0 and score > best['score']:
+                    best.update(score=score, order=list(order), value=total + value[nxt], cost=c + back, gain=real)
                 visit(nxt, used | 1 << nxt, c, g, total + value[nxt], load + carry[nxt])
                 order.pop()
 
@@ -243,13 +258,20 @@ class TourScheme:
             visit(-1, 0, 0.0, 0.0, 0.0, 0.0)
         elif first < n:
             c = to_m[first] * per_m + dwell
-            home = back_m[first] * (per_m + per_load * carry[first])
-            if (c + home) * margin + absolute <= battery:
+            back = back_m[first] * (per_m + per_load * carry[first])
+            if (c + back) * margin + absolute <= battery:
+                fits[0] = True
                 g = pts_sample * value[first] * math.exp(-c / tau)
                 order.append(first)
-                best.update(score=g - pts_left * (c + home), order=[first], value=value[first], cost=c + home)
+                spent = pts_left * (c + back - home)
+                if pts_sample * value[first] - spent > 0.0:
+                    best.update(score=g - spent, order=[first], value=value[first], cost=c + back,
+                                gain=pts_sample * value[first] - spent)
                 visit(first, 1 << first, c, g, value[first], carry[first])
-        return best['order'], {'value': best['value'], 'cost': best['cost'], 'score': best['score']}
+        if not best['order']:
+            return [], {'value': 0.0, 'cost': home, 'score': 0.0, 'gain': 0.0, 'why': 'gain' if fits[0] else 'charge'}
+        return best['order'], {'value': best['value'], 'cost': best['cost'], 'score': best['score'],
+                               'gain': best['gain'], 'why': ''}
 
     # --- связка с агентом --------------------------------------------------------------------------
 
@@ -261,6 +283,7 @@ class TourScheme:
             return None
         self._plan_t = obs.t
         self._visit(obs)
+        self._mine = False
         if self._survey:
             plan = self._survey_plan(obs, state)
             if plan is not None or self.s.targets == 'rule':
@@ -268,16 +291,19 @@ class TourScheme:
         nodes, w = self._nodes(obs, state)
         if self.s.explore == 'rule' and not nodes:
             return None                                  # кандидатов по заряду нет: разведка или база — по правилу
+        self._mine = True
         r = a.rules
-        args = (nodes, self._metres(nodes, w), obs.battery, self._rates(), self._reserve(obs), r.pts_sample,
+        rates = self._rates()
+        home = _walk(a.graph, a._base_pred, a.graph.node(obs.x, obs.y), w) * rates[0]
+        args = (nodes, self._metres(nodes, w), obs.battery, rates, self._reserve(obs), r.pts_sample,
                 r.pts_battery_left)
-        order, info = self.solve(*args)
+        order, info = self.solve(*args, home=home)
         # Начатую цель не бросаем из-за мелкой разницы: иначе робот мечется между равноценными порядками.
         sg = a.queue[0] if a.queue else None
         now = next((k for k, nd in enumerate(nodes) if sg is not None and nd['kind'] == sg['type']
                     and math.hypot(nd['x'] - sg['x'], nd['y'] - sg['y']) <= 0.45), None)
         if now is not None and order and order[0] != now:
-            kept, kept_info = self.solve(*args, first=now)
+            kept, kept_info = self.solve(*args, first=now, home=home)
             if kept and info['score'] - kept_info['score'] < self.s.switch_gain:
                 order, info = kept, kept_info
         rec = {'t': round(obs.t, 1), 'trigger': state['trigger'], 'battery': round(obs.battery, 1),
@@ -285,8 +311,10 @@ class TourScheme:
                'expected_samples': round(info['value'], 2), 'cost': round(info['cost'], 1)}
         self.log.append(rec)
         if not order:
-            return self._result('Ни одна цель не укладывается в заряд с дорогой домой — возвращаюсь на базу.',
-                                [{'type': 'return_base'}], rec)
+            why = ('Ни одна цель не окупает заряда на дорогу к ней: ожидаемые очки за образцы меньше очков за '
+                   'сбережённый заряд' if info['why'] == 'gain' else
+                   'Ни одна цель не укладывается в заряд с дорогой домой')
+            return self._result(why + ' — возвращаюсь на базу.', [{'type': 'return_base'}], rec)
         chosen = [nodes[i] for i in order]
         skipped = [nd['id'] for k, nd in enumerate(nodes) if k not in order]
         text = (f"План на остаток прогона: {' → '.join(nd['id'] for nd in chosen)} → база. Ожидаю собрать "
@@ -306,8 +334,10 @@ class TourScheme:
     def check(self, obs):
         """Раз в секунду вместо правила «заряд ниже запаса — домой».
 
-        Пока текущая цель плана по заряду (с дорогой домой и запасом), робот едет к ней. Если нет — план
-        пересчитывается: в нём останутся только цели, которые ещё по заряду, либо одна база.
+        Пока текущая цель по заряду (с остановкой, грузом, дорогой домой от неё и запасом), робот едет к ней.
+        Если нет — план пересчитывается: в нём останутся только цели, которые ещё по заряду, либо одна база.
+        Проверка идёт каждую секунду, а не с того момента, когда заряд упал до цены возврата из нынешней
+        точки: рядом с базой эта цена мала, и недоступная цель оставалась бы в очереди.
         """
         a, s = self.a, self.s
         t = obs.t
@@ -327,24 +357,51 @@ class TourScheme:
             return a._go_home(t, 'все образцы собраны')
         if a.rules.time_limit_s - t <= home / a.rules.drain_per_m / 0.15 + 10.0:
             return a._go_home(t, 'время прогона на исходе')
+        if a._trigger:
+            return                                       # план и так будет пересчитан в этот же такт
+        spent = a.rules.battery_start - obs.battery
+        if self._survey and spent >= s.survey_budget:
+            # Заряд на объезд вышел по дороге: оставшиеся обзорные точки снимаются, дальше — сбор.
+            self._survey_end(obs, f'на него потрачено {spent:.0f} ед. заряда')
+            return self._replan('survey')
         sg = a.queue[0] if a.queue else None
-        if sg is None or a._trigger or 'x' not in sg:
+        if sg is None or 'x' not in sg:
             return
-        per_m = self._rates()[0]
-        margin, absolute = self._reserve(obs)
-        if self.s.back == 'plan' and obs.battery <= home / a._per_m() * per_m * margin + absolute:
-            # Правило агента здесь повернуло бы домой. Цель плана выбрана с учётом дороги домой от неё —
-            # проверяем, что это всё ещё так.
-            g, w = a.graph, self._weights()
-            node = g.node(sg['x'], sg['y'])
-            trip = _walk(g, g.field(obs.x, obs.y)[1], node, w) + _walk(g, a._base_pred, node, w)
-            if obs.battery - trip * per_m * margin - absolute + s.commit_slack < 0.0:
-                a.queue = []
-                a._path_goal = None
-                return a._request_plan('battery')
+        if s.back == 'plan' and not self._fits(obs, sg):
+            return self._replan('battery')
         if self._survey and t - self._plan_t >= 2.0 and any(
                 c['mass'] >= s.survey_pick for c in a._candidates(t)):
             return a._request_plan('survey')             # по пути появился уверенный кандидат
+
+    def _replan(self, trigger):
+        a = self.a
+        a.queue = []
+        a._path_goal = None
+        a._request_plan(trigger)
+
+    def _trip(self, obs, sg):
+        """Заряд на цель sg по счёту перебора: дорога до неё, остановка на сбор и дорога домой с грузом."""
+        a = self.a
+        g, w = a.graph, self._weights()
+        per_m, per_load = self._rates()
+        a._home_cost(obs.x, obs.y)                       # поле «домой» посчитано и лежит в a._base_pred
+        node = g.node(sg['x'], sg['y'])
+        take = sg['type'] == 'investigate'
+        return (_walk(g, g.field(obs.x, obs.y)[1], node, w) * per_m + (self.s.dwell if take else 0.0)
+                + _walk(g, a._base_pred, node, w) * (per_m + (per_load if take else 0.0)))
+
+    def _fits(self, obs, sg):
+        """Текущая цель ещё по заряду? Формула — того, кто цель выбрал; commit_slack — допуск, чтобы робот не
+        бросал цель из-за колебаний оценки."""
+        a, s = self.a, self.s
+        if self._mine:                                   # перебор: запас — множителем ко всему объезду
+            margin, absolute = self._reserve(obs)
+            return obs.battery + s.commit_slack >= self._trip(obs, sg) * margin + absolute
+        # Правило планировщика или обзорный объезд: запас — множителем к дороге домой (Agent._affordable).
+        dist, pred = a.graph.field(obs.x, obs.y)
+        to = a.graph.energy(dist, pred, sg['x'], sg['y']) * a._per_m()
+        stop = s.dwell if sg['type'] == 'investigate' else 0.0
+        return a._affordable(obs.battery + s.commit_slack - stop, to, a._home_cost(sg['x'], sg['y']))
 
     # --- обзорный объезд ---------------------------------------------------------------------------
 
@@ -365,6 +422,7 @@ class TourScheme:
             return self._survey_end(obs, 'все точки пройдены')
         if spent >= s.survey_budget:
             return self._survey_end(obs, f'на него потрачено {spent:.0f} ед. заряда')
+        # Бюджет ограничивает и исполнение: check() раз в секунду снимает обзорную очередь, когда он вышел.
         if len(sure) >= s.survey_found * left:
             return self._survey_end(obs, f'уверенных кандидатов уже {len(sure)} на {left} оставшихся образцов')
         wx, wy = self._wps[0]

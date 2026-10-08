@@ -2,6 +2,7 @@
 
     ./px python tools/a1_table.py            # читает runs/E23/summary.json, печатает таблицы в Markdown
     ./px python tools/a1_table.py E23_pilot  # то же для подбора на отладочных сценариях
+    ./px python tools/a1_table.py E23b       # перепроверка после исправлений, сценарии 9001–9160
 
 Все числа — из сводки: средние по прогонам группы и парные разности счёта с adaptive на одних и тех же
 сценариях. Разность и её 95% интервал берутся из утверждений сводки (claims); для вариантов без своего
@@ -54,21 +55,24 @@ def main():
     for cond in spec['conditions']:
         for level in spec['levels']:
             print(f"### {cond['label']}, уровень {level}\n")
-            print('| Вариант | Счёт | Разность с adaptive [95%] | Собрано | Вернулся | Штрафов | Потрачено заряда |')
-            print('|---|---|---|---|---|---|---|')
+            print('| Вариант | Счёт | Разность с adaptive [95%] | Собрано | Вернулся | Возвраты: разность с adaptive, '
+                  'п. п. [95%] | Штрафов | Потрачено заряда |')
+            print('|---|---|---|---|---|---|---|---|')
             base = pick(BASE, cond['id'], level)
             for arm in spec['arms']:
                 sel = pick(arm['id'], cond['id'], level)
                 if not sel:
                     continue
                 if arm['id'] == BASE:
-                    diff = '—'
+                    diff = back = '—'
                 else:
+                    r = paired(sel, base, 'returned', np.random.default_rng(0))
+                    back = f"{signed(100 * r['mean'])} [{signed(100 * r['ci'][0])}; {signed(100 * r['ci'][1])}]"
                     p = claimed.get((arm['id'], cond['id'], level)) or paired(sel, base, 'score',
                                                                                 np.random.default_rng(0))
                     diff = f"{signed(p['mean'])} [{signed(p['ci'][0])}; {signed(p['ci'][1])}]"
                 print(f"| {labels[arm['id']]} (`{arm['id']}`) | {num(mean(sel, 'score'))} | {diff} | "
-                      f"{mean(sel, 'samples_share'):.0%} | {mean(sel, 'returned'):.0%} | "
+                      f"{mean(sel, 'samples_share'):.0%} | {mean(sel, 'returned'):.1%} | {back} | "
                       f"{num(mean(sel, 'penalties'), 2)} | {num(mean(sel, 'battery_used'))} |")
             print()
 
