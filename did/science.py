@@ -62,6 +62,8 @@ class Inquiry:
         self.action = ''
         self.critique = []
         self.note = ''
+        self.follow = None            # L3: опыты в порядке плана автора (список id) вместо выбора по пользе
+        self.llm = None               # L3: что предложили автор и критик (для сверки с выбором расчёта)
         for test in self.tests:
             test.gain_bits = round(self.gain(test), 3)
 
@@ -122,6 +124,8 @@ class Inquiry:
         """Следующий опыт: наибольшая польза на единицу заряда. None — опыты больше не нужны или невозможны."""
         if self.conclusion or self.settled or self.maneuvers >= self.max_tests:
             return None
+        if self.follow is not None:
+            return self._next_planned()
         best, score = None, 0.0
         for test in self.tests:
             if test.measured is not None and (not test.repeatable or test.repeats >= 2):
@@ -135,6 +139,20 @@ class Inquiry:
             if value > score:
                 best, score = test, value
         return best
+
+    def _next_planned(self):
+        """Следующий опыт из плана автора: первый ещё не проведённый, который проходит по бюджету.
+
+        Польза не проверяется: что и в каком порядке мерить, решил автор. План исчерпан — опытов больше нет.
+        """
+        by_id = {x.id: x for x in self.tests}
+        for tid in self.follow:
+            test = by_id.get(tid)
+            if test is None or test.measured is not None or self.spent + test.cost > self.budget:
+                continue
+            test.gain_bits = round(self.gain(test), 3)
+            return test
+        return None
 
     def record(self, test_id, value, sigma, t, cost=None, maneuver=True):
         """Результат опыта: пересчитать вероятности объяснений. cost — сколько заряда ушло на самом деле."""
@@ -191,6 +209,7 @@ class Inquiry:
                        'chosen': x.measured is not None, 'measured': x.measured} for x in self.tests],
             'conclusion': self.conclusion, 'action': self.action, 'source': self.source,
             'critique': self.critique, 'note': self.note,
+            **({'llm': self.llm} if self.llm else {}),
         }
 
     def context(self, state):

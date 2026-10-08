@@ -320,8 +320,22 @@ class Investigator:
         state = {'battery': round(obs.battery, 1), 'return_cost': round(a._home_cost(obs.x, obs.y), 1),
                  'carried': a.collected, 'time_s': round(obs.t, 1),
                  'last_penalty_s_ago': round(obs.t - self._penalty_t, 1) if self._penalty_t > 0 else None}
+        first = q.choose()                   # что выбрал бы расчёт до того, как автор сузил список
+        offered = [x.id for x in q.alternatives]
         d = deliberate(self.roles, q.context(state))
         q.restrict(consider=d.proposal.consider, order=[step.test for step in d.proposal.plan])
+        if a.cfg.inquiry_follow_plan and d.proposal.source == 'llm':
+            q.follow = [step.test for step in d.proposal.plan]
+        steps = lambda p: [s.test for s in p.plan]      # noqa: E731
+        q.llm = {'offered': offered, 'tests_offered': [x.id for x in q.tests], 'code_first': first.id if first else None,
+                 'draft': {'source': d.draft.source, 'consider': list(d.draft.consider), 'plan': steps(d.draft),
+                           'extra': [{'statement': x.statement, 'why': x.why} for x in d.draft.extra]},
+                 'critic': {'source': d.critique.source, 'verdict': d.critique.verdict,
+                            'issues': [i.model_dump() for i in d.critique.issues]},
+                 'revised': d.revised,
+                 'final': {'source': d.proposal.source, 'consider': list(d.proposal.consider), 'plan': steps(d.proposal),
+                           'extra': [{'statement': x.statement, 'why': x.why} for x in d.proposal.extra]},
+                 'open_issues': len(d.open_issues), 'follow': q.follow is not None, 'latency_ms': d.latency_ms}
         q.source = d.proposal.source
         q.note = d.proposal.rationale
         q.critique = [{'issue': i.text, 'kind': i.kind, 'fix': i.fix, 'resolved': i not in (d.open_issues or [])}
@@ -494,6 +508,9 @@ class Investigator:
         if self.roles is not None:
             from .llm_roles import explain
             text = explain(self.roles, q.to_dict())
+            # Обмены рассказчика лежат при расследовании, а не в общей ленте: сводка llm_stats прежних опытов не меняется.
+            q.llm = {**(q.llm or {}), 'explain': {'source': text.source, 'error': text.error, 'text': str(text),
+                                                  'latency_ms': text.latency_ms, 'exchanges': list(text.exchanges)}}
             if str(text).strip():
                 q.note = (q.note + ' ' if q.note else '') + 'Объяснение модели: ' + str(text)
                 a.journal.add(t, 'llm', f'{q.id}. {text}', inquiry=q.id)

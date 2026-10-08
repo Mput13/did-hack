@@ -56,6 +56,7 @@ class AgentConfig:
     llm_wait_s: float = 0.0           # быстрый симулятор: сколько секунд робот стоит, «ожидая ответ модели»
     async_planner: bool = False       # Gazebo: модель думает в отдельном потоке, робот в это время стоит
     localize: bool = True             # поправлять позу одометрии по лидару и карте (did/localize.py)
+    inquiry_follow_plan: bool = False  # L3: опыты расследования идут в порядке плана модели-автора, а не по пользе
     science: bool = False             # вести расследования: несколько объяснений странности и опыт (did/inquiry.py)
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
     risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
