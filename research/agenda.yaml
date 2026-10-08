@@ -353,7 +353,7 @@ studies:
   - id: F2
     title: Карта от SLAM Toolbox вместо готовой (бонусный трек)
     criterion: Бонус «SLAM вместо готовой карты»
-    status: submitted
+    status: returned
     owner: Claude Opus 5.5
     why: Ключ подключён, но ни разу не проверен; в условии требование — начало координат карты совпадает с мировым.
     note: >-
