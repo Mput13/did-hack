@@ -623,6 +623,54 @@ function readPoseFix(list) {
   return { T, S, A, max, maxA };
 }
 
+/* Команда роботов (запись с полями robots и team, did/team_runner.py): напарники и их переговоры.
+ * trace.partners — пути остальных роботов, trace.self — имя того, чьими глазами показан прогон
+ * (их подставляет страница прогона, lab/views/run.js). */
+const TEAM_COLORS = ['#1baf7a', '#b8481b', '#7a4fd6'];
+function teamText(m) {
+  const at = (x, y) => `(${num(x, 1)}; ${num(y, 1)})`;
+  switch (m.type) {
+    case 'hello': return `На связи, стою в ${at(m.x, m.y)}`;
+    case 'claim': return m.kind === 'investigate'
+      ? `Эту цель беру я: образец около ${at(m.x, m.y)}, до него ${num(m.cost, 1)} ед. заряда`
+      : `Еду на разведку в ${at(m.x, m.y)} — туда не езди`;
+    case 'collected': return `Образец собран в ${at(m.x, m.y)}. На арене осталось: ${m.left}`;
+    case 'hazard': return `Получил штраф: опасная зона в ${at(m.x, m.y)}. Объезжай`;
+    case 'soil': return `Дорогой грунт около ${at(m.x, m.y)}: расход выше примерно в ${num(m.mult, 1)} раза`;
+    case 'soil_changed': return `Грунт около ${at(m.x, m.y)} изменился: расход перестал сходиться с оценкой`;
+    case 'sector': {
+      if (m.all) return `Вся арена теперь моя (${m.reason})`;
+      const c = m.line.c, n = m.line.n;
+      const side = (nx, ny) => (Math.abs(nx) > Math.abs(ny) ? (nx > 0 ? 'восток' : 'запад') : (ny > 0 ? 'север' : 'юг'));
+      return `Делю арену (${m.reason}): граница через ${at(c[0], c[1])}, ${m.owners.neg} — ${side(-n[0], -n[1])}, ${m.owners.pos} — ${side(n[0], n[1])}`;
+    }
+    case 'status': return `${{ returning: 'Еду на базу', finished: 'Я на базе, закончил', stopped: 'Встал' }[m.state] || m.state}. Заряд ${num(m.battery, 1)}`;
+    default: return m.type;
+  }
+}
+const TEAM_KIND = {
+  hello: 'связь', claim: 'цель', collected: 'сбор', hazard: 'опасность', soil: 'грунт', soil_changed: 'грунт',
+  sector: 'участки', status: 'состояние',
+};
+function buildTeam(trace) {
+  const partners = (trace.partners || []).filter((p) => p && p.track && (p.track.t || []).length).map((p, i) => ({
+    name: p.name, color: rgbOf(TEAM_COLORS[i % TEAM_COLORS.length]), T: p.track.t, x: p.track.x, y: p.track.y, th: p.track.th || [],
+  }));
+  const all = (trace.team && Array.isArray(trace.team.messages) ? trace.team.messages : []).slice().sort(byT);
+  const msgs = all.filter((m) => m.type !== 'obs');
+  const names = [];
+  for (const m of all) if (!names.includes(m.from)) names.push(m.from);
+  const colorOf = (name) => {
+    if (name === trace.self) return null;
+    const k = partners.findIndex((p) => p.name === name);
+    return k >= 0 ? partners[k].color : null;
+  };
+  return {
+    self: trace.self || null, partners, msgs, msgsT: msgs.map((m) => +m.t), obsT: all.filter((m) => m.type === 'obs').map((m) => +m.t),
+    sectors: msgs.filter((m) => m.type === 'sector'), names, colorOf, on: partners.length > 0 || msgs.length > 0,
+  };
+}
+
 function buildModel(trace, prev) {
   const tr0 = trace || {};
   const tr = tr0.track || {};
@@ -851,6 +899,7 @@ function buildModel(trace, prev) {
   const canScore = rules.pts_sample != null;
 
   const model = {
+    team: buildTeam(tr0),
     trace: tr0, n, T, tr, rules, sc, result, modes, events, journal, hyps, llm, paths, scans, samples, total,
     t0, dur, span: Math.max(dur - t0, 0.001), base, finished, faults, trueHazards,
     // показание ниже этого порога не отличить от шума: «в пределах дальности датчика образцов нет»
@@ -1442,6 +1491,63 @@ function createArena(host, cfg) {
       ctx.lineCap = 'round';
       ctx.stroke();
       ctx.lineCap = 'butt';
+    }
+
+    // 5а. Команда: граница участков, следы и положение напарников
+    if (model.team.on) {
+      const tm = model.team;
+      let sector = null;
+      for (const m of tm.sectors) if (+m.t <= t) sector = m;
+      if (sector && sector.line && !cfg.compact) {
+        const c = sector.line.c, nn = sector.line.n;
+        ctx.beginPath();
+        ctx.moveTo(X(c[0] + nn[1] * 6), Y(c[1] - nn[0] * 6));
+        ctx.lineTo(X(c[0] - nn[1] * 6), Y(c[1] + nn[0] * 6));
+        ctx.setLineDash([10, 7]);
+        ctx.strokeStyle = rgba(th.blue, 0.75);
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        label(`участок ${sector.owners.pos}`, X(c[0] + nn[0] * 0.45), Y(c[1] + nn[1] * 0.45), { weight: 600, size: 12, ink: th.blue });
+        label(`участок ${sector.owners.neg}`, X(c[0] - nn[0] * 0.45), Y(c[1] - nn[1] * 0.45), { weight: 600, size: 12, ink: th.blue });
+      }
+      for (const p of tm.partners) {
+        let i = upperBound(p.T, t) - 1;
+        if (i < 0) i = 0;
+        const j = Math.min(i + 1, p.T.length - 1);
+        const f = j > i && p.T[j] > p.T[i] ? clamp((t - p.T[i]) / (p.T[j] - p.T[i]), 0, 1) : 0;
+        const px = X(lerp(p.x[i], p.x[j], f)), py = Y(lerp(p.y[i], p.y[j], f));
+        if (L.trail) {
+          ctx.beginPath();
+          ctx.moveTo(X(p.x[0]), Y(p.y[0]));
+          for (let q = 1; q <= i; q++) ctx.lineTo(X(p.x[q]), Y(p.y[q]));
+          ctx.lineTo(px, py);
+          ctx.strokeStyle = rgba(p.color, 0.8);
+          ctx.lineWidth = 2.25;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          ctx.lineCap = 'butt';
+        }
+        const rr = clamp(0.105 * k, 7.5, 16);
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(-(p.th[i] || 0));
+        ctx.beginPath();
+        ctx.arc(0, 0, rr, 0, TAU);
+        ctx.fillStyle = rgba(p.color, 1);
+        ctx.fill();
+        ctx.strokeStyle = rgba(th.surface, 1);
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(rr * 0.82, 0); ctx.lineTo(-rr * 0.05, -rr * 0.5); ctx.lineTo(-rr * 0.05, rr * 0.5);
+        ctx.closePath();
+        ctx.fillStyle = rgba(th.surface, 1);
+        ctx.fill();
+        ctx.restore();
+        label(p.name, px, py - rr - 9, { weight: 700, size: 12, ink: p.color });
+      }
+      if (tm.self && st.has) label(tm.self, rx, ry - clamp(0.105 * k, 7.5, 16) - 9, { weight: 700, size: 12, ink: th.ink });
     }
 
     // 6. План и текущий путь
@@ -2712,6 +2818,69 @@ function createJournal(host, api) {
   return { build, update, destroy() { ro.disconnect(); root.remove(); } };
 }
 
+/* Переговоры роботов: всё, что они сказали друг другу, кроме ежесекундных показаний датчиков. */
+function createTeamFeed(host, api) {
+  const root = h('section', 'rp-journal rp-team rp-card');
+  const head = h('div', 'rp-card-head');
+  head.appendChild(h('h3', 'rp-card-title', 'Переговоры роботов'));
+  const count = h('span', 'rp-card-count');
+  head.appendChild(count);
+  const list = h('div', 'rp-j-list');
+  list.tabIndex = 0;
+  list.setAttribute('aria-label', 'Сообщения роботов друг другу до текущего момента');
+  const empty = h('div', 'rp-empty', 'Роботы пока молчат.');
+  const foot = h('div', 'rp-team-foot');
+  root.append(head, list, foot);
+  host.appendChild(root);
+  let items = [];
+  let shown = -1;
+  let stick = true;
+
+  function build() {
+    const tm = api.model().team;
+    root.hidden = !tm.on;
+    list.textContent = '';
+    items = tm.msgs.map((m) => {
+      const b = button(`rp-j rp-team-msg rp-team-${m.type}`);
+      b.hidden = true;
+      const who = h('span', 'rp-team-who', m.from);
+      const col = tm.colorOf(m.from);
+      if (col) who.style.color = rgba(col, 1);
+      const bodyEl = h('span', 'rp-j-body');
+      bodyEl.append(who, h('span', 'rp-j-kind', TEAM_KIND[m.type] || m.type), h('span', 'rp-j-text', teamText(m)));
+      b.append(h('span', 'rp-j-t', num(m.t, 1)), bodyEl);
+      b.title = `Перейти к ${sec(m.t)}`;
+      b.addEventListener('click', () => api.seekUser(+m.t));
+      list.appendChild(b);
+      return b;
+    });
+    list.appendChild(empty);
+    shown = -1;
+    update(api.clock.t);
+  }
+
+  function update(t) {
+    const tm = api.model().team;
+    if (!tm.on) return;
+    const kk = upperBound(tm.msgsT, t);
+    setText(foot, `и ещё ${upperBound(tm.obsT, t)} служебных сообщений: раз в секунду каждый шлёт положение, заряд и показания датчика`);
+    if (kk === shown) return;
+    for (let i = 0; i < items.length; i++) {
+      items[i].hidden = i >= kk;
+      items[i].classList.toggle('rp-j-new', i === kk - 1);
+    }
+    shown = kk;
+    empty.hidden = kk > 0;
+    setText(count, `${kk} из ${items.length}`);
+    if (stick) list.scrollTop = list.scrollHeight;
+  }
+  const atEnd = () => list.scrollHeight - list.scrollTop - list.clientHeight < 28;
+  list.addEventListener('wheel', () => requestAnimationFrame(() => { stick = atEnd(); }), { passive: true });
+  list.addEventListener('pointerup', () => requestAnimationFrame(() => { stick = atEnd(); }));
+
+  return { build, update, destroy() { root.remove(); } };
+}
+
 function createHypotheses(host, api) {
   const root = h('section', 'rp-hyps rp-card');
   const head = h('div', 'rp-card-head');
@@ -3436,6 +3605,7 @@ export function mountReplay(container, opts = {}) {
   const statusLine = compact ? createStatusLine(stage, api) : null;
 
   let status = null, charts = null, plan = null, journal = null, hypotheses = null, llm = null, inquiries = null;
+  let teamFeed = null;
   if (!compact) {
     const sideA = h('div', 'rp-side-a');
     const logs = h('div', 'rp-logs');
@@ -3450,6 +3620,7 @@ export function mountReplay(container, opts = {}) {
     sideA.appendChild(chWrap);
     charts = createCharts(chWrap, api);
     plan = createPlan(sideA, api);
+    if (model.team.on) teamFeed = createTeamFeed(logcol, api);
     journal = createJournal(logcol, api);
     llm = createLlm(logcol, api);
     hypotheses = createHypotheses(logs, api);
@@ -3479,6 +3650,7 @@ export function mountReplay(container, opts = {}) {
     if (charts) charts.setCursor(t, st);
     if (plan) plan.update(t);
     if (journal) journal.update(t);
+    if (teamFeed) teamFeed.update(t);
     if (hypotheses) hypotheses.update(t);
     if (llm) llm.update(t);
     if (inquiries) inquiries.update(t);
@@ -3493,6 +3665,7 @@ export function mountReplay(container, opts = {}) {
     timeline.build();
     if (charts) charts.build();
     if (journal) journal.build();
+    if (teamFeed) teamFeed.build();
     if (inquiries) inquiries.build();
     if (inqJump) {
       const nq = model.inquiries.length;
@@ -3567,7 +3740,7 @@ export function mountReplay(container, opts = {}) {
       clock.destroy();
       timeline.destroy();
       arena.destroy();
-      for (const part of [status, charts, plan, journal, hypotheses, llm, inquiries, statusLine, runInfo]) if (part) part.destroy();
+      for (const part of [status, charts, plan, journal, teamFeed, hypotheses, llm, inquiries, statusLine, runInfo]) if (part) part.destroy();
       timeCbs.clear();
       root.remove();
     },

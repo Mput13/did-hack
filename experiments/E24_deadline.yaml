@@ -1,0 +1,58 @@
+title: Срок ожидания ответа модели — модель молчит или отвечает через минуту
+kind: waiting
+question: >-
+  Что происходит с миссией, если модель не отвечает вовсе или отвечает через 60 секунд, — при сроке ожидания
+  llm_wait_deadline_s = 45 с и отказе от модели после двух сроков подряд (llm_wait_give_up = 2)?
+hypothesis: >-
+  По истечении срока вопрос снимается и решает правило: робот не стоит по привязи дольше 45 с подряд, запросы не
+  копятся, миссия заканчивается с возвратом на базу и счётом на уровне правила.
+method: >-
+  Проверка исправления по ревью второго круга, а не новый итог: трудный уровень, первые 20 из тех же сценариев, что
+  в E24 (7001–7020). Имитатор отвечает как правило, но ответ «приходит» через 60 с либо никогда (10^9 с). Варианты:
+  правило (потолок); «стоять и ждать» 60 с (как сейчас, для сравнения); весь план правила и привязь — при ответе
+  через 60 с и при молчащей модели.
+expect: >-
+  При молчащей модели — один запрос и один истёкший срок на прогон; при ответе через 60 с — два запроса, два срока,
+  один просроченный ответ, после чего модель не спрашивается.
+refute: >-
+  Хотя бы один прогон с новым режимом не вернулся на базу из-за ожидания, либо стоянка по привязи дольше срока,
+  либо запросов больше двух.
+arms:
+  - id: rule
+    label: Правило без модели (потолок)
+    agent: adaptive
+  - id: stand60
+    label: Стоять и ждать, 60 с на ответ (как сейчас)
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 60}
+  - id: act60
+    label: Ехать по плану правила, ответ через 60 с
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 60, llm_act_while_waiting: rule}
+  - id: leash60
+    label: Привязь, ответ через 60 с
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 60, llm_act_while_waiting: leash}
+  - id: act_never
+    label: Ехать по плану правила, модель не отвечает
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 1000000000.0, llm_act_while_waiting: rule}
+  - id: leash_never
+    label: Привязь, модель не отвечает
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 1000000000.0, llm_act_while_waiting: leash}
+levels: [hard]
+seeds: 20
+seed_start: 7001
+metrics: [score, hazard_hits, returned, samples_share, idle_s, time, llm_calls, llm_late]
+claims:
+  - {metric: score, a: leash_never, b: stand60, better: higher, text: "привязь при молчащей модели даёт счёт выше, чем стоять и ждать 60 с"}
+  - {metric: score, a: leash60, b: stand60, better: higher, text: "привязь при ответе через 60 с даёт счёт выше, чем стоять и ждать 60 с"}
+  - {metric: score, a: act_never, b: rule, kind: equivalence, margin: 1.0, text: "весь план правила при молчащей модели не отличается от правила (допуск 1 очко)"}
+  - {metric: score, a: leash_never, b: rule, kind: noninferiority, margin: 1.0, text: "привязь при молчащей модели не хуже правила (допуск 1 очко)"}
+  - {metric: returned, a: leash_never, b: stand60, better: higher, text: "возврат на базу чаще, чем у «стоять и ждать 60 с»"}

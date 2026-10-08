@@ -6,11 +6,14 @@
 """
 import math
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+import queue
+import threading
+from concurrent.futures import Future
 from dataclasses import asdict, dataclass, field, replace
 
 import numpy as np
 
+from .calibrate import Calibrator
 from .belief import ChangeDetector, HazardMap, SampleBelief, SensorHealth, SoilModel
 from .config import BASE, Rules
 from .explore import rank_points
@@ -23,6 +26,7 @@ from .nav import (ESCAPE_ROOM, ESCAPE_STOP, ESCAPE_V, FRONT_STOP, CostGraph, Fol
 from .planner import MISSION, HeuristicPlanner, resolve_subgoals
 from .route import survey_route
 from .sensorguard import SensorGuard
+from .waiting import ActWhileWaiting, answer_delay
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,8 @@ class AgentConfig:
     mission_triggers: bool = False    # R13: спрашивать планировщик ещё и после столкновения и на пороге заряда
     mission_battery_floor: float = 30.0   # порог заряда на базе для этого повода (к нему прибавляется дорога домой)
     state_penalties: bool = False     # R13: сообщать планировщику число полученных штрафов (поле penalties в сводке)
+    mission_guard: str = ''           # J1: сторож миссии на модели решений Jev: '' — нет, 'jev', 'jev_llm' (did/mission_guard.py)
+    guard_wait: bool = False          # J1: быстрый симулятор — робот стоит столько, сколько сторож ждал ответов моделей
     search: str = 'belief'            # belief — цели из карты вероятностей; route — фиксированный объезд
     explore: str = 'mass'             # точка разведки: mass — сколько вероятности вокруг; infogain — ожидаемая польза
     learn_soil: bool = True           # оценивать стоимость грунта по расходу батареи и объезжать дорогое
@@ -57,6 +63,14 @@ class AgentConfig:
     llm_min_interval_s: float = 4.0   # не дёргать модель чаще
     llm_wait_s: float = 0.0           # быстрый симулятор: сколько секунд робот стоит, «ожидая ответ модели»
     async_planner: bool = False       # Gazebo: модель думает в отдельном потоке, робот в это время стоит
+    llm_act_while_waiting: str = 'off'   # R16, пока модель думает: off — стоять; rule — ехать по плану правила;
+                                         # leash — без сбора и не дальше llm_wait_leash_m от места вопроса (did/waiting.py)
+    llm_wait_leash_m: float = 0.5     # leash: как далеко от места вопроса можно отъехать до ответа модели
+    llm_wait_deadline_s: float = 45.0    # rule и leash: ответа нет дольше — вопрос снят, решает правило (did/waiting.py)
+    llm_wait_give_up: int = 2         # столько сроков истекло подряд — модель до конца прогона не спрашивается
+    llm_wait_superseded: str = 'apply'   # ответ не совпал с правилом, а план с тех пор уже сменился: apply — перейти
+                                         # на план модели, если он выполним сейчас; drop — отбросить (кроме возврата на базу)
+    llm_wait_measured: bool = False   # быстрый симулятор: ждать столько, сколько модель отвечала на деле, а не llm_wait_s
     localize: bool = True             # поправлять позу одометрии по лидару и карте (did/localize.py)
     inquiry_follow_plan: bool = False  # L3: опыты расследования идут в порядке плана модели-автора, а не по пользе
     guard: bool = True                # не давить в преграду и не ехать вслепую: отъезд по лидару, остановка при
@@ -65,6 +79,8 @@ class AgentConfig:
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
     risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
     foresight_choice: str = 'planner'  # среди прошедших по риску выбирает: planner — правило планировщика, score — счёт
+    calibrate: bool = False           # проверять допущения о законе датчика и расходе на метр (did/calibrate.py)
+    law_known: bool = False           # для сравнения: форма закона датчика берётся из правил (как если бы её сообщили)
     scheme: str = 'rule'              # A1: rule — цель выбирает планировщик; tour — план на весь остаток прогона (did/tour.py)
     scheme_opts: dict = field(default_factory=dict)   # настройки схемы: поля did.tour.Settings
     # --- правки P1 (research/findings/P1.md): по умолчанию выключены; в пресетах *_v2 включена первая
@@ -74,6 +90,9 @@ class AgentConfig:
     fault_wait_s: float = 120.0       # бюджет ожидания датчика на весь прогон, с
     fault_wait_charge: float = 3.0    # и по заряду, ед. (по показаниям батареи)
     straight_paths: bool = False      # спрямлять путь по клеткам там, где прямая проходима и не дороже
+    # --- абляция R12 (research/findings/R12.md): как исследователь выбирает опыт; gain — прежнее поведение
+    inquiry_choice: str = 'gain'      # gain | bits | random | cheapest | fixed | worst | blind (did.science.CHOICES)
+    inquiry_seed: int = 0             # зерно случайного выбора; прогон подставляет номер сценария (did/runner.py)
 
     def to_dict(self):
         return asdict(self)
@@ -90,6 +109,10 @@ PRESETS = {
     # Тот же агент, но точку разведки выбирает по ожидаемой пользе измерений (did/explore.py).
     'adaptive_ig': AgentConfig(name='adaptive_ig', explore='infogain'),
     'adaptive_llm': AgentConfig(name='adaptive_llm', planner='llm'),
+    # Полный агент, который сам проверяет допущения о датчике образцов и расходе на метр (R14).
+    'adaptive_cal': AgentConfig(name='adaptive_cal', calibrate=True),
+    # Верхняя граница для R14: агенту сообщили настоящую форму закона датчика.
+    'adaptive_known': AgentConfig(name='adaptive_known', law_known=True),
     # Исследователь: сам уточняет модель расхода и расследует странности опытами.
     'scientist': AgentConfig(name='scientist', science=True),
     'scientist_llm': AgentConfig(name='scientist_llm', science=True, planner='llm'),
@@ -120,6 +143,8 @@ PRESETS = {
     # Версия 2 (research/findings/P1.md): пережидание сбоя датчика по измеренной цене простоя. Спрямление
     # пути в неё не входит: выигрыша у него не показано. Прежние пресеты не меняются.
     'adaptive_v2': AgentConfig(name='adaptive_v2', fault_wait=True),
+    # adaptive_v2 с самокалибровкой датчика и расхода (R14, второй круг).
+    'adaptive_cal_v2': AgentConfig(name='adaptive_cal_v2', fault_wait=True, calibrate=True),
     'scientist_v2': AgentConfig(name='scientist_v2', science=True, fault_wait=True),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
@@ -127,14 +152,59 @@ PRESETS = {
 }
 
 
+LAW_POWER = {'linear': 1.0, 'quadratic': 2.0, 'sqrt': 0.5}    # показатель p в законе 1 − (d / R) ** p
+
+
 def make_config(name, **overrides):
     return replace(PRESETS[name], **overrides)
+
+
+class DaemonPool:
+    """Один фоновый поток для запросов к планировщику, запросы идут по очереди.
+
+    Поток — «демон»: зависший запрос к модели не мешает программе завершиться. У ThreadPoolExecutor
+    интерпретатор при выходе ждёт рабочий поток, и прогон с неответившей моделью не закрывался (R16).
+    """
+
+    def __init__(self):
+        self._queue = queue.SimpleQueue()
+        self._thread = None
+
+    def submit(self, fn, *args):
+        future = Future()
+        self._queue.put((future, fn, args))
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._work, daemon=True, name='did-planner')
+            self._thread.start()
+        return future
+
+    def shutdown(self, wait=True, timeout=5.0):
+        """Остановить поток после уже поставленных запросов. Зависший запрос не ждём дольше timeout."""
+        thread = self._thread
+        if thread is None or not thread.is_alive():
+            return
+        self._queue.put(None)
+        if wait:
+            thread.join(timeout)
+
+    def _work(self):
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            future, fn, args = item
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(fn(*args))
+            except BaseException as e:      # noqa: BLE001 — исключение уходит в Future, поток живёт дальше
+                future.set_exception(e)
 
 
 class Agent:
 
     SLIP_STOP = 0.04      # м: на столько поправка сдвинула позу против хода за секунду — робот упёрся
-    ALERT_S, ALERT_V = 10.0, 0.12      # осторожная езда после столкновения или сомнения в позе: сколько секунд и м/с
+    ALERT_S, ALERT_V = 10.0, 0.12      # осторожная езда после признака упора или сомнения в позе: сколько секунд и м/с
     LOST_WAIT_S = 5.0     # с: столько робот стоит, потеряв положение, прежде чем переползти на новое место
     # Ни одна остановка не длится без срока: невозврат на базу стоит дороже любой осторожности.
     LOST_MAX_S = 20.0     # с: положение не нашлось за это время — ехать на базу по той позе, какая есть
@@ -156,7 +226,8 @@ class Agent:
         self.home_graph = CostGraph(arena)                  # дорога домой: предпочитает проверенный пол
         self.follower = Follower()
         self.tracker = PoseTracker(arena, enabled=config.localize, verify=config.guard)   # одометрия → поза на карте
-        self.belief = SampleBelief(arena, n_samples, self.rules.sensor_range_m)
+        power = LAW_POWER[self.rules.sensor_law] if config.law_known else 1.0
+        self.belief = SampleBelief(arena, n_samples, self.rules.sensor_range_m, power=power)
         self.soil = SoilModel(arena, self.rules.drain_per_m, self.rules.drain_idle_per_s)
         self.change = ChangeDetector()
         self.health = SensorHealth(self.rules.sensor_sigma)
@@ -178,7 +249,7 @@ class Agent:
         self._returning = False
         self._wait_until = 0.0
         self._future = None
-        self._pool = ThreadPoolExecutor(max_workers=1) if config.async_planner else None
+        self._pool = DaemonPool() if config.async_planner else None
         self._last_llm_t = -1e9
         self._known_cands = []
         self._visited = deque(maxlen=8)                     # недавние точки разведки: [(t, x, y)]
@@ -198,7 +269,8 @@ class Agent:
         self._path_version = -1
         self._path_t = -1e9
         self._escape = None
-        self._stuck = None                                  # (t, x, y, время с командой «вперёд»)
+        self._stuck = None                                  # [t, x, y, время езды вперёд, t и номер такта последнего вызова]
+        self._tick_n = 0                                    # номер такта
         self._scan = None                                   # последний скан лидара: (дальности, шаг лучей, поза в момент скана)
         self._blocked_t = None                              # с какого времени преграда вплотную по курсу
         self._alert_until = -1e9                            # до этого времени робот едет осторожно (см. _alert)
@@ -225,9 +297,12 @@ class Agent:
         self._no_collect_until = -1e9
         self.inv = Investigator(self, knowledge, roles) if config.science else None
         self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
+        self.cal = Calibrator(self) if config.calibrate else None  # проверка допущений о датчике и расходе
         self.guard = SensorGuard(self) if config.fault_wait else None   # пережидание сбоя датчика (did/sensorguard.py)
         self._battery_threshold_triggered = False
         self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
+        # R16: пока модель думает, робот действует по правилу, а ответ сверяет с тем, что уже делает.
+        self.aw = ActWhileWaiting(self) if config.planner == 'llm' and config.llm_act_while_waiting != 'off' else None
         self.tour = None
         if config.scheme != 'rule':                         # A1: другая схема выбора целей и возврата
             from .tour import TourScheme
@@ -241,6 +316,7 @@ class Agent:
     # ======================================================================================
 
     def tick(self, obs, io):
+        self._tick_n += 1
         if self.cfg.localize:              # дальше весь агент работает с позой на карте, а не с одометрией
             x, y, th = self.tracker.update(obs.x, obs.y, obs.th, obs.scan, obs.scan_pose, obs.scan_step)
             obs = replace(obs, x=x, y=y, th=th)
@@ -264,6 +340,8 @@ class Agent:
                 self._ask_at_battery_floor(obs)
         if self._trigger and obs.t >= self._wait_until:
             self._deliberate(obs)
+        if self.aw is not None:
+            self.aw.poll(obs)
         self._waiting = True               # снимается в _act: наследник со своим исполнителем сторожу не подотчётен
         self._act(obs, io)
         self._watch_idle(obs)
@@ -329,7 +407,7 @@ class Agent:
         elif kind == 'sample_collected' and ev.get('collected', 0) > self.collected:
             # Ответ сервиса сбора потерялся, а образец засчитан: повторять сбор нельзя, сверяемся по событию.
             self.collected = ev['collected']
-            self.belief.collected(obs.x, obs.y)
+            self._sample_taken(obs)
             self.journal.add(obs.t, 'action', f'Судья сообщил о сборе образца: всего {self.collected} из {self.n_samples}')
         elif kind == 'collision':
             self.journal.add(obs.t, 'alarm', f'Штраф: столкновение в ({obs.x:.2f}; {obs.y:.2f})', tag='collision')
@@ -339,9 +417,14 @@ class Agent:
                 self._request_plan('collision')
 
     def _alert(self, t):
-        """Только что было столкновение или сомнение в позе: ALERT_S секунд робот едет медленнее и не
-        подходит к преградам вплотную по лидару. В спокойной езде этой осторожности нет — она не меняет
-        прогонов, в которых ничего не случилось."""
+        """Есть признак упора или неверной позы: ALERT_S секунд робот едет медленнее и не подходит к
+        преградам вплотную по лидару. В спокойной езде этой осторожности нет — она не меняет прогонов,
+        в которых ничего не случилось.
+
+        Осторожность не бесплатна: прогон сдвигается на секунды, и робот встречает изменения среды в
+        других местах. Поэтому повод — только признак беды: штраф «столкновение» (любой: расстояние по
+        карте не доказывает, что упора не было), проскальзывание колёс, сканы не сходятся с картой, робот
+        ехал и не сдвинулся, простой дольше срока. Стоянка по своей воле поводом не считается (G3)."""
         if self.cfg.guard:
             self._alert_until = t + self.ALERT_S
 
@@ -397,12 +480,14 @@ class Agent:
     def _on_segment(self, x0, y0, x1, y1, spent, dt, t):
         ds = math.hypot(x1 - x0, y1 - y0)
         self._trail_point(x1, y1, t)
-        ratio = (spent - self.rules.drain_idle_per_s * dt) / (self.rules.drain_per_m * ds)
+        ratio = (spent - self.rules.drain_idle_per_s * dt) / (self._floor_per_m() * ds)
         if t <= self._skip_soil_until or ratio > 7.0:
             # Скачок расхода — это не грунт (разовая потеря в опасной зоне), в карту стоимостей не идёт.
             if ratio > 7.0 and t - self._hazard_t > 3.0:
                 self.journal.add(t, 'alarm', f'Скачок расхода батареи: {spent:.1f} ед. на {ds * 100:.0f} см пути')
             return
+        if self.cal:
+            self.cal.segment(ds, spent - self.rules.drain_idle_per_s * dt, t, x1, y1)
         if not self.cfg.learn_soil:
             return
         ratio, predicted, conf = self.soil.observe(x0, y0, x1, y1, spent, dt)
@@ -455,7 +540,7 @@ class Agent:
                                  f'{self.health.nominal:.2f}', tag='sensor_degraded')
                 self.journal.open(obs.t, 'sensor', 'датчик образцов неисправен, его показаниям нельзя верить как раньше',
                                   'снизить вес показаний и следить, вернётся ли разброс к норме')
-                self.belief.relax(0.25)
+                self._belief_do('relax', 0.25)
                 self._request_plan('sensor_degraded')
             elif change == 'recovered':
                 self.journal.close(obs.t, 'sensor', 'confirmed',
@@ -468,7 +553,23 @@ class Agent:
             z, sigma = self.inv.reading(z, obs, sigma)
             if z is None:                      # датчик залип: карту образцов не трогаем
                 return
-        self.belief.update(obs.x, obs.y, z, sigma)
+        if self.cal:
+            self.cal.reading(obs, z, sigma)
+        else:
+            self.belief.update(obs.x, obs.y, z, sigma)
+
+    def _belief_do(self, method, *args):
+        """Операция над картой образцов; при самокалибровке — над всеми картами-гипотезами."""
+        if self.cal:
+            self.cal.do(method, *args)
+        else:
+            getattr(self.belief, method)(*args)
+
+    def _sample_taken(self, obs):
+        if self.cal:
+            self.cal.collected(obs)        # заодно сверяет закон датчика по показаниям на подъезде
+        else:
+            self.belief.collected(obs.x, obs.y)
 
     def _soil_hypotheses(self, t):
         if not self.cfg.learn_soil:
@@ -540,7 +641,11 @@ class Agent:
 
     def _per_m(self):
         """Заряд на метр пути: номинал из правил либо то, что исследователь выяснил сам (груз, повороты)."""
-        return self.inv.per_meter() if self.inv else self.rules.drain_per_m
+        return self.inv.per_meter() if self.inv else self._floor_per_m()
+
+    def _floor_per_m(self):
+        """Заряд на метр обычного пола: допущение из правил либо измеренное при самокалибровке."""
+        return self.cal.per_m if self.cal else self.rules.drain_per_m
 
     def _affordable(self, battery, cost_to, cost_back):
         if self.cfg.dynamic_reserve:
@@ -561,7 +666,7 @@ class Agent:
         elif obs.battery <= need:
             reason = (f'заряд {obs.battery:.1f} ед., дорога домой оценивается в {home:.1f} ед.'
                       if self.cfg.dynamic_reserve else f'заряд {obs.battery:.1f} ед. опустился до порога {need:.0f}')
-        elif self.rules.time_limit_s - obs.t <= home / self.rules.drain_per_m / 0.15 + 10.0:
+        elif self.rules.time_limit_s - obs.t <= home / self._floor_per_m() / 0.15 + 10.0:
             reason = 'время прогона на исходе'
         if reason:
             self._go_home(obs.t, reason)
@@ -661,7 +766,7 @@ class Agent:
                  for i, z in enumerate(self.soil.zones())] if self.cfg.learn_soil else []
         alarms = [e['text'] for e in self.journal.entries[-12:] if e['kind'] == 'alarm' and obs.t - e['t'] <= 30.0]
         penalties = {'penalties': {'total': sum(self._penalties.values()), **self._penalties}} \
-            if self.cfg.state_penalties else {}
+            if self.cfg.state_penalties or self.cfg.mission_guard else {}
         return {
             'mission': self.cfg.mission,
             'trigger': trigger,
@@ -714,6 +819,8 @@ class Agent:
             if self.tour is not None:
                 ahead = self.tour.plan(obs, state)                               # порядок обхода всех целей сразу
             use_llm =self.cfg.planner == 'llm' and obs.t - self._last_llm_t >= self.cfg.llm_min_interval_s
+            if self.aw is not None and ahead is None and self.aw.decide(obs, state, trigger, use_llm):
+                return
             planner = self.planner if use_llm or self.cfg.planner != 'llm' else HeuristicPlanner()
             if use_llm:
                 self._last_llm_t = obs.t
@@ -722,8 +829,10 @@ class Agent:
                 self._future = self._pool.submit(planner.plan, state)
                 return
             plan = ahead or planner.plan(state)
-            if use_llm and self.cfg.llm_wait_s:
-                self._wait_until = obs.t + self.cfg.llm_wait_s
+            if use_llm and (self.cfg.llm_wait_s or self.cfg.llm_wait_measured):
+                self._wait_until = obs.t + answer_delay(self.cfg, plan)
+            if self.cfg.guard_wait and plan.get('wait_s'):
+                self._wait_until = obs.t + plan['wait_s']
         else:
             if not self._future.done():
                 return
@@ -756,6 +865,8 @@ class Agent:
             self.journal.add(t, 'llm', f"Модель предполагает: {h['statement']}. Как проверить: {h.get('test', '—')}")
         if self.rec:
             self.rec.add_plan(t, source, trigger, reasoning, subgoals)
+            if plan.get('guard'):                # J1: что ответил сторож миссии и сколько ждал
+                self.rec.plans[-1].update(guard=plan['guard'], wait_s=round(plan.get('wait_s') or 0.0, 3))
             if plan.get('exchanges'):
                 # Решение с участием модели: что выбрало бы правило на том же состоянии и итоги шагов способа.
                 rule = resolve_subgoals(HeuristicPlanner().plan(state)['subgoals'], state)
@@ -793,6 +904,10 @@ class Agent:
             self._escape = None
             self._path_goal = None
             self._stuck = None
+        if self.aw is not None and self.aw.hold(obs):
+            self._waiting = True               # ожидание ответа модели: у него свой срок, сторожу простоя не подотчётно
+            self.mode = 'think'                # leash: до ответа модели дальше не еду и не собираю
+            return self._command(io, 0.0, 0.0)
         if self.inv and self.inv.act(obs, io):
             self._waiting = True
             return                             # такт занят опытом расследования
@@ -955,7 +1070,7 @@ class Agent:
         if here >= self.cfg.collect_confidence:
             if any(t - mt < 30.0 and math.hypot(obs.x - mx, obs.y - my) < 0.35 for mt, mx, my in self._misses):
                 # Здесь только что был промах: второй раз на том же месте не пробуем, как бы ни был уверен датчик.
-                self.belief.clear_disc(obs.x, obs.y, 0.35, factor=0.02)
+                self._belief_do('clear_disc', obs.x, obs.y, 0.35, 0.02)
                 self.journal.close(t, sg.get('key'), 'refuted', 'на этом месте уже был промах, повторно не собираю')
                 return self._end_subgoal(obs, io, 'candidate_lost')
             return self._try_collect(sg, obs, io, here)
@@ -981,7 +1096,7 @@ class Agent:
         ok, _ = io.collect()
         if ok:
             self.collected += 1
-            self.belief.collected(obs.x, obs.y)
+            self._sample_taken(obs)
             if self.inv:
                 self.inv.on_collect(obs.t)
             self.journal.add(obs.t, 'action', f'Сбор в ({obs.x:.2f}; {obs.y:.2f}) при уверенности {confidence:.0%}: '
@@ -990,12 +1105,15 @@ class Agent:
             self._end_subgoal(obs, io, 'sample_collected')
             self._wait_until = obs.t + 1.0      # дать датчику показать следующий ближайший образец
         else:
-            self.belief.clear_disc(obs.x, obs.y, 0.30, factor=0.05)
+            if self.cal:
+                self.cal.missed(obs)
+            else:
+                self.belief.clear_disc(obs.x, obs.y, 0.30, factor=0.05)
             self._misses.append((obs.t, obs.x, obs.y))
             if sum(1 for mt, _, _ in self._misses if obs.t - mt < 25.0) >= 2:
                 # Два промаха подряд: карте образцов сейчас верить нельзя. Пауза в сборе и частичный сброс карты.
                 self._no_collect_until = obs.t + 15.0
-                self.belief.relax(0.4)
+                self._belief_do('relax', 0.4)
                 self.journal.add(obs.t, 'alarm', 'Два ложных сбора подряд: 15 секунд не собираю и заново набираю показания')
             if self.inv:
                 self.inv.on_miss(obs)
@@ -1091,12 +1209,25 @@ class Agent:
         return False
 
     def _watch_stuck(self, obs, v):
+        """Робот ехал вперёд и не сдвинулся: за окно 4 с команда «вперёд» действовала не меньше 3 с, а
+        сдвиг меньше 3 см. Вызывается прямо перед выдачей новой команды езды к цели.
+
+        Время езды копится по команде, которая действовала на прошедшем интервале, — по выданной на
+        прошлом такте (_last_cmd), и только если прошлый такт тоже был ездой к цели. Стоянка по своей воле
+        (ответ модели, опыт расследования, набор показаний, ожидание датчика) в езду не попадает, сколько
+        бы она ни длилась; опоздавший такт при команде «вперёд» засчитывается целиком: робот всё это
+        время ехал (G3). При guard=False счёт прежний, по новой команде: это рука «как до G2».
+        """
         if self._stuck is None:
-            self._stuck = [obs.t, obs.x, obs.y, 0.0, obs.t]
+            self._stuck = [obs.t, obs.x, obs.y, 0.0, obs.t, self._tick_n]
         s = self._stuck
-        if v > 0.03:
+        if self.cfg.guard:
+            drove = s[5] == self._tick_n - 1 and self._last_cmd[0] > 0.03
+        else:
+            drove = v > 0.03
+        if drove:
             s[3] += obs.t - s[4]
-        s[4] = obs.t
+        s[4], s[5] = obs.t, self._tick_n
         if obs.t - s[0] >= 4.0:
             if s[3] >= 3.0 and math.hypot(obs.x - s[1], obs.y - s[2]) < 0.03:
                 self.journal.add(obs.t, 'alarm', f'Робот не движется в ({obs.x:.2f}; {obs.y:.2f}): отъезжаю назад')

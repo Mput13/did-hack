@@ -828,7 +828,7 @@ def llm_stats(exchanges):
 def make_client(kind='mock', **opts):
     """Клиент модели с интерфейсом chat(messages, temperature, max_tokens, schema=None) -> ChatReply.
 
-    mock   — имитатор в процессе: seed, faults, script (см. did.llm_mock.MockResponder);
+    mock   — имитатор в процессе: seed, faults, script, temperament, deviate (см. did.llm_mock.MockResponder);
     http   — адрес, ключ и модель из DID_LLM_* (окружение или .env); opts — параметры ChatClient
              поверх окружения, например model или timeout_s;
     ollama — локальный сервер Ollama: model ('qwen2.5:3b'), base_url, timeout_s (120), use_schema (True).
@@ -845,7 +845,8 @@ def make_client(kind='mock', **opts):
     if kind == 'mock':
         from .llm_mock import MockResponder
         return LocalClient(MockResponder(seed=opts.get('seed', 0), faults=opts.get('faults'),
-                                         script=opts.get('script'), temperament=opts.get('temperament')))
+                                         script=opts.get('script'), temperament=opts.get('temperament'),
+                                         deviate=opts.get('deviate', 0.0)))
     if kind == 'codex':
         from .llm_codex import CodexCliClient
         return CodexCliClient(**opts)

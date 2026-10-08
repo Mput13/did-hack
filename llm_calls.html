@@ -1,104 +1,189 @@
-<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DID Hack — настоящие вызовы языковой модели</title>
-<style>
- :root { --acc: #eb6834; --ok: #1baf7a; }
- body { margin: 0 auto; max-width: 1100px; padding: 18px 22px 60px; font: 15.5px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--foreground, #14181c); background: var(--background, #fff); }
- h1 { font-size: 26px; margin: 8px 0 6px; } h2 { font-size: 20px; margin: 38px 0 8px; } h2:first-child { margin-top: 0; } h3 { font-size: 17px; margin: 0 0 6px; } h4 { font-size: 13.5px; margin: 12px 0 5px; color: var(--muted-foreground, #5b6570); }
- p { margin: 7px 0; } .sub, .note { color: var(--muted-foreground, #5b6570); } .note { font-size: 14px; }
- code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: rgba(127,127,127,.13); padding: 1px 5px; border-radius: 4px; }
- pre { font: 12.5px/1.45 ui-monospace, Menlo, monospace; background: rgba(127,127,127,.09); border-radius: 8px; padding: 10px 12px; margin: 0; white-space: pre-wrap; word-break: break-word; overflow: auto; }
- pre.tall { max-height: 440px; }
- table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
- th, td { text-align: left; padding: 6px 10px 6px 0; vertical-align: top; border-top: 1px solid rgba(127,127,127,.25); }
- th { font-size: 12.5px; color: var(--muted-foreground, #5b6570); border-top: 0; }
- .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
- .call { border: 1px solid rgba(127,127,127,.3); border-radius: 12px; padding: 16px 18px; margin: 16px 0; }
- .meta { font-size: 13.5px; color: var(--muted-foreground, #5b6570); margin: 6px 0 10px; }
- .after { margin-top: 12px; } details { margin: 8px 0 12px; } summary { cursor: pointer; font-size: 14px; color: var(--muted-foreground, #5b6570); }
- .tag { font-size: 12.5px; font-weight: 650; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
- .tag.llm { background: rgba(235,104,52,.16); color: #b8481b; } .tag.rule { background: rgba(127,127,127,.18); }
- .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; margin: 12px 0; } .flow div { flex: 1 1 150px; border: 1px solid rgba(127,127,127,.35); border-radius: 10px; padding: 9px 11px; font-size: 13.5px; }
- .flow div b { display: block; font-size: 14.5px; } .flow .hl { border-color: var(--acc); border-width: 2px; }
-</style></head><body>
-<h1>Настоящие вызовы языковой модели</h1>
-<p class="sub">Что именно агент отправляет модели, что получает в ответ и что делает с ответом. Всё ниже — из записей настоящих прогонов, без пересказа.</p>
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Что получает языковая модель и что она отвечает</title><style>
+:root{color-scheme:light;--page:#f5f5f2;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#8b8a84;--line:#e3e2dd;
+--floor:#e9e8e2;--code:#f0efeb;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--crit:#d03b3b;--warn:#fab219;--good:#0ca30c;--accent:#eb6834}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){color-scheme:dark;--page:#111110;--surface:#1a1a19;
+--ink:#ffffff;--ink2:#c3c2b7;--muted:#8e8d85;--line:#34342f;--floor:#2b2b27;--code:#232320;--s1:#3987e5;--s2:#d95926;--s3:#199e70;
+--crit:#e66767;--accent:#d95926}}
+:root[data-theme="dark"]{color-scheme:dark;--page:#111110;--surface:#1a1a19;--ink:#ffffff;--ink2:#c3c2b7;--muted:#8e8d85;
+--line:#34342f;--floor:#2b2b27;--code:#232320;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--crit:#e66767;--accent:#d95926}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--page);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 22px 80px}
+h1{font-size:34px;line-height:1.15;margin:8px 0 10px}
+h2{font-size:26px;line-height:1.2;margin:2px 0 6px}
+h3{font-size:18px;margin:26px 0 8px}
+p{margin:8px 0}
+ul{margin:6px 0;padding-left:22px}
+li{margin:5px 0}
+a{color:var(--s1)}
+code{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);border-radius:8px;padding:12px 14px;overflow-x:auto;margin:10px 0}
+pre code{background:none;padding:0;white-space:pre}
+.lead{font-size:18px;color:var(--ink2);max-width:780px}
+.note{font-size:14px;color:var(--ink2);border-left:3px solid var(--line);padding:2px 0 2px 12px;margin:12px 0}
+section{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 26px 24px;margin:22px 0}
+.num{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.tag{color:var(--ink2);font-size:14.5px;margin:0 0 12px}
+.answer{background:var(--code);border-radius:10px;padding:12px 16px;margin:10px 0 4px}
+.say{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:10px 14px;margin:18px 0 0}
+.cap{font-size:13.5px;color:var(--ink2);margin:4px 0 12px}
+.where{font-size:13.5px;color:var(--ink2);margin-top:14px}
+table{border-collapse:collapse;width:100%;font-size:14.5px;margin:8px 0}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--ink2);font-size:13px}
+td.c{white-space:nowrap}
+.sum td:first-child{white-space:nowrap}
+details.tbl{margin:2px 0 6px;font-size:13.5px}
+details.tbl summary{cursor:pointer;color:var(--ink2)}
+details.tbl td{font-variant-numeric:tabular-nums}
+.qa details{border-bottom:1px solid var(--line);padding:9px 0}
+.qa summary{cursor:pointer;font-weight:600}
+.qa p{color:var(--ink2);margin:6px 0 2px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13.5px;color:var(--ink2);margin:8px 0 4px}
+.key{display:inline-flex;align-items:center;gap:6px}
+.key i{display:inline-block;flex:none}
+i.dot{width:10px;height:10px;border-radius:50%}
+i.dot.s1{background:var(--s1)} i.dot.s2{background:var(--s2)} i.dot.s3{background:var(--s3)}
+i.dot.got{background:var(--ink)} i.dot.open{border:1.5px solid var(--ink);background:var(--surface)}
+i.sq{width:12px;height:12px;border-radius:3px}
+i.sq.soil{background:color-mix(in srgb,var(--ink) 16%,transparent)}
+i.sq.haz{border:1.5px solid var(--crit);background:color-mix(in srgb,var(--crit) 14%,transparent);border-radius:50%}
+i.sq.base{border:1.5px solid var(--ink);background:var(--surface)}
+i.sq.fault{background:color-mix(in srgb,var(--warn) 45%,transparent)}
+i.sq.waitb{background:color-mix(in srgb,var(--ink) 30%,transparent)}
+i.x{color:var(--crit);font-style:normal;font-weight:700;line-height:1}
+i.ln{width:20px;height:3px;border-radius:2px}
+i.ln.s1{background:var(--s1)} i.ln.s2{background:var(--s2)} i.ln.hl{background:var(--ink)} i.ln.ban{background:var(--crit)}
+svg{display:block;width:100%;height:auto}
+svg.chart{margin:6px 0 2px}
+.grid{stroke:var(--line);stroke-width:1}
+.zero{stroke:var(--muted);stroke-width:1}
+.tick{fill:var(--ink2);font-size:12px;text-anchor:middle;font-variant-numeric:tabular-nums}
+.tick.e{text-anchor:end}
+.rl{fill:var(--ink);font-size:13.5px;text-anchor:end}
+.rs{fill:var(--muted);font-size:11.5px;text-anchor:end}
+.val{fill:var(--ink);font-size:12.5px;font-variant-numeric:tabular-nums}
+.ci{stroke-width:2;stroke-linecap:round}
+.pt{stroke:var(--surface);stroke-width:2}
+.pt.bare{stroke:none}
+.s1{stroke:var(--s1)} .s2{stroke:var(--s2)} .s3{stroke:var(--s3)} .mut{stroke:var(--muted)}
+circle.s1{fill:var(--s1);stroke:var(--surface)} circle.s2{fill:var(--s2);stroke:var(--surface)}
+circle.s3{fill:var(--s3);stroke:var(--surface)} circle.mut{fill:var(--muted);stroke:var(--surface)}
+.conn{stroke:var(--line);stroke-width:3;stroke-linecap:round}
+.hit{fill:transparent}
+.ln{fill:none;stroke-width:1.6;stroke-linejoin:round}
+.band.fault{fill:color-mix(in srgb,var(--warn) 22%,transparent)}
+.band.wait{fill:color-mix(in srgb,var(--ink) 14%,transparent)}
+.bl{fill:var(--ink2);font-size:11.5px;text-anchor:middle}
+.cross{stroke:var(--muted);stroke-width:1}
+.tsname{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;margin:12px 0 0}
+.maps{display:grid;gap:14px;margin:10px 0 4px}
+.maps.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.maps.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:720px){.maps.two,.maps.three{grid-template-columns:1fr}}
+figure.map{margin:0;border:1px solid var(--line);border-radius:10px;padding:8px 8px 10px;background:var(--surface)}
+figure.map figcaption{font-size:13px;line-height:1.35;padding:6px 4px 0}
+figure.map figcaption span{display:block;color:var(--ink2)}
+.floor{fill:var(--floor)}
+.soil{fill:color-mix(in srgb,var(--ink) 15%,transparent)}
+.haz{fill:color-mix(in srgb,var(--crit) 14%,transparent);stroke:var(--crit);stroke-width:1.5}
+.zl{fill:var(--ink2);font-size:10.5px;text-anchor:middle;pointer-events:none}
+.ban{stroke:var(--crit);stroke-width:2}
+.tr{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.tr.hl{stroke:var(--ink);stroke-width:3.2}
+.sm{fill:var(--surface);stroke:var(--ink);stroke-width:1.6}
+.sm.got{fill:var(--ink);stroke:var(--surface);stroke-width:2}
+.pen circle{fill:var(--surface);opacity:.85}
+.pen path{stroke:var(--crit);stroke-width:2.2;stroke-linecap:round}
+.base{fill:var(--surface);stroke:var(--ink);stroke-width:1.6}
+.end{stroke-width:2}
+.dialog{display:grid;gap:10px;margin:10px 0}
+.turn .who{font-size:13px;font-weight:600;color:var(--ink2)}
+.turn pre{margin:4px 0 0}
+.turn pre code{white-space:pre-wrap;word-break:break-word}
+ol.journal{list-style:none;padding:0;margin:10px 0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+ol.journal li{display:grid;grid-template-columns:62px 112px 1fr;gap:10px;padding:7px 12px;margin:0;border-bottom:1px solid var(--line);font-size:14px}
+ol.journal li:last-child{border-bottom:none}
+ol.journal .t{color:var(--muted);font-variant-numeric:tabular-nums}
+ol.journal .k{color:var(--ink2);font-weight:600}
+ol.journal li.k-inquiry{background:color-mix(in srgb,var(--s1) 7%,transparent)}
+.tv{font-size:12.5px;white-space:nowrap;border-radius:4px;padding:1px 6px;margin-left:4px;border:1px solid var(--line);color:var(--ink2)}
+.tv.ok::before{content:"✓ "} .tv.bad::before{content:"✗ "}
+.toc a{text-decoration:none}
+#tip{position:fixed;z-index:10;max-width:340px;background:var(--ink);color:var(--surface);font-size:13px;line-height:1.4;
+padding:7px 10px;border-radius:7px;pointer-events:none}
+@media print{section{break-inside:avoid-page}.qa details{display:block}}
 
-<h2>0. На чём построен агент и где в нём модель</h2>
-<p>Агент — обычная программа на Python, написанная командой; готовых «агентных» библиотек в ней нет. Десять раз в секунду она делает одно и то же:</p>
-<div class="flow">
- <div><b>1. Читает датчики</b>одометрия, лидар, батарея, датчик образцов</div>
- <div><b>2. Обновляет картину мира</b>где могут быть образцы, сколько стоит пол, где опасно. Это расчёт, без модели</div>
- <div class="hl"><b>3. Если есть повод — выбирает подцели</b>собран образец, пропал кандидат, сбой датчика… Здесь стоит сменная деталь: <b>правило</b> или <b>языковая модель</b></div>
- <div><b>4. Едет</b>путь по карте, скорости, объезд, сбор, возврат по заряду. Без модели</div>
-</div>
-<table><thead><tr><th style="width:20%">Вариант агента</th><th style="width:30%">Кто выбирает подцели</th><th>Что ещё</th></tr></thead><tbody>
-<tr><td><code>fixed</code></td><td>никто: маршрут посчитан заранее</td><td>база для сравнения</td></tr>
-<tr><td><code>adaptive</code></td><td>правило: «уверенность, делённая на цену пути»</td><td>основной агент, на нём посчитано большинство опытов</td></tr>
-<tr><td><code>scientist</code></td><td>правило</td><td>плюс расследования странностей: объяснения и опыты выбирает код</td></tr>
-<tr><td><code>adaptive_llm</code></td><td><span class="tag llm">модель</span>, при отказе — правило</td><td>всё остальное как у <code>adaptive</code></td></tr>
-<tr><td><code>scientist_llm</code></td><td><span class="tag llm">модель</span>, при отказе — правило</td><td>та же модель — автор и критик в расследованиях</td></tr>
-</tbody></table>
-<p>Вызов модели — это один HTTP-запрос к серверу МАИ в формате, общем для большинства моделей. Вот код, который его делает (файлы <code>did/planner.py</code> и <code>did/llm.py</code>):</p>
-<div class="cols"><div><h4>Планировщик: спросить модель, проверить ответ, при отказе — правило</h4><pre class="tall">    def plan(self, state):
-        self.calls += 1
-        mission = self.mission or state.get(&#x27;mission&#x27;) or MISSION
-        if self.strategy != &#x27;single&#x27;:
-            from .llm_orchestration import plan_orchestrated
-            out = plan_orchestrated(self.strategy, self.client, {**state, &#x27;mission&#x27;: mission}, self.fallback,
-                                    system_prompt=self.system_prompt, max_repairs=self.max_repairs)
-            self.failures += out[&#x27;source&#x27;] == &#x27;fallback&#x27;
-            return out
-        from .llm import request_plan
-        res = request_plan(self.client, {**state, &#x27;mission&#x27;: mission}, system_prompt=self.system_prompt,
-                           max_repairs=self.max_repairs)
-        if res.plan is None:
-            self.failures += 1
-            out = self.fallback.plan(state)
-            out.update(source=&#x27;fallback&#x27;, exchanges=res.exchanges, error=res.error)
-            out[&#x27;reasoning&#x27;] = f&#x27;Модель не дала пригодного плана ({res.error}). Решение по правилу: &#x27; + out[&#x27;reasoning&#x27;]
-            return out
-        plan = res.plan.model_dump(exclude_none=True)
-        return {&#x27;reasoning&#x27;: plan[&#x27;reasoning&#x27;], &#x27;hypotheses&#x27;: plan.get(&#x27;hypotheses&#x27;, []),
-                &#x27;subgoals&#x27;: plan[&#x27;subgoals&#x27;], &#x27;source&#x27;: &#x27;llm&#x27;, &#x27;exchanges&#x27;: res.exchanges, &#x27;error&#x27;: None}</pre></div>
-<div><h4>Сам запрос</h4><pre class="tall">    def _post(self, content):
-        &quot;&quot;&quot;(код, заголовки, тело ответа). timeout_s ограничивает весь ответ, а не только паузы в нём:
-        иначе сервер, который в ожидании очереди шлёт пустые строки, держит вызов минутами.&quot;&quot;&quot;
-        deadline = time.monotonic() + self.timeout_s
-        with self._http.stream(&#x27;POST&#x27;, self.base_url + &#x27;/chat/completions&#x27;, content=content,
-                               headers={&#x27;Content-Type&#x27;: &#x27;application/json&#x27;}) as r:
-            chunks = []
-            for chunk in r.iter_bytes():
-                chunks.append(chunk)
-                if time.monotonic() &gt; deadline:
-                    raise httpx.ReadTimeout(&#x27;ответ не уложился в срок&#x27;)
-            return r.status_code, r.headers, b&#x27;&#x27;.join(chunks).decode(&#x27;utf-8&#x27;, &#x27;replace&#x27;)</pre></div></div>
-<h2>1. Один прогон целиком: когда агент спрашивал модель</h2>
-<p>Агент <code>adaptive_llm</code>, модель <b>qwen3.8-flash-next</b> с сервера МАИ, трудный сценарий 1001. Робот собрал
-5 образцов из 7, вернулся на базу, счёт 66.8. За прогон длиной 85 секунд
-было 14 решений о том, куда ехать дальше: 10 приняла модель, 4 — правило.
-Модель в сумме думала 159 секунд; в этом прогоне время раздумий роботу не засчитывалось.</p>
-<table><thead><tr><th>Время</th><th>Повод</th><th>Кто решал</th><th>Ответ за</th><th>Первая подцель</th><th>Обоснование (начало)</th></tr></thead>
-<tbody><tr><td>0,0 с</td><td>старт</td><td><span class="tag llm">модель</span></td><td>10 с</td><td>разведка E1</td><td>Старт: заряд 60.0, собрано 0 из 7, кандидатов нет — разведка. E1: unseen_share 0.13, путь 5.0, возврат 5.0 — лучший балл 0.13/6.0. E2: 0.12/5.6 — втор</td></tr>
-<tr><td>2,1 с</td><td>найден кандидат</td><td><span class="tag rule">правило</span></td><td>—</td><td>проверить кандидата C1</td><td>Кандидат C1 в (-1.6; 1.1): уверенность 39%, дорога 3.8 ед., возврат оттуда 4.2 ед. при заряде 58.9.</td></tr>
-<tr><td>4,1 с</td><td>кандидат не подтвердился</td><td><span class="tag llm">модель</span></td><td>11 с</td><td>проверить кандидата C1</td><td>Собрано 0 из 7, заряд 58.3, возврат 1.3 — запас огромный. C1: confidence 0.64, путь 4.5, возврат 4.3, суммарно ~8.8 — очень выгодно. После C1 разведка</td></tr>
-<tr><td>15,6 с</td><td>образец собран</td><td><span class="tag llm">модель</span></td><td>15 с</td><td>проверить кандидата C1</td><td>Собрано 1 из 7, заряд 54.1, возврат 3.9 — запас большой. Все 4 кандидата feasible. C1: confidence 0.36, путь 4.8, возврат 6.0, отношение 0.36/5.3=0.06</td></tr>
-<tr><td>27,7 с</td><td>образец собран</td><td><span class="tag llm">модель</span></td><td>8 с</td><td>разведка E1</td><td>Собрано 2 из 7, кандидатов нет — разведка. E1: unseen 0.29, путь 5.0, возврат 12.8; E2: unseen 0.23, путь 3.9, возврат 7.8. Заряд 49.8 при возврате 7.</td></tr>
-<tr><td>28,8 с</td><td>найден кандидат</td><td><span class="tag rule">правило</span></td><td>—</td><td>проверить кандидата C2</td><td>Кандидат C2 в (0.6; 0.7): уверенность 37%, дорога 4.1 ед., возврат оттуда 7.6 ед. при заряде 49.3.</td></tr>
-<tr><td>38,1 с</td><td>образец собран</td><td><span class="tag llm">модель</span></td><td>13 с</td><td>разведка E1</td><td>Собрано 3 из 7, заряд 45.1, возврат 6.8 — запас большой. Кандидатов нет, датчик показывает 0.12 — образцы в неразведанных зонах. E1: unseen 27%, путь </td></tr>
-<tr><td>40,7 с</td><td>найден кандидат</td><td><span class="tag rule">правило</span></td><td>—</td><td>проверить кандидата C1</td><td>Кандидат C1 в (0.8; 2.2): уверенность 37%, дорога 4.4 ед., возврат оттуда 11.5 ед. при заряде 44.2.</td></tr>
-<tr><td>42,2 с</td><td>кандидат не подтвердился</td><td><span class="tag llm">модель</span></td><td>13 с</td><td>проверить кандидата C1</td><td>Собрано 3 из 7, заряд 43.8, возврат 7.9 — запас большой. Кандидат потерян, но C1 (conf 0.46, путь 4.3, возврат 9.1) и C2 (conf 0.36, путь 4.7) оба fea</td></tr>
-<tr><td>51,4 с</td><td>образец собран</td><td><span class="tag llm">модель</span></td><td>22 с</td><td>проверить кандидата C3</td><td>Собрано 4 из 7, заряд 39.7, возврат 8.4 — запас большой. C3: confidence 0.38, путь 5.2, возврат 4.6, отношение 0.38/5.7=0.067 — лучший кандидат. Затем</td></tr>
-<tr><td>52,0 с</td><td>кандидат не подтвердился</td><td><span class="tag rule">правило</span></td><td>—</td><td>проверить кандидата C1</td><td>Кандидат C1 в (2.2; -0.5): уверенность 61%, дорога 9.3 ед., возврат оттуда 10.7 ед. при заряде 39.5.</td></tr>
-<tr><td>60,8 с</td><td>датчик сбоит</td><td><span class="tag llm">модель</span></td><td>28 с</td><td>проверить кандидата C1</td><td>Собрано 4 из 7, заряд 35.3, возврат 8.3. Датчик degraded (шум 0.13). C1: confidence 0.6 ≥ 0.5 — допустим, путь 7.2, возврат 4.4, запас 23.7. C2 исключ</td></tr>
-<tr><td>66,7 с</td><td>штраф: опасная зона</td><td><span class="tag llm">модель</span></td><td>22 с</td><td>проверить кандидата C1</td><td>Заряд 29.7, возврат 6.2, запас 23.5. C1: confidence 0.62 &gt; 0.5 (degraded-датчик не блокирует), путь 4.6 + возврат 4.7 = 9.3, остаток 20.4 &gt; 6.2. Робот</td></tr>
-<tr><td>75,7 с</td><td>образец собран</td><td><span class="tag llm">модель</span></td><td>17 с</td><td>на базу</td><td>Заряд 22.0, возврат 4.3. Все цели feasible: false: даже E3 (10.5+10.8=21.3) превышает заряд без запаса. Собрано 5 из 7, но доехать до оставшихся и вер</td></tr></tbody></table>
-<p class="note">Почему часть решений принимает правило: если модель спрашивали меньше четырёх секунд назад, на новый повод отвечает
-правило — иначе робот стоял бы в ожидании почти весь прогон. Это настройка <code>llm_min_interval_s</code>.</p>
-<h2>2. Вызовы целиком</h2>
-<p>Каждый запрос состоит из двух частей. Первая — постоянная инструкция: кто ты, что означают поля сводки, как выбирать, в каком виде
-отвечать. Вторая — сводка состояния на этот момент. Инструкция одна и та же во всех вызовах планировщика:</p>
-<details><summary>Инструкция модели целиком (5487 знаков)</summary><pre># Роль
+main{max-width:1120px}
+.duo{display:grid;grid-template-columns:minmax(0,430px) minmax(0,1fr);gap:22px;align-items:start;margin-top:10px}
+.duo h3:first-child{margin-top:0}
+@media (max-width:860px){.duo,.raw,.retry{grid-template-columns:1fr !important}}
+table.facts th{width:132px;white-space:nowrap;color:var(--ink2);font-weight:600;font-size:13.5px}
+table.facts td{font-size:14.5px}
+.said{background:var(--code);border-radius:10px;padding:10px 14px}
+.said p{margin:2px 0 10px}
+.lbl{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink2);margin-top:4px}
+ol.steps{list-style:none;padding:0;margin:4px 0 10px}
+ol.steps li{display:flex;align-items:center;gap:8px;margin:4px 0}
+.stepb{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--s2);color:#fff;font-size:12px;font-weight:700;flex:none}
+ul.hyp{margin:4px 0 2px;padding-left:18px;font-size:14.5px}
+.test{color:var(--ink2)}
+.muted{color:var(--muted)}
+.raw,.retry{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:6px}
+.retry{margin-top:14px}
+.pane .who{font-size:13px;font-weight:700;color:var(--ink2);margin-bottom:4px}
+.pane pre{margin:0;max-height:430px;overflow:auto}
+.pane pre code{white-space:pre-wrap;word-break:break-word;font-size:12.5px}
+.pane.bad pre{border:1.5px solid var(--crit)}
+.prompt pre{max-height:520px;overflow:auto}
+.prompt pre code{white-space:pre-wrap}
+.robot{fill:var(--s1);stroke:var(--surface);stroke-width:2.5}
+.cand{fill:var(--surface);stroke:var(--ink);stroke-width:2;stroke-dasharray:3 2}
+.ep{fill:var(--surface);stroke:var(--muted);stroke-width:1.5}
+.idl{fill:var(--ink2);font-size:10.5px;text-anchor:middle}
+.plan{stroke:var(--s2);stroke-width:2.5;stroke-linecap:round}
+.stepc{fill:var(--s2);stroke:var(--surface);stroke-width:2}
+.stepn{fill:#fff;font-size:11px;font-weight:700;text-anchor:middle;pointer-events:none}
+.banarea{fill:color-mix(in srgb,var(--crit) 13%,transparent)}
+.toc2 a{display:block;padding:3px 0;text-decoration:none}
+i.sq.cand{border:1.5px dashed var(--ink);border-radius:50%;background:var(--surface)}
+i.sq.ep{border:1.5px solid var(--muted);background:var(--surface)}
+i.dot.robot{background:var(--s1)}
+</style></head>
+<body><svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="arena" overflow="visible">
+<path class="floor" d="M-1.10 -2.50h2.20v0.054h-2.20zM-1.10 -2.45h2.25v0.054h-2.25zM-1.15 -2.40h2.35v0.054h-2.35zM-1.15 -2.35h2.35v0.054h-2.35zM-1.20 -2.30h2.45v0.054h-2.45zM-1.20 -2.25h2.45v0.054h-2.45zM-1.25 -2.20h2.55v0.054h-2.55zM-1.30 -2.15h2.60v0.054h-2.60zM-1.30 -2.10h2.65v0.054h-2.65zM-1.35 -2.05h2.70v0.054h-2.70zM-1.35 -2.00h2.80v0.054h-2.80zM1.65 -2.00h0.05v0.054h-0.05zM-1.75 -1.95h3.55v0.054h-3.55zM-1.80 -1.90h3.65v0.054h-3.65zM-1.80 -1.85h3.65v0.054h-3.65zM-1.85 -1.80h3.75v0.054h-3.75zM-1.85 -1.75h3.80v0.054h-3.80zM-1.90 -1.70h3.85v0.054h-3.85zM-1.90 -1.65h3.90v0.054h-3.90zM-1.95 -1.60h3.95v0.054h-3.95zM-2.00 -1.55h4.05v0.054h-4.05zM-2.00 -1.50h4.05v0.054h-4.05zM-2.05 -1.45h4.15v0.054h-4.15zM-2.05 -1.40h4.20v0.054h-4.20zM-2.10 -1.35h4.25v0.054h-4.25zM-2.15 -1.30h4.35v0.054h-4.35zM-2.15 -1.25h1.05v0.054h-1.05zM-1.05 -1.25h1.10v0.054h-1.10zM0.10 -1.25h1.10v0.054h-1.10zM1.25 -1.25h0.95v0.054h-0.95zM-2.20 -1.20h1.05v0.054h-1.05zM-0.90 -1.20h0.80v0.054h-0.80zM0.10 -1.20h0.90v0.054h-0.90zM1.25 -1.20h1.00v0.054h-1.00zM-2.20 -1.15h0.95v0.054h-0.95zM-0.90 -1.15h0.75v0.054h-0.75zM0.20 -1.15h0.75v0.054h-0.75zM1.30 -1.15h0.95v0.054h-0.95zM-2.25 -1.10h1.00v0.054h-1.00zM-0.90 -1.10h0.75v0.054h-0.75zM0.20 -1.10h0.75v0.054h-0.75zM1.30 -1.10h1.00v0.054h-1.00zM-2.25 -1.05h1.00v0.054h-1.00zM-0.90 -1.05h0.75v0.054h-0.75zM0.20 -1.05h0.75v0.054h-0.75zM1.30 -1.05h1.05v0.054h-1.05zM-2.30 -1.00h1.10v0.054h-1.10zM-0.95 -1.00h0.85v0.054h-0.85zM0.15 -1.00h0.85v0.054h-0.85zM1.25 -1.00h1.10v0.054h-1.10zM-2.30 -0.95h1.15v0.054h-1.15zM-1.00 -0.95h0.95v0.054h-0.95zM0.00 -0.95h1.10v0.054h-1.10zM1.15 -0.95h1.25v0.054h-1.25zM-2.35 -0.90h4.75v0.054h-4.75zM-2.40 -0.85h4.85v0.054h-4.85zM-2.40 -0.80h4.90v0.054h-4.90zM-2.45 -0.75h4.95v0.054h-4.95zM-2.45 -0.70h5.00v0.054h-5.00zM-2.50 -0.65h5.05v0.054h-5.05zM-2.55 -0.60h5.15v0.054h-5.15zM-2.55 -0.55h5.15v0.054h-5.15zM-2.60 -0.50h5.20v0.054h-5.20zM-2.60 -0.45h5.15v0.054h-5.15zM-2.65 -0.40h5.20v0.054h-5.20zM-2.70 -0.35h5.20v0.054h-5.20zM-2.70 -0.30h5.20v0.054h-5.20zM-2.75 -0.25h5.20v0.054h-5.20zM-2.75 -0.20h5.20v0.054h-5.20zM-2.80 -0.15h1.60v0.054h-1.60zM-0.95 -0.15h0.85v0.054h-0.85zM0.15 -0.15h0.85v0.054h-0.85zM1.15 -0.15h1.25v0.054h-1.25zM-2.85 -0.10h1.60v0.054h-1.60zM-0.90 -0.10h0.75v0.054h-0.75zM0.20 -0.10h0.75v0.054h-0.75zM1.25 -0.10h1.10v0.054h-1.10zM-2.85 -0.05h1.60v0.054h-1.60zM-0.90 -0.05h0.75v0.054h-0.75zM0.20 -0.05h0.75v0.054h-0.75zM1.25 -0.05h1.10v0.054h-1.10zM-2.85 0.00h1.60v0.054h-1.60zM-0.90 0.00h0.75v0.054h-0.75zM0.20 0.00h0.75v0.054h-0.75zM1.30 0.00h1.05v0.054h-1.05zM-2.85 0.05h1.60v0.054h-1.60zM-0.90 0.05h0.75v0.054h-0.75zM0.20 0.05h0.75v0.054h-0.75zM1.30 0.05h1.05v0.054h-1.05zM-2.80 0.10h1.60v0.054h-1.60zM-0.95 0.10h0.85v0.054h-0.85zM0.15 0.10h0.85v0.054h-0.85zM1.25 0.10h1.15v0.054h-1.15zM-2.75 0.15h5.20v0.054h-5.20zM-2.75 0.20h5.20v0.054h-5.20zM-2.70 0.25h5.20v0.054h-5.20zM-2.70 0.30h5.20v0.054h-5.20zM-2.65 0.35h5.20v0.054h-5.20zM-2.65 0.40h5.20v0.054h-5.20zM-2.60 0.45h5.20v0.054h-5.20zM-2.55 0.50h5.15v0.054h-5.15zM-2.55 0.55h5.15v0.054h-5.15zM-2.55 0.60h5.10v0.054h-5.10zM-2.50 0.65h5.05v0.054h-5.05zM-2.45 0.70h4.95v0.054h-4.95zM-2.45 0.75h4.95v0.054h-4.95zM-2.40 0.80h4.85v0.054h-4.85zM-2.40 0.85h4.80v0.054h-4.80zM-2.35 0.90h2.35v0.054h-2.35zM0.10 0.90h0.95v0.054h-0.95zM1.20 0.90h1.20v0.054h-1.20zM-2.35 0.95h1.15v0.054h-1.15zM-0.95 0.95h0.85v0.054h-0.85zM0.15 0.95h0.85v0.054h-0.85zM1.25 0.95h1.10v0.054h-1.10zM-2.30 1.00h1.05v0.054h-1.05zM-0.90 1.00h0.75v0.054h-0.75zM0.20 1.00h0.80v0.054h-0.80zM1.30 1.00h1.05v0.054h-1.05zM-2.25 1.05h1.00v0.054h-1.00zM-0.90 1.05h0.75v0.054h-0.75zM0.20 1.05h0.75v0.054h-0.75zM1.30 1.05h1.00v0.054h-1.00zM-2.25 1.10h1.00v0.054h-1.00zM-0.90 1.10h0.75v0.054h-0.75zM0.20 1.10h0.80v0.054h-0.80zM1.30 1.10h0.95v0.054h-0.95zM-2.20 1.15h1.05v0.054h-1.05zM-0.90 1.15h0.75v0.054h-0.75zM0.20 1.15h0.80v0.054h-0.80zM1.30 1.15h0.95v0.054h-0.95zM-2.15 1.20h1.10v0.054h-1.10zM-0.95 1.20h0.90v0.054h-0.90zM0.15 1.20h0.90v0.054h-0.90zM1.25 1.20h0.95v0.054h-0.95zM-2.15 1.25h4.35v0.054h-4.35zM-2.10 1.30h4.25v0.054h-4.25zM-2.10 1.35h4.25v0.054h-4.25zM-2.05 1.40h4.15v0.054h-4.15zM-2.00 1.45h4.05v0.054h-4.05zM-2.00 1.50h4.05v0.054h-4.05zM-1.95 1.55h3.95v0.054h-3.95zM-1.95 1.60h3.95v0.054h-3.95zM-1.90 1.65h3.85v0.054h-3.85zM-1.85 1.70h3.80v0.054h-3.80zM-1.85 1.75h3.75v0.054h-3.75zM-1.80 1.80h3.70v0.054h-3.70zM-1.80 1.85h3.65v0.054h-3.65zM-1.75 1.90h3.55v0.054h-3.55zM-1.75 1.95h3.15v0.054h-3.15zM-1.30 2.00h2.70v0.054h-2.70zM-1.30 2.05h2.65v0.054h-2.65zM-1.25 2.10h2.60v0.054h-2.60zM-1.20 2.15h2.50v0.054h-2.50zM-1.20 2.20h2.45v0.054h-2.45zM-1.15 2.25h2.40v0.054h-2.40zM-1.15 2.30h2.35v0.054h-2.35zM-1.10 2.35h2.30v0.054h-2.30zM-1.05 2.40h2.20v0.054h-2.20zM-1.05 2.45h2.15v0.054h-2.15z"/></symbol><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+<path d="M0 0L10 5L0 10z" style="fill:var(--s2)"/></marker></defs></svg>
+<main>
+<div class="num">DID Hack · робот-исследователь</div>
+<h1>Что получает языковая модель и что она отвечает</h1>
+<p class="lead">Десять настоящих обменов из прогонов робота. В каждом: ситуация на карте, что робот написал модели, что она
+ответила — и оба текста дословно.</p>
+
+<section><h2>Как это устроено</h2>
+<ul>
+<li><b>Когда робот обращается к модели.</b> Не постоянно, а по поводу: старт, найден кандидат, образец собран, кандидат пропал,
+датчик сбоит, штраф, заряд у порога. Между поводами робот едет сам.</li>
+<li><b>Что он ей пишет.</b> Два сообщения. Первое — постоянная инструкция (она ниже, целиком). Второе — состояние на эту секунду
+в виде JSON: заряд, сколько собрано, кандидаты, точки разведки, известные грунты и зоны, датчик, тревоги.</li>
+<li><b>Что она отвечает.</b> Один JSON: рассуждение, гипотезы и список из 1–3 подцелей. Подцель — это «куда ехать дальше», а не
+команда колёсам.</li>
+<li><b>Чего модель не видит.</b> Где на самом деле лежат образцы и какие грунты ещё не найдены. На картах ниже нарисовано только
+то, что было в сообщении.</li>
+<li><b>Что делает код с ответом.</b> Проверяет: цель есть в списке, заряда хватает, формат верный. Не прошло — отправляет модели
+текст ошибки (ситуация 10). Потом едет к первой подцели обычным кодом.</li>
+</ul>
+<div class="legend"><span class="key"><i class="dot robot"></i>робот</span><span class="key"><i class="sq cand"></i>кандидат: возможно, образец, и уверенность</span>
+<span class="key"><i class="sq ep"></i>точка разведки</span><span class="key"><i class="sq soil"></i>известный дорогой грунт</span>
+<span class="key"><i class="sq haz"></i>известная опасная зона</span><span class="key"><i class="sq base"></i>база</span>
+<span class="key"><span class="stepb">1</span>подцели из ответа модели, по порядку</span></div>
+<h3>Ситуации</h3><div class="toc2"><a href="#c1">1. Старт: робот ещё ничего не знает</a><a href="#c2">2. Датчик нашёл место, похожее на образец</a><a href="#c3">3. Образец собран — что дальше</a><a href="#c4">4. Датчик сбоит, кандидат пропал</a><a href="#c5">5. Штраф: робот заехал в опасную зону</a><a href="#c6">6. Другая миссия: «собери ровно два образца»</a><a href="#c7">7. Другая миссия: «не заезжай в правую половину»</a><a href="#c8">8. Другая миссия: «после первого штрафа — домой»</a><a href="#c9">9. Другая миссия: «сохрани не меньше 30 единиц заряда»</a><a href="#c10">10. Модель ошиблась: пустой ответ и повторный запрос</a></div>
+</section>
+
+<section class="prompt"><h2>Постоянная инструкция модели</h2>
+<p class="tag">Первое сообщение каждого обмена, одно и то же. Меняется только строка «Миссия». Файл: <code>did/prompts/</code>.</p>
+<pre><code># Роль
 Ты — планировщик верхнего уровня автономного робота-исследователя (TurtleBot3) на закрытой арене.
 Ты выбираешь, куда ехать дальше. Скоростью, объездом препятствий, сбором образца и аварийным
 возвратом по заряду управляет исполнитель, не ты.
@@ -183,12 +268,14 @@
 Ответ:
 {&quot;reasoning&quot;: &quot;Заряд 9.0 при возврате 5.1: ни C1, ни E1 не достижимы с запасом (feasible: false). Еду на базу, пока хватает заряда.&quot;,
  &quot;hypotheses&quot;: [],
- &quot;subgoals&quot;: [{&quot;type&quot;: &quot;return_base&quot;}]}</pre></details><div class="call">
-<h3>Вызов на старте: куда ехать, когда ещё ничего не известно</h3>
-<p>Первая секунда прогона. Кандидатов нет, поэтому в сводке только точки разведки (<code>explore_points</code>) с долей неосмотренной площади и ценой пути до каждой.</p>
-<div class="meta">агент <code>adaptive_llm</code> · модель qwen3.8-flash-next · сценарий hard-1001 · время 0,0 с · ответ за <b>10.2 с</b> · запрос 2312 токенов, ответ 712</div>
-<div class="cols">
- <div><h4>Агент → модель: сводка состояния</h4><pre class="tall">{
+ &quot;subgoals&quot;: [{&quot;type&quot;: &quot;return_base&quot;}]}</code></pre></section>
+
+<section id="c1"><div class="num">Ситуация 1</div><h2>Старт: робот ещё ничего не знает</h2><p class="tag">Кандидатов нет, датчик молчит. Модели остаётся выбрать, какой участок разведать первым.</p>
+<div class="duo"><figure class="map"><svg viewBox="0 0 294 270" role="img" aria-label="Что известно модели"><use href="#arena" transform="translate(153.4,135.2) scale(52.0,-52.0)"/><line x1="49.4" y1="161.2" x2="114.4" y2="148.2" class="plan" marker-end="url(#arrow)"/><line x1="114.4" y1="148.2" x2="88.4" y2="96.2" class="plan" marker-end="url(#arrow)"/><rect x="109.4" y="143.2" width="10" height="10" rx="2" class="ep" data-tip="E1: точка разведки, не проверено 12% окрестности, дорога 3,4 ед."/><text x="114.4" y="139.2" class="idl">E1</text><rect x="83.4" y="91.2" width="10" height="10" rx="2" class="ep" data-tip="E2: точка разведки, не проверено 13% окрестности, дорога 3,9 ед."/><text x="88.4" y="87.2" class="idl">E2</text><rect x="135.4" y="169.2" width="10" height="10" rx="2" class="ep" data-tip="E3: точка разведки, не проверено 13% окрестности, дорога 4,6 ед."/><text x="140.4" y="165.2" class="idl">E3</text><rect x="109.4" y="195.2" width="10" height="10" rx="2" class="ep" data-tip="E4: точка разведки, не проверено 13% окрестности, дорога 4,3 ед."/><text x="114.4" y="191.2" class="idl">E4</text><g data-tip="Подцель 1: разведать: E1"><circle cx="125.4" cy="159.2" r="8" class="stepc"/><text x="125.4" y="163.2" class="stepn">1</text></g><g data-tip="Подцель 2: разведать: E2"><circle cx="99.4" cy="107.2" r="8" class="stepc"/><text x="99.4" y="111.2" class="stepn">2</text></g><rect x="44.4" y="156.2" width="10" height="10" rx="2" class="base" data-tip="База"/><circle cx="49.4" cy="161.2" r="6" class="robot" data-tip="Робот: (−2,0; −0,5)"/></svg><figcaption><b>Карта по сообщению модели</b>
+<span>Только то, что робот ей написал. Стрелки и номера — её ответ.</span></figcaption></figure>
+<div><h3>Что модель узнала</h3><table class="facts"><tr><th>Миссия</th><td>Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.</td></tr><tr><th>Повод</th><td>старт прогона <code>start</code></td></tr><tr><th>Время</th><td>0 с из 600</td></tr><tr><th>Заряд</th><td>60,0 из 60; до базы нужно 0,0</td></tr><tr><th>Образцы</th><td>собрано 0 из 5</td></tr><tr><th>Датчик</th><td>показание 0,29, исправен</td></tr><tr><th>Кандидаты</th><td>нет</td></tr><tr><th>Точки разведки</th><td>E1, E2, E3, E4</td></tr></table><h3>Что она ответила</h3><div class="said"><div class="lbl">Почему (поле reasoning)</div><p>Старт, заряд 60.0, собрано 0 из 5. Кандидатов нет — датчик показывает 0.29, ниже порога 0.35. Разведка: E1 (unseen 0.12, путь 3.4, возврат 3.4) даёт лучший балл 0.12/4.4=0.027; E2 (0.13/4.9=0.027) — вторая. Грунтов и опасностей нет, запас заряда большой.</p><div class="lbl">Подцели</div><ol class="steps"><li><span class="stepb">1</span>разведать: E1</li><li><span class="stepb">2</span>разведать: E2</li></ol><div class="lbl">Гипотезы модели</div><ul class="hyp"><li><b>Датчик 0.29 указывает на образец в радиусе ~1 м от базы, но ниже порога детекции</b><br><span class="test">Проверка: доехать до E1 и наблюдать, растёт ли reading при приближении к (-0.75;-0.25)</span></li></ul></div></div></div>
+<h3>Дословно</h3>
+<div class="raw"><div class="pane"><div class="who">Робот → модель</div><pre><code>{
  &quot;mission&quot;: &quot;Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.&quot;,
  &quot;trigger&quot;: &quot;start&quot;,
  &quot;time_s&quot;: 0.0,
@@ -205,65 +292,65 @@
  },
  &quot;samples&quot;: {
   &quot;collected&quot;: 0,
-  &quot;total&quot;: 7
+  &quot;total&quot;: 5
  },
  &quot;return_cost&quot;: 0.0,
  &quot;candidates&quot;: [],
  &quot;explore_points&quot;: [
   {
    &quot;id&quot;: &quot;E1&quot;,
-   &quot;x&quot;: -0.25,
-   &quot;y&quot;: -1.25,
-   &quot;unseen_share&quot;: 0.13,
-   &quot;cost_to&quot;: 5.0,
-   &quot;cost_back&quot;: 5.0,
+   &quot;x&quot;: -0.75,
+   &quot;y&quot;: -0.25,
+   &quot;unseen_share&quot;: 0.12,
+   &quot;cost_to&quot;: 3.4,
+   &quot;cost_back&quot;: 3.4,
    &quot;feasible&quot;: true
   },
   {
    &quot;id&quot;: &quot;E2&quot;,
-   &quot;x&quot;: -0.25,
-   &quot;y&quot;: -0.25,
-   &quot;unseen_share&quot;: 0.12,
-   &quot;cost_to&quot;: 4.6,
-   &quot;cost_back&quot;: 4.6,
+   &quot;x&quot;: -1.25,
+   &quot;y&quot;: 0.75,
+   &quot;unseen_share&quot;: 0.13,
+   &quot;cost_to&quot;: 3.9,
+   &quot;cost_back&quot;: 3.9,
    &quot;feasible&quot;: true
   },
   {
    &quot;id&quot;: &quot;E3&quot;,
-   &quot;x&quot;: -0.75,
-   &quot;y&quot;: -1.75,
-   &quot;unseen_share&quot;: 0.12,
-   &quot;cost_to&quot;: 4.8,
-   &quot;cost_back&quot;: 4.8,
+   &quot;x&quot;: -0.25,
+   &quot;y&quot;: -0.75,
+   &quot;unseen_share&quot;: 0.13,
+   &quot;cost_to&quot;: 4.6,
+   &quot;cost_back&quot;: 4.6,
    &quot;feasible&quot;: true
   },
   {
    &quot;id&quot;: &quot;E4&quot;,
    &quot;x&quot;: -0.75,
-   &quot;y&quot;: 0.75,
-   &quot;unseen_share&quot;: 0.12,
-   &quot;cost_to&quot;: 4.6,
-   &quot;cost_back&quot;: 4.6,
+   &quot;y&quot;: -1.25,
+   &quot;unseen_share&quot;: 0.13,
+   &quot;cost_to&quot;: 4.3,
+   &quot;cost_back&quot;: 4.3,
    &quot;feasible&quot;: true
   }
  ],
  &quot;soil_zones&quot;: [],
  &quot;hazards&quot;: [],
  &quot;sensor&quot;: {
-  &quot;reading&quot;: 0.17,
+  &quot;reading&quot;: 0.29,
   &quot;noise&quot;: 0.05,
   &quot;status&quot;: &quot;ok&quot;
  },
  &quot;recent_events&quot;: [],
  &quot;alarms&quot;: [],
  &quot;open_hypotheses&quot;: []
-}</pre></div>
- <div><h4>Модель → агент: план</h4><pre class="tall">{
- &quot;reasoning&quot;: &quot;Старт: заряд 60.0, собрано 0 из 7, кандидатов нет — разведка. E1: unseen_share 0.13, путь 5.0, возврат 5.0 — лучший балл 0.13/6.0. E2: 0.12/5.6 — вторая по выгоде, ближе к E1. Запас заряда огромный, время 0/600. Грунтов и опасностей нет.&quot;,
+}</code></pre></div>
+<div class="pane"><div class="who">Модель → робот</div><pre><code>{
+ &quot;reasoning&quot;: &quot;Старт, заряд 60.0, собрано 0 из 5. Кандидатов нет — датчик показывает 0.29, ниже порога 0.35. Разведка: E1 (unseen 0.12, путь 3.4, возврат 3.4) даёт лучший балл 0.12/4.4=0.027; E2 (0.13/4.9=0.027) — вторая. Грунтов и опасностей нет, запас заряда большой.&quot;,
  &quot;hypotheses&quot;: [
   {
-   &quot;statement&quot;: &quot;Образцы распределены по арене неравномерно; в секторе x∈[-1,0], y∈[-2,-1] их плотность выше средней&quot;,
-   &quot;test&quot;: &quot;собрать данные с датчика в E1 и E3 и сравнить среднее reading с E2/E4&quot;
+   &quot;statement&quot;: &quot;Датчик 0.29 указывает на образец в радиусе ~1 м от базы, но ниже порога детекции&quot;,
+   &quot;test&quot;: &quot;доехать до E1 и наблюдать, растёт ли reading при приближении к (-0.75;-0.25)&quot;
   }
  ],
  &quot;subgoals&quot;: [
@@ -276,125 +363,117 @@
    &quot;target&quot;: &quot;E2&quot;
   }
  ]
-}</pre></div>
-</div>
-<p class="after"><b>Что сделал код.</b> Ответ прошёл проверку формы (это план по схеме) и смысла (такие точки есть, заряда хватает). Исполнитель повёл робота к первой подцели сам: путь, скорости и объезд препятствий модель не задаёт.</p>
-</div>
-<div class="call">
-<h3>Вызов при сбое датчика</h3>
-<p>На 61-й секунде агент заметил, что датчик образцов ведёт себя не так, как предсказывает карта. В сводке это видно в полях <code>sensor</code> и <code>alarms</code>.</p>
-<div class="meta">агент <code>adaptive_llm</code> · модель qwen3.8-flash-next · сценарий hard-1001 · время 60,8 с · ответ за <b>28.4 с</b> · запрос 2509 токенов, ответ 2299</div>
-<div class="cols">
- <div><h4>Агент → модель: сводка состояния</h4><pre class="tall">{
+}</code></pre></div></div>
+<p class="where">qwen3.8-flash-next · ответ за 10 с · 2312 токенов на входе, 751 на выходе · файл кэша <code>0a81e0a6…</code></p></section><section id="c2"><div class="num">Ситуация 2</div><h2>Датчик нашёл место, похожее на образец</h2><p class="tag">В списке появился кандидат. Модель должна решить, ехать ли к нему и что делать после.</p>
+<div class="duo"><figure class="map"><svg viewBox="0 0 294 270" role="img" aria-label="Что известно модели"><use href="#arena" transform="translate(153.4,135.2) scale(52.0,-52.0)"/><circle cx="169.0" cy="67.6" r="10.4" class="soil" data-tip="S1: дорогой грунт ×1,5, измерено на 0,2 м пути, suspected"/><text x="169.0" y="71.1" class="zl">×1,5</text><line x1="182.5" y1="78.0" x2="249.6" y2="143.0" class="plan" marker-end="url(#arrow)"/><line x1="249.6" y1="143.0" x2="244.4" y2="148.2" class="plan" marker-end="url(#arrow)"/><line x1="244.4" y1="148.2" x2="218.4" y2="122.2" class="plan" marker-end="url(#arrow)"/><rect x="239.4" y="143.2" width="10" height="10" rx="2" class="ep" data-tip="E1: точка разведки, не проверено 55% окрестности, дорога 4,7 ед."/><text x="244.4" y="139.2" class="idl">E1</text><rect x="265.4" y="117.2" width="10" height="10" rx="2" class="ep" data-tip="E2: точка разведки, не проверено 38% окрестности, дорога 5,2 ед."/><text x="270.4" y="113.2" class="idl">E2</text><rect x="213.4" y="169.2" width="10" height="10" rx="2" class="ep" data-tip="E3: точка разведки, не проверено 38% окрестности, дорога 5,4 ед."/><text x="218.4" y="165.2" class="idl">E3</text><rect x="213.4" y="117.2" width="10" height="10" rx="2" class="ep" data-tip="E4: точка разведки, не проверено 24% окрестности, дорога 2,8 ед."/><text x="218.4" y="113.2" class="idl">E4</text><circle cx="249.6" cy="143.0" r="6.5" class="cand" data-tip="C1: возможно, образец; уверенность 40%, дорога 4,6 ед., оттуда домой 10,0 ед."/><text x="249.6" y="133.0" class="idl">C1 · 40%</text><g data-tip="Подцель 1: подъехать и собрать: C1"><circle cx="260.6" cy="154.0" r="8" class="stepc"/><text x="260.6" y="158.0" class="stepn">1</text></g><g data-tip="Подцель 2: разведать: E1"><circle cx="255.4" cy="159.2" r="8" class="stepc"/><text x="255.4" y="163.2" class="stepn">2</text></g><g data-tip="Подцель 3: разведать: E4"><circle cx="229.4" cy="133.2" r="8" class="stepc"/><text x="229.4" y="137.2" class="stepn">3</text></g><rect x="44.4" y="156.2" width="10" height="10" rx="2" class="base" data-tip="База"/><circle cx="182.5" cy="78.0" r="6" class="robot" data-tip="Робот: (0,6; 1,1)"/></svg><figcaption><b>Карта по сообщению модели</b>
+<span>Только то, что робот ей написал. Стрелки и номера — её ответ.</span></figcaption></figure>
+<div><h3>Что модель узнала</h3><table class="facts"><tr><th>Миссия</th><td>Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.</td></tr><tr><th>Повод</th><td>датчик нашёл место, похожее на образец <code>candidate_found</code></td></tr><tr><th>Время</th><td>35 с из 600</td></tr><tr><th>Заряд</th><td>44,3 из 60; до базы нужно 10,8</td></tr><tr><th>Образцы</th><td>собрано 3 из 7</td></tr><tr><th>Датчик</th><td>показание 0,10, исправен</td></tr><tr><th>Кандидаты</th><td>C1 (40%)</td></tr><tr><th>Точки разведки</th><td>E1, E2, E3, E4</td></tr></table><h3>Что она ответила</h3><div class="said"><div class="lbl">Почему (поле reasoning)</div><p>Собрано 3 из 7, заряд 44.3, возврат 10.8 — запас большой. C1: confidence 0.4, путь 4.6, возврат 10.0, feasible. Выгода 0.4/5.1≈0.08. Потом E1: не проверено 55%, путь 4.7, возврат 9.7, выгода 0.55/5.7≈0.10. Время 35/600 — рано домой, 4 образца ещё не найдены.</p><div class="lbl">Подцели</div><ol class="steps"><li><span class="stepb">1</span>подъехать и собрать: C1</li><li><span class="stepb">2</span>разведать: E1</li><li><span class="stepb">3</span>разведать: E4</li></ol><div class="lbl">Гипотезы модели</div><ul class="hyp"><li><b>C1 (confidence 0.4) — реальный образец на границе чувствительности датчика; подъезд поднимет reading выше 0.3</b><br><span class="test">Проверка: подъехать к C1 и зафиксировать reading датчика до и после остановки</span></li><li><b>В области E1 (55% не проверено) скрыто не менее одного образца, раз 4 из 7 ещё не собраны</b><br><span class="test">Проверка: доехать до E1 и просканировать окрестность на наличие reading &gt; 0.3</span></li></ul></div></div></div>
+<h3>Дословно</h3>
+<div class="raw"><div class="pane"><div class="who">Робот → модель</div><pre><code>{
  &quot;mission&quot;: &quot;Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.&quot;,
- &quot;trigger&quot;: &quot;sensor_degraded&quot;,
- &quot;time_s&quot;: 60.8,
+ &quot;trigger&quot;: &quot;candidate_found&quot;,
+ &quot;time_s&quot;: 35.1,
  &quot;time_limit_s&quot;: 600.0,
- &quot;battery&quot;: 35.3,
+ &quot;battery&quot;: 44.3,
  &quot;battery_start&quot;: 60.0,
  &quot;pose&quot;: {
-  &quot;x&quot;: 0.78,
-  &quot;y&quot;: 0.88
+  &quot;x&quot;: 0.56,
+  &quot;y&quot;: 1.1
  },
  &quot;base&quot;: {
   &quot;x&quot;: -2.0,
   &quot;y&quot;: -0.5
  },
  &quot;samples&quot;: {
-  &quot;collected&quot;: 4,
+  &quot;collected&quot;: 3,
   &quot;total&quot;: 7
  },
- &quot;return_cost&quot;: 8.3,
+ &quot;return_cost&quot;: 10.8,
  &quot;candidates&quot;: [
   {
    &quot;id&quot;: &quot;C1&quot;,
-   &quot;x&quot;: -1.85,
-   &quot;y&quot;: 1.15,
-   &quot;confidence&quot;: 0.6,
-   &quot;cost_to&quot;: 7.2,
-   &quot;cost_back&quot;: 4.4,
-   &quot;feasible&quot;: true
-  },
-  {
-   &quot;id&quot;: &quot;C2&quot;,
-   &quot;x&quot;: 2.25,
-   &quot;y&quot;: -0.55,
-   &quot;confidence&quot;: 0.35,
-   &quot;cost_to&quot;: 5.2,
-   &quot;cost_back&quot;: 10.7,
+   &quot;x&quot;: 1.85,
+   &quot;y&quot;: -0.15,
+   &quot;confidence&quot;: 0.4,
+   &quot;cost_to&quot;: 4.6,
+   &quot;cost_back&quot;: 10.0,
    &quot;feasible&quot;: true
   }
  ],
  &quot;explore_points&quot;: [
   {
    &quot;id&quot;: &quot;E1&quot;,
-   &quot;x&quot;: -1.25,
-   &quot;y&quot;: 1.25,
-   &quot;unseen_share&quot;: 0.34,
-   &quot;cost_to&quot;: 6.0,
-   &quot;cost_back&quot;: 5.5,
-   &quot;feasible&quot;: true
-  },
-  {
-   &quot;id&quot;: &quot;E2&quot;,
    &quot;x&quot;: 1.75,
    &quot;y&quot;: -0.25,
-   &quot;unseen_share&quot;: 0.26,
-   &quot;cost_to&quot;: 3.9,
+   &quot;unseen_share&quot;: 0.55,
+   &quot;cost_to&quot;: 4.7,
    &quot;cost_back&quot;: 9.7,
    &quot;feasible&quot;: true
   },
   {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: 2.25,
+   &quot;y&quot;: 0.25,
+   &quot;unseen_share&quot;: 0.38,
+   &quot;cost_to&quot;: 5.2,
+   &quot;cost_back&quot;: 11.4,
+   &quot;feasible&quot;: true
+  },
+  {
    &quot;id&quot;: &quot;E3&quot;,
-   &quot;x&quot;: -1.75,
-   &quot;y&quot;: 0.75,
-   &quot;unseen_share&quot;: 0.34,
-   &quot;cost_to&quot;: 6.6,
-   &quot;cost_back&quot;: 3.4,
+   &quot;x&quot;: 1.25,
+   &quot;y&quot;: -0.75,
+   &quot;unseen_share&quot;: 0.38,
+   &quot;cost_to&quot;: 5.4,
+   &quot;cost_back&quot;: 8.4,
    &quot;feasible&quot;: true
   },
   {
    &quot;id&quot;: &quot;E4&quot;,
-   &quot;x&quot;: 2.25,
-   &quot;y&quot;: -0.75,
-   &quot;unseen_share&quot;: 0.26,
-   &quot;cost_to&quot;: 5.6,
-   &quot;cost_back&quot;: 10.9,
+   &quot;x&quot;: 1.25,
+   &quot;y&quot;: 0.25,
+   &quot;unseen_share&quot;: 0.24,
+   &quot;cost_to&quot;: 2.8,
+   &quot;cost_back&quot;: 9.0,
    &quot;feasible&quot;: true
   }
  ],
- &quot;soil_zones&quot;: [],
+ &quot;soil_zones&quot;: [
+  {
+   &quot;id&quot;: &quot;S1&quot;,
+   &quot;x&quot;: 0.3,
+   &quot;y&quot;: 1.3,
+   &quot;radius&quot;: 0.2,
+   &quot;mult&quot;: 1.5,
+   &quot;evidence_m&quot;: 0.2,
+   &quot;status&quot;: &quot;suspected&quot;
+  }
+ ],
  &quot;hazards&quot;: [],
  &quot;sensor&quot;: {
-  &quot;reading&quot;: 0.16,
-  &quot;noise&quot;: 0.132,
-  &quot;status&quot;: &quot;degraded&quot;
+  &quot;reading&quot;: 0.1,
+  &quot;noise&quot;: 0.05,
+  &quot;status&quot;: &quot;ok&quot;
  },
  &quot;recent_events&quot;: [],
- &quot;alarms&quot;: [
-  &quot;Датчик образцов шумит: разброс 0.13 вместо 0.05&quot;
- ],
+ &quot;alarms&quot;: [],
  &quot;open_hypotheses&quot;: [
   {
    &quot;id&quot;: &quot;H5&quot;,
-   &quot;statement&quot;: &quot;образец лежит около (2.2; -0.4)&quot;
-  },
-  {
-   &quot;id&quot;: &quot;H6&quot;,
-   &quot;statement&quot;: &quot;датчик образцов неисправен, его показаниям нельзя верить как раньше&quot;
+   &quot;statement&quot;: &quot;около (0.3; 1.3) грунт дороже обычного примерно в 1.6 раза&quot;
   }
  ]
-}</pre></div>
- <div><h4>Модель → агент: план</h4><pre class="tall">{
- &quot;reasoning&quot;: &quot;Собрано 4 из 7, заряд 35.3, возврат 8.3. Датчик degraded (шум 0.13). C1: confidence 0.6 ≥ 0.5 — допустим, путь 7.2, возврат 4.4, запас 23.7. C2 исключён: confidence 0.35 &lt; 0.5 при degraded. Среди разведки E2 лучший: 0.26/(3.9+1)=0.053. Времени много (60.8/600).&quot;,
+}</code></pre></div>
+<div class="pane"><div class="who">Модель → робот</div><pre><code>{
+ &quot;reasoning&quot;: &quot;Собрано 3 из 7, заряд 44.3, возврат 10.8 — запас большой. C1: confidence 0.4, путь 4.6, возврат 10.0, feasible. Выгода 0.4/5.1≈0.08. Потом E1: не проверено 55%, путь 4.7, возврат 9.7, выгода 0.55/5.7≈0.10. Время 35/600 — рано домой, 4 образца ещё не найдены.&quot;,
  &quot;hypotheses&quot;: [
   {
-   &quot;statement&quot;: &quot;Повышенный шум датчика (0.13 вместо 0.05) вызван не поломкой, а помехой в конкретной зоне арены; вдали от неё шум вернётся к норме&quot;,
-   &quot;test&quot;: &quot;после подъезда к C1 записать серию показаний датчика на месте и сравнить разброс с текущим 0.132&quot;
+   &quot;statement&quot;: &quot;C1 (confidence 0.4) — реальный образец на границе чувствительности датчика; подъезд поднимет reading выше 0.3&quot;,
+   &quot;test&quot;: &quot;подъехать к C1 и зафиксировать reading датчика до и после остановки&quot;
   },
   {
-   &quot;statement&quot;: &quot;C1 содержит образец несмотря на degraded-датчик: confidence 0.6 устойчива к шуму 0.13&quot;,
-   &quot;test&quot;: &quot;подъехать к C1 и собрать образец; если reading стабильно &gt; 0.5 при подходе — гипотеза подтверждена&quot;
+   &quot;statement&quot;: &quot;В области E1 (55% не проверено) скрыто не менее одного образца, раз 4 из 7 ещё не собраны&quot;,
+   &quot;test&quot;: &quot;доехать до E1 и просканировать окрестность на наличие reading &gt; 0.3&quot;
   }
  ],
  &quot;subgoals&quot;: [
@@ -404,28 +483,406 @@
   },
   {
    &quot;type&quot;: &quot;explore&quot;,
+   &quot;target&quot;: &quot;E1&quot;
+  },
+  {
+   &quot;type&quot;: &quot;explore&quot;,
+   &quot;target&quot;: &quot;E4&quot;
+  }
+ ]
+}</code></pre></div></div>
+<p class="where">qwen3.8-flash-next · ответ за 17 с · 2462 токенов на входе, 1351 на выходе · файл кэша <code>2ed71a24…</code></p></section><section id="c3"><div class="num">Ситуация 3</div><h2>Образец собран — что дальше</h2><p class="tag">Самый частый повод: после каждого сбора робот спрашивает, куда ехать теперь.</p>
+<div class="duo"><figure class="map"><svg viewBox="0 0 294 270" role="img" aria-label="Что известно модели"><use href="#arena" transform="translate(153.4,135.2) scale(52.0,-52.0)"/><line x1="102.4" y1="159.6" x2="140.4" y2="226.2" class="plan" marker-end="url(#arrow)"/><line x1="140.4" y1="226.2" x2="166.4" y2="174.2" class="plan" marker-end="url(#arrow)"/><rect x="135.4" y="221.2" width="10" height="10" rx="2" class="ep" data-tip="E1: точка разведки, не проверено 15% окрестности, дорога 3,9 ед."/><text x="140.4" y="217.2" class="idl">E1</text><rect x="161.4" y="169.2" width="10" height="10" rx="2" class="ep" data-tip="E2: точка разведки, не проверено 13% окрестности, дорога 3,4 ед."/><text x="166.4" y="165.2" class="idl">E2</text><rect x="187.4" y="143.2" width="10" height="10" rx="2" class="ep" data-tip="E3: точка разведки, не проверено 16% окрестности, дорога 4,6 ед."/><text x="192.4" y="139.2" class="idl">E3</text><rect x="187.4" y="195.2" width="10" height="10" rx="2" class="ep" data-tip="E4: точка разведки, не проверено 16% окрестности, дорога 5,2 ед."/><text x="192.4" y="191.2" class="idl">E4</text><g data-tip="Подцель 1: разведать: E1"><circle cx="151.4" cy="237.2" r="8" class="stepc"/><text x="151.4" y="241.2" class="stepn">1</text></g><g data-tip="Подцель 2: разведать: E2"><circle cx="177.4" cy="185.2" r="8" class="stepc"/><text x="177.4" y="189.2" class="stepn">2</text></g><rect x="44.4" y="156.2" width="10" height="10" rx="2" class="base" data-tip="База"/><circle cx="102.4" cy="159.6" r="6" class="robot" data-tip="Робот: (−1,0; −0,5)"/></svg><figcaption><b>Карта по сообщению модели</b>
+<span>Только то, что робот ей написал. Стрелки и номера — её ответ.</span></figcaption></figure>
+<div><h3>Что модель узнала</h3><table class="facts"><tr><th>Миссия</th><td>Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.</td></tr><tr><th>Повод</th><td>образец собран <code>sample_collected</code></td></tr><tr><th>Время</th><td>7 с из 600</td></tr><tr><th>Заряд</th><td>57,2 из 60; до базы нужно 2,5</td></tr><tr><th>Образцы</th><td>собрано 1 из 7</td></tr><tr><th>Датчик</th><td>показание 0,21, исправен</td></tr><tr><th>Кандидаты</th><td>нет</td></tr><tr><th>Точки разведки</th><td>E1, E2, E3, E4</td></tr></table><h3>Что она ответила</h3><div class="said"><div class="lbl">Почему (поле reasoning)</div><p>Собрано 1 из 7, кандидатов нет — разведка. E1: unseen 0.15, путь 3.9, возврат 6.2; E2: unseen 0.13, путь 3.4, возврат 5.9. Заряд 57.2, возврат с базы 2.5 — запас огромный, 6 образцов ещё не найдены. E1 выигрывает по unseen/(cost+1): 0.031 против 0.030 у E2.</p><div class="lbl">Подцели</div><ol class="steps"><li><span class="stepb">1</span>разведать: E1</li><li><span class="stepb">2</span>разведать: E2</li></ol><div class="lbl">Гипотезы модели</div><p class="muted">нет</p></div></div></div>
+<h3>Дословно</h3>
+<div class="raw"><div class="pane"><div class="who">Робот → модель</div><pre><code>{
+ &quot;mission&quot;: &quot;Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.&quot;,
+ &quot;trigger&quot;: &quot;sample_collected&quot;,
+ &quot;time_s&quot;: 7.2,
+ &quot;time_limit_s&quot;: 600.0,
+ &quot;battery&quot;: 57.2,
+ &quot;battery_start&quot;: 60.0,
+ &quot;pose&quot;: {
+  &quot;x&quot;: -0.98,
+  &quot;y&quot;: -0.47
+ },
+ &quot;base&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;samples&quot;: {
+  &quot;collected&quot;: 1,
+  &quot;total&quot;: 7
+ },
+ &quot;return_cost&quot;: 2.5,
+ &quot;candidates&quot;: [],
+ &quot;explore_points&quot;: [
+  {
+   &quot;id&quot;: &quot;E1&quot;,
+   &quot;x&quot;: -0.25,
+   &quot;y&quot;: -1.75,
+   &quot;unseen_share&quot;: 0.15,
+   &quot;cost_to&quot;: 3.9,
+   &quot;cost_back&quot;: 6.2,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: 0.25,
+   &quot;y&quot;: -0.75,
+   &quot;unseen_share&quot;: 0.13,
+   &quot;cost_to&quot;: 3.4,
+   &quot;cost_back&quot;: 5.9,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E3&quot;,
+   &quot;x&quot;: 0.75,
+   &quot;y&quot;: -0.25,
+   &quot;unseen_share&quot;: 0.16,
+   &quot;cost_to&quot;: 4.6,
+   &quot;cost_back&quot;: 7.1,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E4&quot;,
+   &quot;x&quot;: 0.75,
+   &quot;y&quot;: -1.25,
+   &quot;unseen_share&quot;: 0.16,
+   &quot;cost_to&quot;: 5.2,
+   &quot;cost_back&quot;: 7.7,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;soil_zones&quot;: [],
+ &quot;hazards&quot;: [],
+ &quot;sensor&quot;: {
+  &quot;reading&quot;: 0.21,
+  &quot;noise&quot;: 0.05,
+  &quot;status&quot;: &quot;ok&quot;
+ },
+ &quot;recent_events&quot;: [],
+ &quot;alarms&quot;: [],
+ &quot;open_hypotheses&quot;: []
+}</code></pre></div>
+<div class="pane"><div class="who">Модель → робот</div><pre><code>{
+ &quot;reasoning&quot;: &quot;Собрано 1 из 7, кандидатов нет — разведка. E1: unseen 0.15, путь 3.9, возврат 6.2; E2: unseen 0.13, путь 3.4, возврат 5.9. Заряд 57.2, возврат с базы 2.5 — запас огромный, 6 образцов ещё не найдены. E1 выигрывает по unseen/(cost+1): 0.031 против 0.030 у E2.&quot;,
+ &quot;hypotheses&quot;: [],
+ &quot;subgoals&quot;: [
+  {
+   &quot;type&quot;: &quot;explore&quot;,
+   &quot;target&quot;: &quot;E1&quot;
+  },
+  {
+   &quot;type&quot;: &quot;explore&quot;,
    &quot;target&quot;: &quot;E2&quot;
   }
  ]
-}</pre></div>
-</div>
-<p class="after"><b>Что сделал код.</b> План принят и исполнен. Что датчик сбоит, определил код (сравнение показаний с прогнозом); модель получила это готовым фактом и учла в выборе цели.</p>
-</div>
-<div class="call">
-<h3>Миссия, заданная словами: «Собери ровно два образца и сразу возвращайся на базу»</h3>
-<p>Тот же агент и тот же сценарий, но текст миссии другой (поле <code>mission</code> в сводке). На 27.7-й секунде собран второй образец. На арене ещё пять, заряда много — правило поехало бы дальше.</p>
-<div class="meta">агент <code>adaptive_llm</code> · модель qwen3.8-flash-next · сценарий hard-1001 · время 27.7 с · ответ за <b>5.4 с</b> · запрос 2307 токенов, ответ 386</div>
-<div class="cols">
- <div><h4>Агент → модель: сводка состояния</h4><pre class="tall">{
- &quot;mission&quot;: &quot;Собери ровно два образца и сразу возвращайся на базу.&quot;,
- &quot;trigger&quot;: &quot;sample_collected&quot;,
- &quot;time_s&quot;: 27.7,
+}</code></pre></div></div>
+<p class="where">qwen3.8-flash-next · ответ за 7 с · 2316 токенов на входе, 673 на выходе · файл кэша <code>027c0822…</code></p></section><section id="c4"><div class="num">Ситуация 4</div><h2>Датчик сбоит, кандидат пропал</h2><p class="tag">В состоянии стоит sensor.status = degraded и тревога. По правилам подсказки слабому кандидату при неисправном датчике верить нельзя.</p>
+<div class="duo"><figure class="map"><svg viewBox="0 0 294 270" role="img" aria-label="Что известно модели"><use href="#arena" transform="translate(153.4,135.2) scale(52.0,-52.0)"/><circle cx="208.5" cy="106.6" r="14.6" class="soil" data-tip="S1: дорогой грунт ×2,0, измерено на 1,1 м пути, confirmed"/><text x="208.5" y="110.1" class="zl">×2,0</text><circle cx="185.6" cy="145.6" r="23.5" class="haz" data-tip="Z1: опасная зона"/><text x="185.6" y="149.1" class="zl">!</text><line x1="141.4" y1="62.9" x2="176.8" y2="18.2" class="plan" marker-end="url(#arrow)"/><line x1="176.8" y1="18.2" x2="140.4" y2="18.2" class="plan" marker-end="url(#arrow)"/><rect x="135.4" y="13.2" width="10" height="10" rx="2" class="ep" data-tip="E1: точка разведки, не проверено 75% окрестности, дорога 2,3 ед."/><text x="140.4" y="9.2" class="idl">E1</text><rect x="161.4" y="39.2" width="10" height="10" rx="2" class="ep" data-tip="E2: точка разведки, не проверено 53% окрестности, дорога 1,8 ед."/><text x="166.4" y="35.2" class="idl">E2</text><rect x="109.4" y="39.2" width="10" height="10" rx="2" class="ep" data-tip="E3: точка разведки, не проверено 43% окрестности, дорога 1,7 ед."/><text x="114.4" y="35.2" class="idl">E3</text><rect x="187.4" y="13.2" width="10" height="10" rx="2" class="ep" data-tip="E4: точка разведки, не проверено 46% окрестности, дорога 3,6 ед."/><text x="192.4" y="9.2" class="idl">E4</text><circle cx="176.8" cy="18.2" r="6.5" class="cand" data-tip="C1: возможно, образец; уверенность 50%, дорога 3,2 ед., оттуда домой 9,7 ед."/><text x="176.8" y="8.2" class="idl">C1 · 50%</text><circle cx="124.8" cy="23.4" r="6.5" class="cand" data-tip="C2: возможно, образец; уверенность 44%, дорога 2,3 ед., оттуда домой 8,5 ед."/><text x="124.8" y="13.4" class="idl">C2 · 44%</text><g data-tip="Подцель 1: подъехать и собрать: C1"><circle cx="187.8" cy="29.2" r="8" class="stepc"/><text x="187.8" y="33.2" class="stepn">1</text></g><g data-tip="Подцель 2: разведать: E1"><circle cx="151.4" cy="29.2" r="8" class="stepc"/><text x="151.4" y="33.2" class="stepn">2</text></g><rect x="44.4" y="156.2" width="10" height="10" rx="2" class="base" data-tip="База"/><circle cx="141.4" cy="62.9" r="6" class="robot" data-tip="Робот: (−0,2; 1,4)"/></svg><figcaption><b>Карта по сообщению модели</b>
+<span>Только то, что робот ей написал. Стрелки и номера — её ответ.</span></figcaption></figure>
+<div><h3>Что модель узнала</h3><table class="facts"><tr><th>Миссия</th><td>Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.</td></tr><tr><th>Повод</th><td>место, к которому ехали, не подтвердилось <code>candidate_lost</code></td></tr><tr><th>Время</th><td>67 с из 600</td></tr><tr><th>Заряд</th><td>28,2 из 60; до базы нужно 6,4</td></tr><tr><th>Образцы</th><td>собрано 5 из 7</td></tr><tr><th>Датчик</th><td>показание 0,63, <b>неисправен</b></td></tr><tr><th>Кандидаты</th><td>C1 (50%), C2 (44%)</td></tr><tr><th>Точки разведки</th><td>E1, E2, E3, E4</td></tr><tr><th>Тревоги</th><td>Датчик образцов шумит: разброс 0.13 вместо 0.05</td></tr></table><h3>Что она ответила</h3><div class="said"><div class="lbl">Почему (поле reasoning)</div><p>Собрано 5 из 7, заряд 28.2, возврат 6.4. Триггер candidate_lost. Датчик degraded (шум 0.13), поэтому C2 (conf 0.44 &lt; 0.5) пропускаю. C1: conf 0.5, путь 3.2, возврат 9.7, feasible — первая цель. После C1 — E1: unseen 0.75, путь 2.3, возврат 9.1, лучший балл разведки 0.75/3.3=0.23. Времени 533 с, заряда хватает.</p><div class="lbl">Подцели</div><ol class="steps"><li><span class="stepb">1</span>подъехать и собрать: C1</li><li><span class="stepb">2</span>разведать: E1</li></ol><div class="lbl">Гипотезы модели</div><ul class="hyp"><li><b>candidate_lost вызван шумом датчика (0.13): показание временно упало ниже порога 0.35, образец на месте</b><br><span class="test">Проверка: подъехать к C1 и убедиться, что reading &gt; 0.6 на дистанции &lt; 0.5 м</span></li><li><b>повышенный шум датчика связан с вибрацией при движении, а не с аппаратной поломкой</b><br><span class="test">Проверка: остановить робота на 10 с и сравнить noise в покое с 0.13 при движении</span></li></ul></div></div></div>
+<h3>Дословно</h3>
+<div class="raw"><div class="pane"><div class="who">Робот → модель</div><pre><code>{
+ &quot;mission&quot;: &quot;Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.&quot;,
+ &quot;trigger&quot;: &quot;candidate_lost&quot;,
+ &quot;time_s&quot;: 67.3,
  &quot;time_limit_s&quot;: 600.0,
- &quot;battery&quot;: 49.8,
+ &quot;battery&quot;: 28.2,
  &quot;battery_start&quot;: 60.0,
  &quot;pose&quot;: {
-  &quot;x&quot;: 0.43,
-  &quot;y&quot;: -1.14
+  &quot;x&quot;: -0.23,
+  &quot;y&quot;: 1.39
+ },
+ &quot;base&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;samples&quot;: {
+  &quot;collected&quot;: 5,
+  &quot;total&quot;: 7
+ },
+ &quot;return_cost&quot;: 6.4,
+ &quot;candidates&quot;: [
+  {
+   &quot;id&quot;: &quot;C1&quot;,
+   &quot;x&quot;: 0.45,
+   &quot;y&quot;: 2.25,
+   &quot;confidence&quot;: 0.5,
+   &quot;cost_to&quot;: 3.2,
+   &quot;cost_back&quot;: 9.7,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;C2&quot;,
+   &quot;x&quot;: -0.55,
+   &quot;y&quot;: 2.15,
+   &quot;confidence&quot;: 0.44,
+   &quot;cost_to&quot;: 2.3,
+   &quot;cost_back&quot;: 8.5,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;explore_points&quot;: [
+  {
+   &quot;id&quot;: &quot;E1&quot;,
+   &quot;x&quot;: -0.25,
+   &quot;y&quot;: 2.25,
+   &quot;unseen_share&quot;: 0.75,
+   &quot;cost_to&quot;: 2.3,
+   &quot;cost_back&quot;: 9.1,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: 0.25,
+   &quot;y&quot;: 1.75,
+   &quot;unseen_share&quot;: 0.53,
+   &quot;cost_to&quot;: 1.8,
+   &quot;cost_back&quot;: 8.2,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E3&quot;,
+   &quot;x&quot;: -0.75,
+   &quot;y&quot;: 1.75,
+   &quot;unseen_share&quot;: 0.43,
+   &quot;cost_to&quot;: 1.7,
+   &quot;cost_back&quot;: 7.1,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E4&quot;,
+   &quot;x&quot;: 0.75,
+   &quot;y&quot;: 2.25,
+   &quot;unseen_share&quot;: 0.46,
+   &quot;cost_to&quot;: 3.6,
+   &quot;cost_back&quot;: 10.1,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;soil_zones&quot;: [
+  {
+   &quot;id&quot;: &quot;S1&quot;,
+   &quot;x&quot;: 1.06,
+   &quot;y&quot;: 0.55,
+   &quot;radius&quot;: 0.28,
+   &quot;mult&quot;: 1.98,
+   &quot;evidence_m&quot;: 1.14,
+   &quot;status&quot;: &quot;confirmed&quot;
+  }
+ ],
+ &quot;hazards&quot;: [
+  {
+   &quot;id&quot;: &quot;Z1&quot;,
+   &quot;x&quot;: 0.62,
+   &quot;y&quot;: -0.2,
+   &quot;radius&quot;: 0.4522197911918642
+  }
+ ],
+ &quot;sensor&quot;: {
+  &quot;reading&quot;: 0.63,
+  &quot;noise&quot;: 0.172,
+  &quot;status&quot;: &quot;degraded&quot;
+ },
+ &quot;recent_events&quot;: [],
+ &quot;alarms&quot;: [
+  &quot;Датчик образцов шумит: разброс 0.13 вместо 0.05&quot;
+ ],
+ &quot;open_hypotheses&quot;: [
+  {
+   &quot;id&quot;: &quot;H4&quot;,
+   &quot;statement&quot;: &quot;около (0.6; -0.2) опасная зона радиусом около 0.5 м&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H9&quot;,
+   &quot;statement&quot;: &quot;образец лежит около (-0.1; 1.5)&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H10&quot;,
+   &quot;statement&quot;: &quot;датчик образцов неисправен, его показаниям нельзя верить как раньше&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H12&quot;,
+   &quot;statement&quot;: &quot;около (0.1; 1.9) грунт дороже обычного примерно в 1.5 раза&quot;
+  }
+ ]
+}</code></pre></div>
+<div class="pane"><div class="who">Модель → робот</div><pre><code>{
+ &quot;reasoning&quot;: &quot;Собрано 5 из 7, заряд 28.2, возврат 6.4. Триггер candidate_lost. Датчик degraded (шум 0.13), поэтому C2 (conf 0.44 &lt; 0.5) пропускаю. C1: conf 0.5, путь 3.2, возврат 9.7, feasible — первая цель. После C1 — E1: unseen 0.75, путь 2.3, возврат 9.1, лучший балл разведки 0.75/3.3=0.23. Времени 533 с, заряда хватает.&quot;,
+ &quot;hypotheses&quot;: [
+  {
+   &quot;statement&quot;: &quot;candidate_lost вызван шумом датчика (0.13): показание временно упало ниже порога 0.35, образец на месте&quot;,
+   &quot;test&quot;: &quot;подъехать к C1 и убедиться, что reading &gt; 0.6 на дистанции &lt; 0.5 м&quot;
+  },
+  {
+   &quot;statement&quot;: &quot;повышенный шум датчика связан с вибрацией при движении, а не с аппаратной поломкой&quot;,
+   &quot;test&quot;: &quot;остановить робота на 10 с и сравнить noise в покое с 0.13 при движении&quot;
+  }
+ ],
+ &quot;subgoals&quot;: [
+  {
+   &quot;type&quot;: &quot;investigate&quot;,
+   &quot;target&quot;: &quot;C1&quot;
+  },
+  {
+   &quot;type&quot;: &quot;explore&quot;,
+   &quot;target&quot;: &quot;E1&quot;
+  }
+ ]
+}</code></pre></div></div>
+<p class="where">qwen3.8-flash-next · ответ за 21 с · 2685 токенов на входе, 1851 на выходе · файл кэша <code>01034f00…</code></p></section><section id="c5"><div class="num">Ситуация 5</div><h2>Штраф: робот заехал в опасную зону</h2><p class="tag">Робот стоит внутри опасной зоны, датчик при этом неисправен. Модель решает, ехать ли к кандидату с уверенностью 62%.</p>
+<div class="duo"><figure class="map"><svg viewBox="0 0 294 270" role="img" aria-label="Что известно модели"><use href="#arena" transform="translate(153.4,135.2) scale(52.0,-52.0)"/><circle cx="131.6" cy="100.4" r="23.5" class="haz" data-tip="Z1: опасная зона"/><text x="131.6" y="103.9" class="zl">!</text><line x1="143.5" y1="100.4" x2="62.4" y2="70.2" class="plan" marker-end="url(#arrow)"/><line x1="62.4" y1="70.2" x2="62.4" y2="96.2" class="plan" marker-end="url(#arrow)"/><rect x="57.4" y="91.2" width="10" height="10" rx="2" class="ep" data-tip="E1: точка разведки, не проверено 47% окрестности, дорога 4,0 ед."/><text x="62.4" y="87.2" class="idl">E1</text><rect x="83.4" y="65.2" width="10" height="10" rx="2" class="ep" data-tip="E2: точка разведки, не проверено 43% окрестности, дорога 3,7 ед."/><text x="88.4" y="61.2" class="idl">E2</text><rect x="83.4" y="117.2" width="10" height="10" rx="2" class="ep" data-tip="E3: точка разведки, не проверено 17% окрестности, дорога 3,2 ед."/><text x="88.4" y="113.2" class="idl">E3</text><rect x="239.4" y="169.2" width="10" height="10" rx="2" class="ep" data-tip="E4: точка разведки, не проверено 22% окрестности, дорога 6,3 ед."/><text x="244.4" y="165.2" class="idl">E4</text><circle cx="62.4" cy="70.2" r="6.5" class="cand" data-tip="C1: возможно, образец; уверенность 62%, дорога 4,6 ед., оттуда домой 4,7 ед."/><text x="62.4" y="60.2" class="idl">C1 · 62%</text><g data-tip="Подцель 1: подъехать и собрать: C1"><circle cx="73.4" cy="81.2" r="8" class="stepc"/><text x="73.4" y="85.2" class="stepn">1</text></g><g data-tip="Подцель 2: разведать: E1"><circle cx="73.4" cy="107.2" r="8" class="stepc"/><text x="73.4" y="111.2" class="stepn">2</text></g><rect x="44.4" y="156.2" width="10" height="10" rx="2" class="base" data-tip="База"/><circle cx="143.5" cy="100.4" r="6" class="robot" data-tip="Робот: (−0,2; 0,7)"/></svg><figcaption><b>Карта по сообщению модели</b>
+<span>Только то, что робот ей написал. Стрелки и номера — её ответ.</span></figcaption></figure>
+<div><h3>Что модель узнала</h3><table class="facts"><tr><th>Миссия</th><td>Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.</td></tr><tr><th>Повод</th><td>штраф: заезд в опасную зону <code>hazard</code></td></tr><tr><th>Время</th><td>67 с из 600</td></tr><tr><th>Заряд</th><td>29,7 из 60; до базы нужно 6,2</td></tr><tr><th>Образцы</th><td>собрано 4 из 7</td></tr><tr><th>Датчик</th><td>показание 0,25, <b>неисправен</b></td></tr><tr><th>Кандидаты</th><td>C1 (62%)</td></tr><tr><th>Точки разведки</th><td>E1, E2, E3, E4</td></tr><tr><th>Тревоги</th><td>Датчик образцов шумит: разброс 0.13 вместо 0.05<br>Штраф: опасная зона в (-0.19; 0.67)</td></tr></table><h3>Что она ответила</h3><div class="said"><div class="lbl">Почему (поле reasoning)</div><p>Заряд 29.7, возврат 6.2, запас 23.5. C1: confidence 0.62 &gt; 0.5 (degraded-датчик не блокирует), путь 4.6 + возврат 4.7 = 9.3, остаток 20.4 &gt; 6.2. Робот внутри Z1 (расст. 0.23 &lt; радиус 0.45) — исполнитель объедет. После C1 — E1: unseen 0.47, путь 4.0, возврат 3.4. Собрано 4 из 7, 3 образца ещё нужны, время 66.7/600 — рано домой.</p><div class="lbl">Подцели</div><ol class="steps"><li><span class="stepb">1</span>подъехать и собрать: C1</li><li><span class="stepb">2</span>разведать: E1</li></ol><div class="lbl">Гипотезы модели</div><ul class="hyp"><li><b>Шум датчика (0.13) вызван электромагнитным полем зоны Z1, а не общей неисправностью; после отъезда на &gt;1 м noise вернётся к 0.05</b><br><span class="test">Проверка: сравнить sensor.noise в точке C1 (-1.75;1.25) с текущим 0.123 при удалении от Z1</span></li><li><b>C1 (conf 0.62) содержит образец, несмотря на degraded-датчик; подъезд уточнит confidence выше 0.8</b><br><span class="test">Проверка: подъехать к C1 и зафиксировать изменение confidence и reading при сближении</span></li></ul></div></div></div>
+<h3>Дословно</h3>
+<div class="raw"><div class="pane"><div class="who">Робот → модель</div><pre><code>{
+ &quot;mission&quot;: &quot;Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.&quot;,
+ &quot;trigger&quot;: &quot;hazard&quot;,
+ &quot;time_s&quot;: 66.7,
+ &quot;time_limit_s&quot;: 600.0,
+ &quot;battery&quot;: 29.7,
+ &quot;battery_start&quot;: 60.0,
+ &quot;pose&quot;: {
+  &quot;x&quot;: -0.19,
+  &quot;y&quot;: 0.67
+ },
+ &quot;base&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;samples&quot;: {
+  &quot;collected&quot;: 4,
+  &quot;total&quot;: 7
+ },
+ &quot;return_cost&quot;: 6.2,
+ &quot;candidates&quot;: [
+  {
+   &quot;id&quot;: &quot;C1&quot;,
+   &quot;x&quot;: -1.75,
+   &quot;y&quot;: 1.25,
+   &quot;confidence&quot;: 0.62,
+   &quot;cost_to&quot;: 4.6,
+   &quot;cost_back&quot;: 4.7,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;explore_points&quot;: [
+  {
+   &quot;id&quot;: &quot;E1&quot;,
+   &quot;x&quot;: -1.75,
+   &quot;y&quot;: 0.75,
+   &quot;unseen_share&quot;: 0.47,
+   &quot;cost_to&quot;: 4.0,
+   &quot;cost_back&quot;: 3.4,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: -1.25,
+   &quot;y&quot;: 1.25,
+   &quot;unseen_share&quot;: 0.43,
+   &quot;cost_to&quot;: 3.7,
+   &quot;cost_back&quot;: 5.5,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E3&quot;,
+   &quot;x&quot;: -1.25,
+   &quot;y&quot;: 0.25,
+   &quot;unseen_share&quot;: 0.17,
+   &quot;cost_to&quot;: 3.2,
+   &quot;cost_back&quot;: 2.7,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E4&quot;,
+   &quot;x&quot;: 1.75,
+   &quot;y&quot;: -0.75,
+   &quot;unseen_share&quot;: 0.22,
+   &quot;cost_to&quot;: 6.3,
+   &quot;cost_back&quot;: 9.7,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;soil_zones&quot;: [],
+ &quot;hazards&quot;: [
+  {
+   &quot;id&quot;: &quot;Z1&quot;,
+   &quot;x&quot;: -0.42,
+   &quot;y&quot;: 0.67,
+   &quot;radius&quot;: 0.4522197911918642
+  }
+ ],
+ &quot;sensor&quot;: {
+  &quot;reading&quot;: 0.25,
+  &quot;noise&quot;: 0.123,
+  &quot;status&quot;: &quot;degraded&quot;
+ },
+ &quot;recent_events&quot;: [],
+ &quot;alarms&quot;: [
+  &quot;Датчик образцов шумит: разброс 0.13 вместо 0.05&quot;,
+  &quot;Штраф: опасная зона в (-0.19; 0.67)&quot;
+ ],
+ &quot;open_hypotheses&quot;: [
+  {
+   &quot;id&quot;: &quot;H5&quot;,
+   &quot;statement&quot;: &quot;образец лежит около (2.2; -0.4)&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H6&quot;,
+   &quot;statement&quot;: &quot;датчик образцов неисправен, его показаниям нельзя верить как раньше&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H7&quot;,
+   &quot;statement&quot;: &quot;образец лежит около (-1.9; 1.2)&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H8&quot;,
+   &quot;statement&quot;: &quot;около (-0.4; 0.7) опасная зона радиусом около 0.5 м&quot;
+  }
+ ]
+}</code></pre></div>
+<div class="pane"><div class="who">Модель → робот</div><pre><code>{
+ &quot;reasoning&quot;: &quot;Заряд 29.7, возврат 6.2, запас 23.5. C1: confidence 0.62 &gt; 0.5 (degraded-датчик не блокирует), путь 4.6 + возврат 4.7 = 9.3, остаток 20.4 &gt; 6.2. Робот внутри Z1 (расст. 0.23 &lt; радиус 0.45) — исполнитель объедет. После C1 — E1: unseen 0.47, путь 4.0, возврат 3.4. Собрано 4 из 7, 3 образца ещё нужны, время 66.7/600 — рано домой.&quot;,
+ &quot;hypotheses&quot;: [
+  {
+   &quot;statement&quot;: &quot;Шум датчика (0.13) вызван электромагнитным полем зоны Z1, а не общей неисправностью; после отъезда на &gt;1 м noise вернётся к 0.05&quot;,
+   &quot;test&quot;: &quot;сравнить sensor.noise в точке C1 (-1.75;1.25) с текущим 0.123 при удалении от Z1&quot;
+  },
+  {
+   &quot;statement&quot;: &quot;C1 (conf 0.62) содержит образец, несмотря на degraded-датчик; подъезд уточнит confidence выше 0.8&quot;,
+   &quot;test&quot;: &quot;подъехать к C1 и зафиксировать изменение confidence и reading при сближении&quot;
+  }
+ ],
+ &quot;subgoals&quot;: [
+  {
+   &quot;type&quot;: &quot;investigate&quot;,
+   &quot;target&quot;: &quot;C1&quot;
+  },
+  {
+   &quot;type&quot;: &quot;explore&quot;,
+   &quot;target&quot;: &quot;E1&quot;
+  }
+ ]
+}</code></pre></div></div>
+<p class="where">qwen3.8-flash-next · ответ за 22 с · 2580 токенов на входе, 1956 на выходе · файл кэша <code>2ec08117…</code></p></section><section id="c6"><div class="num">Ситуация 6</div><h2>Другая миссия: «собери ровно два образца»</h2><p class="tag">Код тот же, изменён только текст миссии. Второй образец собран — модель должна остановить сбор.</p>
+<div class="duo"><figure class="map"><svg viewBox="0 0 294 270" role="img" aria-label="Что известно модели"><use href="#arena" transform="translate(153.4,135.2) scale(52.0,-52.0)"/><circle cx="104.0" cy="153.4" r="14.6" class="soil" data-tip="S1: дорогой грунт ×3,7, измерено на 1,0 м пути, confirmed"/><text x="104.0" y="156.9" class="zl">×3,7</text><line x1="64.5" y1="74.9" x2="49.4" y2="161.2" class="plan" marker-end="url(#arrow)"/><rect x="239.4" y="117.2" width="10" height="10" rx="2" class="ep" data-tip="E1: точка разведки, не проверено 21% окрестности, дорога 9,9 ед."/><text x="244.4" y="113.2" class="idl">E1</text><rect x="135.4" y="221.2" width="10" height="10" rx="2" class="ep" data-tip="E2: точка разведки, не проверено 21% окрестности, дорога 10,0 ед."/><text x="140.4" y="217.2" class="idl">E2</text><rect x="213.4" y="169.2" width="10" height="10" rx="2" class="ep" data-tip="E3: точка разведки, не проверено 20% окрестности, дорога 9,8 ед."/><text x="218.4" y="165.2" class="idl">E3</text><rect x="187.4" y="195.2" width="10" height="10" rx="2" class="ep" data-tip="E4: точка разведки, не проверено 20% окрестности, дорога 9,7 ед."/><text x="192.4" y="191.2" class="idl">E4</text><g data-tip="Подцель 1: вернуться на базу"><circle cx="60.4" cy="172.2" r="8" class="stepc"/><text x="60.4" y="176.2" class="stepn">1</text></g><rect x="44.4" y="156.2" width="10" height="10" rx="2" class="base" data-tip="База"/><circle cx="64.5" cy="74.9" r="6" class="robot" data-tip="Робот: (−1,7; 1,2)"/></svg><figcaption><b>Карта по сообщению модели</b>
+<span>Только то, что робот ей написал. Стрелки и номера — её ответ.</span></figcaption></figure>
+<div><h3>Что модель узнала</h3><table class="facts"><tr><th>Миссия</th><td>Собери ровно два образца и сразу возвращайся на базу.</td></tr><tr><th>Повод</th><td>образец собран <code>sample_collected</code></td></tr><tr><th>Время</th><td>25 с из 600</td></tr><tr><th>Заряд</th><td>42,9 из 60; до базы нужно 4,7</td></tr><tr><th>Образцы</th><td>собрано 2 из 5</td></tr><tr><th>Датчик</th><td>показание 0,01, исправен</td></tr><tr><th>Кандидаты</th><td>нет</td></tr><tr><th>Точки разведки</th><td>E1, E2, E3, E4</td></tr></table><h3>Что она ответила</h3><div class="said"><div class="lbl">Почему (поле reasoning)</div><p>Миссия: ровно два образца и возврат. Собрано 2 из требуемых 2 — цель выполнена. Заряд 42.9, возврат 4.7 — запас огромный. Дальнейшая разведка не нужна, возвращаюсь на базу.</p><div class="lbl">Подцели</div><ol class="steps"><li><span class="stepb">1</span>вернуться на базу</li></ol><div class="lbl">Гипотезы модели</div><p class="muted">нет</p></div></div></div>
+<h3>Дословно</h3>
+<div class="raw"><div class="pane"><div class="who">Робот → модель</div><pre><code>{
+ &quot;mission&quot;: &quot;Собери ровно два образца и сразу возвращайся на базу.&quot;,
+ &quot;trigger&quot;: &quot;sample_collected&quot;,
+ &quot;time_s&quot;: 24.8,
+ &quot;time_limit_s&quot;: 600.0,
+ &quot;battery&quot;: 42.9,
+ &quot;battery_start&quot;: 60.0,
+ &quot;pose&quot;: {
+  &quot;x&quot;: -1.71,
+  &quot;y&quot;: 1.16
  },
  &quot;base&quot;: {
   &quot;x&quot;: -2.0,
@@ -433,80 +890,565 @@
  },
  &quot;samples&quot;: {
   &quot;collected&quot;: 2,
-  &quot;total&quot;: 7
+  &quot;total&quot;: 5
  },
- &quot;return_cost&quot;: 7.8,
+ &quot;return_cost&quot;: 4.7,
  &quot;candidates&quot;: [],
  &quot;explore_points&quot;: [
   {
    &quot;id&quot;: &quot;E1&quot;,
    &quot;x&quot;: 1.75,
    &quot;y&quot;: 0.25,
-   &quot;unseen_share&quot;: 0.29,
-   &quot;cost_to&quot;: 5.0,
-   &quot;cost_back&quot;: 12.8,
+   &quot;unseen_share&quot;: 0.21,
+   &quot;cost_to&quot;: 9.9,
+   &quot;cost_back&quot;: 11.0,
    &quot;feasible&quot;: true
   },
   {
    &quot;id&quot;: &quot;E2&quot;,
-   &quot;x&quot;: 0.75,
-   &quot;y&quot;: 0.25,
-   &quot;unseen_share&quot;: 0.23,
-   &quot;cost_to&quot;: 3.9,
-   &quot;cost_back&quot;: 7.8,
+   &quot;x&quot;: -0.25,
+   &quot;y&quot;: -1.75,
+   &quot;unseen_share&quot;: 0.21,
+   &quot;cost_to&quot;: 10.0,
+   &quot;cost_back&quot;: 6.1,
    &quot;feasible&quot;: true
   },
   {
    &quot;id&quot;: &quot;E3&quot;,
    &quot;x&quot;: 1.25,
-   &quot;y&quot;: 0.75,
-   &quot;unseen_share&quot;: 0.28,
-   &quot;cost_to&quot;: 5.6,
-   &quot;cost_back&quot;: 9.5,
+   &quot;y&quot;: -0.75,
+   &quot;unseen_share&quot;: 0.2,
+   &quot;cost_to&quot;: 9.8,
+   &quot;cost_back&quot;: 11.6,
    &quot;feasible&quot;: true
   },
   {
    &quot;id&quot;: &quot;E4&quot;,
-   &quot;x&quot;: 1.25,
-   &quot;y&quot;: -0.25,
-   &quot;unseen_share&quot;: 0.18,
-   &quot;cost_to&quot;: 3.0,
-   &quot;cost_back&quot;: 10.8,
+   &quot;x&quot;: 0.75,
+   &quot;y&quot;: -1.25,
+   &quot;unseen_share&quot;: 0.2,
+   &quot;cost_to&quot;: 9.7,
+   &quot;cost_back&quot;: 8.7,
    &quot;feasible&quot;: true
   }
  ],
- &quot;soil_zones&quot;: [],
+ &quot;soil_zones&quot;: [
+  {
+   &quot;id&quot;: &quot;S1&quot;,
+   &quot;x&quot;: -0.95,
+   &quot;y&quot;: -0.35,
+   &quot;radius&quot;: 0.28,
+   &quot;mult&quot;: 3.68,
+   &quot;evidence_m&quot;: 1.0,
+   &quot;status&quot;: &quot;confirmed&quot;
+  }
+ ],
  &quot;hazards&quot;: [],
  &quot;sensor&quot;: {
-  &quot;reading&quot;: 0.14,
+  &quot;reading&quot;: 0.01,
   &quot;noise&quot;: 0.05,
   &quot;status&quot;: &quot;ok&quot;
  },
  &quot;recent_events&quot;: [],
  &quot;alarms&quot;: [],
  &quot;open_hypotheses&quot;: []
-}</pre></div>
- <div><h4>Модель → агент: план</h4><pre class="tall">{
- &quot;reasoning&quot;: &quot;Миссия: ровно 2 образца и сразу на базу. Собрано 2 из требуемых 2 — цель выполнена. Заряд 49.8, возврат 7.8, запас огромный. Время 27.7 из 600. Дальнейшая разведка не нужна: миссия завершена.&quot;,
+}</code></pre></div>
+<div class="pane"><div class="who">Модель → робот</div><pre><code>{
+ &quot;reasoning&quot;: &quot;Миссия: ровно два образца и возврат. Собрано 2 из требуемых 2 — цель выполнена. Заряд 42.9, возврат 4.7 — запас огромный. Дальнейшая разведка не нужна, возвращаюсь на базу.&quot;,
  &quot;hypotheses&quot;: [],
  &quot;subgoals&quot;: [
   {
    &quot;type&quot;: &quot;return_base&quot;
   }
  ]
-}</pre></div>
-</div>
-<p class="after"><b>Что сделал код.</b> Робот вернулся на базу с двумя образцами из 7. Кода, который знает про «ровно два», в программе нет: поведение изменила одна фраза в миссии. Это исследование R13.</p>
-</div>
-<div class="call"><h3>Негодный ответ и что с ним происходит</h3>
-<p>Модель <b>DeepSeek-V4-Flash</b>, трудный сценарий 1003, время 54.7 с. Модель рассуждала так долго, что упёрлась в лимит длины
-и не успела написать сам план.</p>
-<div class="cols">
- <div><h4>Первый ответ модели</h4><pre>(пусто)</pre>
- <h4>Что нашла проверка</h4><pre>— пустой ответ
-— ответ обрезан по лимиту токенов, отвечай короче</pre></div>
- <div><h4>Агент → модель: просьба исправить</h4><pre>Ответ не принят. Ошибки: - пустой ответ - ответ обрезан по лимиту токенов, отвечай короче Исправь и верни план заново: один JSON-объект по схеме, без пояснений и без Markdown.</pre>
- <h4>Второй ответ модели (4 с)</h4><pre class="tall">{
+}</code></pre></div></div>
+<p class="where">qwen3.8-flash-next · ответ за 33 с · 2365 токенов на входе, 242 на выходе · файл кэша <code>823d7190…</code></p></section><section id="c7"><div class="num">Ситуация 7</div><h2>Другая миссия: «не заезжай в правую половину»</h2><p class="tag">Все кандидаты и точки разведки лежат в запрещённой половине. Модель сама должна от них отказаться.</p>
+<div class="duo"><figure class="map"><svg viewBox="0 0 294 270" role="img" aria-label="Что известно модели"><use href="#arena" transform="translate(153.4,135.2) scale(52.0,-52.0)"/><rect x="179.4" y="0" width="114.4" height="270" class="banarea" data-tip="Запрещено текстом миссии: x больше 0,5 м"/><circle cx="169.0" cy="171.6" r="10.4" class="soil" data-tip="S1: дорогой грунт ×3,5, измерено на 0,3 м пути, suspected"/><text x="169.0" y="175.1" class="zl">×3,5</text><line x1="130.0" y1="82.7" x2="174.2" y2="176.8" class="plan" marker-end="url(#arrow)"/><line x1="174.2" y1="176.8" x2="49.4" y2="161.2" class="plan" marker-end="url(#arrow)"/><rect x="239.4" y="143.2" width="10" height="10" rx="2" class="ep" data-tip="E1: точка разведки, не проверено 87% окрестности, дорога 7,1 ед., заряда не хватит"/><text x="244.4" y="139.2" class="idl">E1</text><rect x="213.4" y="169.2" width="10" height="10" rx="2" class="ep" data-tip="E2: точка разведки, не проверено 79% окрестности, дорога 7,2 ед., заряда не хватит"/><text x="218.4" y="165.2" class="idl">E2</text><rect x="213.4" y="117.2" width="10" height="10" rx="2" class="ep" data-tip="E3: точка разведки, не проверено 53% окрестности, дорога 5,0 ед."/><text x="218.4" y="113.2" class="idl">E3</text><rect x="187.4" y="143.2" width="10" height="10" rx="2" class="ep" data-tip="E4: точка разведки, не проверено 50% окрестности, дорога 4,8 ед."/><text x="192.4" y="139.2" class="idl">E4</text><circle cx="234.0" cy="158.6" r="6.5" class="cand" data-tip="C1: возможно, образец; уверенность 71%, дорога 7,3 ед., оттуда домой 10,7 ед., заряда не хватит"/><text x="234.0" y="148.6" class="idl">C1 · 71%</text><g data-tip="Подцель 1: доехать до точки (0,4; −0,8)"><circle cx="185.2" cy="187.8" r="8" class="stepc"/><text x="185.2" y="191.8" class="stepn">1</text></g><g data-tip="Подцель 2: вернуться на базу"><circle cx="60.4" cy="172.2" r="8" class="stepc"/><text x="60.4" y="176.2" class="stepn">2</text></g><rect x="44.4" y="156.2" width="10" height="10" rx="2" class="base" data-tip="База"/><circle cx="130.0" cy="82.7" r="6" class="robot" data-tip="Робот: (−0,5; 1,0)"/></svg><figcaption><b>Карта по сообщению модели</b>
+<span>Только то, что робот ей написал. Стрелки и номера — её ответ.</span></figcaption></figure>
+<div><h3>Что модель узнала</h3><table class="facts"><tr><th>Миссия</th><td>Не заезжай в правую половину арены (x больше 0,5 м): работай только в левой.</td></tr><tr><th>Повод</th><td>образец собран <code>sample_collected</code></td></tr><tr><th>Время</th><td>61 с из 600</td></tr><tr><th>Заряд</th><td>22,6 из 60; до базы нужно 6,9</td></tr><tr><th>Образцы</th><td>собрано 3 из 5</td></tr><tr><th>Датчик</th><td>показание 0,01, исправен</td></tr><tr><th>Кандидаты</th><td>C1 (71%)</td></tr><tr><th>Точки разведки</th><td>E1, E2, E3, E4</td></tr><tr><th>Тревоги</th><td>Модель расхода не сходится около (0.4; -0.8): ждал ×1.9, вижу ×4.0 (дороже прогноза). Похоже, грунты изменились</td></tr></table><h3>Что она ответила</h3><div class="said"><div class="lbl">Почему (поле reasoning)</div><p>Заряд 22.6, возврат 6.9. Все кандидаты и точки разведки (C1, E1–E4) лежат при x &gt; 0,5 — правая половина запрещена миссией. Датчик 0.01, образцов в левой половине не видно. 2 из 5 образцов недостижимы. Тревога: у (0,4; −0,8) расход ×4,0 против прогноза ×1,9. Еду туда проверить грунт, затем на базу.</p><div class="lbl">Подцели</div><ol class="steps"><li><span class="stepb">1</span>доехать до точки (0,4; −0,8)</li><li><span class="stepb">2</span>вернуться на базу</li></ol><div class="lbl">Гипотезы модели</div><ul class="hyp"><li><b>Зона дорогого грунта простирается за радиус S1 (0,2 м) до (0,4; −0,8), множитель ближе к 4,0, а не 3,55</b><br><span class="test">Проверка: проехать через (0,4; −0,8) и записать фактический расход на отрезке 0,5 м; если ×4,0 подтвердится — расширить карту S1</span></li></ul></div></div></div>
+<h3>Дословно</h3>
+<div class="raw"><div class="pane"><div class="who">Робот → модель</div><pre><code>{
+ &quot;mission&quot;: &quot;Не заезжай в правую половину арены (x больше 0,5 м): работай только в левой.&quot;,
+ &quot;trigger&quot;: &quot;sample_collected&quot;,
+ &quot;time_s&quot;: 61.4,
+ &quot;time_limit_s&quot;: 600.0,
+ &quot;battery&quot;: 22.6,
+ &quot;battery_start&quot;: 60.0,
+ &quot;pose&quot;: {
+  &quot;x&quot;: -0.45,
+  &quot;y&quot;: 1.01
+ },
+ &quot;base&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;samples&quot;: {
+  &quot;collected&quot;: 3,
+  &quot;total&quot;: 5
+ },
+ &quot;return_cost&quot;: 6.9,
+ &quot;candidates&quot;: [
+  {
+   &quot;id&quot;: &quot;C1&quot;,
+   &quot;x&quot;: 1.55,
+   &quot;y&quot;: -0.45,
+   &quot;confidence&quot;: 0.71,
+   &quot;cost_to&quot;: 7.3,
+   &quot;cost_back&quot;: 10.7,
+   &quot;feasible&quot;: false
+  }
+ ],
+ &quot;explore_points&quot;: [
+  {
+   &quot;id&quot;: &quot;E1&quot;,
+   &quot;x&quot;: 1.75,
+   &quot;y&quot;: -0.25,
+   &quot;unseen_share&quot;: 0.87,
+   &quot;cost_to&quot;: 7.1,
+   &quot;cost_back&quot;: 11.4,
+   &quot;feasible&quot;: false
+  },
+  {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: 1.25,
+   &quot;y&quot;: -0.75,
+   &quot;unseen_share&quot;: 0.79,
+   &quot;cost_to&quot;: 7.2,
+   &quot;cost_back&quot;: 10.6,
+   &quot;feasible&quot;: false
+  },
+  {
+   &quot;id&quot;: &quot;E3&quot;,
+   &quot;x&quot;: 1.25,
+   &quot;y&quot;: 0.25,
+   &quot;unseen_share&quot;: 0.53,
+   &quot;cost_to&quot;: 5.0,
+   &quot;cost_back&quot;: 9.4,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E4&quot;,
+   &quot;x&quot;: 0.75,
+   &quot;y&quot;: -0.25,
+   &quot;unseen_share&quot;: 0.5,
+   &quot;cost_to&quot;: 4.8,
+   &quot;cost_back&quot;: 8.3,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;soil_zones&quot;: [
+  {
+   &quot;id&quot;: &quot;S1&quot;,
+   &quot;x&quot;: 0.3,
+   &quot;y&quot;: -0.7,
+   &quot;radius&quot;: 0.2,
+   &quot;mult&quot;: 3.55,
+   &quot;evidence_m&quot;: 0.29,
+   &quot;status&quot;: &quot;suspected&quot;
+  }
+ ],
+ &quot;hazards&quot;: [],
+ &quot;sensor&quot;: {
+  &quot;reading&quot;: 0.01,
+  &quot;noise&quot;: 0.05,
+  &quot;status&quot;: &quot;ok&quot;
+ },
+ &quot;recent_events&quot;: [],
+ &quot;alarms&quot;: [
+  &quot;Модель расхода не сходится около (0.4; -0.8): ждал ×1.9, вижу ×4.0 (дороже прогноза). Похоже, грунты изменились&quot;
+ ],
+ &quot;open_hypotheses&quot;: [
+  {
+   &quot;id&quot;: &quot;H5&quot;,
+   &quot;statement&quot;: &quot;образец лежит около (1.5; -0.6)&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H7&quot;,
+   &quot;statement&quot;: &quot;образец лежит около (1.5; -0.6)&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H8&quot;,
+   &quot;statement&quot;: &quot;около (0.3; -0.7) грунт дороже обычного примерно в 4.3 раза&quot;
+  }
+ ]
+}</code></pre></div>
+<div class="pane"><div class="who">Модель → робот</div><pre><code>{
+ &quot;reasoning&quot;: &quot;Заряд 22.6, возврат 6.9. Все кандидаты и точки разведки (C1, E1–E4) лежат при x &gt; 0,5 — правая половина запрещена миссией. Датчик 0.01, образцов в левой половине не видно. 2 из 5 образцов недостижимы. Тревога: у (0,4; −0,8) расход ×4,0 против прогноза ×1,9. Еду туда проверить грунт, затем на базу.&quot;,
+ &quot;hypotheses&quot;: [
+  {
+   &quot;statement&quot;: &quot;Зона дорогого грунта простирается за радиус S1 (0,2 м) до (0,4; −0,8), множитель ближе к 4,0, а не 3,55&quot;,
+   &quot;test&quot;: &quot;проехать через (0,4; −0,8) и записать фактический расход на отрезке 0,5 м; если ×4,0 подтвердится — расширить карту S1&quot;
+  }
+ ],
+ &quot;subgoals&quot;: [
+  {
+   &quot;type&quot;: &quot;goto&quot;,
+   &quot;x&quot;: 0.4,
+   &quot;y&quot;: -0.8
+  },
+  {
+   &quot;type&quot;: &quot;return_base&quot;
+  }
+ ]
+}</code></pre></div></div>
+<p class="where">qwen3.8-flash-next · ответ за 56 с · 2562 токенов на входе, 2318 на выходе · файл кэша <code>0c0a3622…</code></p></section><section id="c8"><div class="num">Ситуация 8</div><h2>Другая миссия: «после первого штрафа — домой»</h2><p class="tag">В состояние добавлен счётчик штрафов. Штраф получен — модель должна прекратить сбор.</p>
+<div class="duo"><figure class="map"><svg viewBox="0 0 294 270" role="img" aria-label="Что известно модели"><use href="#arena" transform="translate(153.4,135.2) scale(52.0,-52.0)"/><circle cx="169.5" cy="210.6" r="12.0" class="soil" data-tip="S1: дорогой грунт ×2,9, измерено на 0,7 м пути, confirmed"/><text x="169.5" y="214.1" class="zl">×2,9</text><circle cx="216.8" cy="147.7" r="14.6" class="soil" data-tip="S2: дорогой грунт ×2,0, измерено на 0,9 м пути, confirmed"/><text x="216.8" y="151.2" class="zl">×2,0</text><circle cx="235.6" cy="102.4" r="23.5" class="haz" data-tip="Z1: опасная зона"/><text x="235.6" y="105.9" class="zl">!</text><line x1="235.6" y1="113.9" x2="49.4" y2="161.2" class="plan" marker-end="url(#arrow)"/><rect x="239.4" y="65.2" width="10" height="10" rx="2" class="ep" data-tip="E1: точка разведки, не проверено 72% окрестности, дорога 2,4 ед."/><text x="244.4" y="61.2" class="idl">E1</text><rect x="213.4" y="39.2" width="10" height="10" rx="2" class="ep" data-tip="E2: точка разведки, не проверено 81% окрестности, дорога 3,7 ед."/><text x="218.4" y="35.2" class="idl">E2</text><rect x="213.4" y="91.2" width="10" height="10" rx="2" class="ep" data-tip="E3: точка разведки, не проверено 45% окрестности, дорога 1,2 ед."/><text x="218.4" y="87.2" class="idl">E3</text><rect x="187.4" y="65.2" width="10" height="10" rx="2" class="ep" data-tip="E4: точка разведки, не проверено 49% окрестности, дорога 3,4 ед."/><text x="192.4" y="61.2" class="idl">E4</text><circle cx="234.0" cy="54.6" r="6.5" class="cand" data-tip="C1: возможно, образец; уверенность 72%, дорога 2,8 ед., оттуда домой 12,3 ед."/><text x="234.0" y="44.6" class="idl">C1 · 72%</text><g data-tip="Подцель 1: вернуться на базу"><circle cx="60.4" cy="172.2" r="8" class="stepc"/><text x="60.4" y="176.2" class="stepn">1</text></g><rect x="44.4" y="156.2" width="10" height="10" rx="2" class="base" data-tip="База"/><circle cx="235.6" cy="113.9" r="6" class="robot" data-tip="Робот: (1,6; 0,4)"/></svg><figcaption><b>Карта по сообщению модели</b>
+<span>Только то, что робот ей написал. Стрелки и номера — её ответ.</span></figcaption></figure>
+<div><h3>Что модель узнала</h3><table class="facts"><tr><th>Миссия</th><td>После первого же штрафа немедленно возвращайся на базу.</td></tr><tr><th>Повод</th><td>штраф: заезд в опасную зону <code>hazard</code></td></tr><tr><th>Время</th><td>45 с из 600</td></tr><tr><th>Заряд</th><td>33,0 из 60; до базы нужно 10,5</td></tr><tr><th>Образцы</th><td>собрано 4 из 7</td></tr><tr><th>Датчик</th><td>показание 0,46, исправен</td></tr><tr><th>Кандидаты</th><td>C1 (72%)</td></tr><tr><th>Точки разведки</th><td>E1, E2, E3, E4</td></tr><tr><th>Штрафы</th><td>всего 1</td></tr><tr><th>Тревоги</th><td>Штраф: опасная зона в (1.58; 0.41)</td></tr></table><h3>Что она ответила</h3><div class="said"><div class="lbl">Почему (поле reasoning)</div><p>Миссия: после первого штрафа — немедленно на базу. Штраф получен (hazard_hit: 1, триггер hazard, зона Z1 в (1.58; 0.63) r≈0.45, робот в (1.58; 0.41) — внутри). Заряд 33.0, возврат 10.5 — запас достаточен. Продолжать разведку нельзя.</p><div class="lbl">Подцели</div><ol class="steps"><li><span class="stepb">1</span>вернуться на базу</li></ol><div class="lbl">Гипотезы модели</div><p class="muted">нет</p></div></div></div>
+<h3>Дословно</h3>
+<div class="raw"><div class="pane"><div class="who">Робот → модель</div><pre><code>{
+ &quot;mission&quot;: &quot;После первого же штрафа немедленно возвращайся на базу.&quot;,
+ &quot;trigger&quot;: &quot;hazard&quot;,
+ &quot;penalties&quot;: {
+  &quot;total&quot;: 1,
+  &quot;hazard_hit&quot;: 1,
+  &quot;false_collect&quot;: 0,
+  &quot;collision&quot;: 0
+ },
+ &quot;time_s&quot;: 44.9,
+ &quot;time_limit_s&quot;: 600.0,
+ &quot;battery&quot;: 33.0,
+ &quot;battery_start&quot;: 60.0,
+ &quot;pose&quot;: {
+  &quot;x&quot;: 1.58,
+  &quot;y&quot;: 0.41
+ },
+ &quot;base&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;samples&quot;: {
+  &quot;collected&quot;: 4,
+  &quot;total&quot;: 7
+ },
+ &quot;return_cost&quot;: 10.5,
+ &quot;candidates&quot;: [
+  {
+   &quot;id&quot;: &quot;C1&quot;,
+   &quot;x&quot;: 1.55,
+   &quot;y&quot;: 1.55,
+   &quot;confidence&quot;: 0.72,
+   &quot;cost_to&quot;: 2.8,
+   &quot;cost_back&quot;: 12.3,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;explore_points&quot;: [
+  {
+   &quot;id&quot;: &quot;E1&quot;,
+   &quot;x&quot;: 1.75,
+   &quot;y&quot;: 1.25,
+   &quot;unseen_share&quot;: 0.72,
+   &quot;cost_to&quot;: 2.4,
+   &quot;cost_back&quot;: 11.9,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: 1.25,
+   &quot;y&quot;: 1.75,
+   &quot;unseen_share&quot;: 0.81,
+   &quot;cost_to&quot;: 3.7,
+   &quot;cost_back&quot;: 12.5,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E3&quot;,
+   &quot;x&quot;: 1.25,
+   &quot;y&quot;: 0.75,
+   &quot;unseen_share&quot;: 0.45,
+   &quot;cost_to&quot;: 1.2,
+   &quot;cost_back&quot;: 10.1,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E4&quot;,
+   &quot;x&quot;: 0.75,
+   &quot;y&quot;: 1.25,
+   &quot;unseen_share&quot;: 0.49,
+   &quot;cost_to&quot;: 3.4,
+   &quot;cost_back&quot;: 10.8,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;soil_zones&quot;: [
+  {
+   &quot;id&quot;: &quot;S1&quot;,
+   &quot;x&quot;: 0.31,
+   &quot;y&quot;: -1.45,
+   &quot;radius&quot;: 0.23,
+   &quot;mult&quot;: 2.89,
+   &quot;evidence_m&quot;: 0.69,
+   &quot;status&quot;: &quot;confirmed&quot;
+  },
+  {
+   &quot;id&quot;: &quot;S2&quot;,
+   &quot;x&quot;: 1.22,
+   &quot;y&quot;: -0.24,
+   &quot;radius&quot;: 0.28,
+   &quot;mult&quot;: 2.0,
+   &quot;evidence_m&quot;: 0.91,
+   &quot;status&quot;: &quot;confirmed&quot;
+  }
+ ],
+ &quot;hazards&quot;: [
+  {
+   &quot;id&quot;: &quot;Z1&quot;,
+   &quot;x&quot;: 1.58,
+   &quot;y&quot;: 0.63,
+   &quot;radius&quot;: 0.45221979119186423
+  }
+ ],
+ &quot;sensor&quot;: {
+  &quot;reading&quot;: 0.46,
+  &quot;noise&quot;: 0.05,
+  &quot;status&quot;: &quot;ok&quot;
+ },
+ &quot;recent_events&quot;: [],
+ &quot;alarms&quot;: [
+  &quot;Штраф: опасная зона в (1.58; 0.41)&quot;
+ ],
+ &quot;open_hypotheses&quot;: [
+  {
+   &quot;id&quot;: &quot;H6&quot;,
+   &quot;statement&quot;: &quot;образец лежит около (1.8; -0.3)&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H9&quot;,
+   &quot;statement&quot;: &quot;образец лежит около (1.5; 1.5)&quot;
+  },
+  {
+   &quot;id&quot;: &quot;H10&quot;,
+   &quot;statement&quot;: &quot;около (1.6; 0.6) опасная зона радиусом около 0.5 м&quot;
+  }
+ ]
+}</code></pre></div>
+<div class="pane"><div class="who">Модель → робот</div><pre><code>{
+ &quot;reasoning&quot;: &quot;Миссия: после первого штрафа — немедленно на базу. Штраф получен (hazard_hit: 1, триггер hazard, зона Z1 в (1.58; 0.63) r≈0.45, робот в (1.58; 0.41) — внутри). Заряд 33.0, возврат 10.5 — запас достаточен. Продолжать разведку нельзя.&quot;,
+ &quot;hypotheses&quot;: [],
+ &quot;subgoals&quot;: [
+  {
+   &quot;type&quot;: &quot;return_base&quot;
+  }
+ ]
+}</code></pre></div></div>
+<p class="where">qwen3.8-flash-next · ответ за 9 с · 2673 токенов на входе, 593 на выходе · файл кэша <code>195b5bf2…</code></p></section><section id="c9"><div class="num">Ситуация 9</div><h2>Другая миссия: «сохрани не меньше 30 единиц заряда»</h2><p class="tag">Рядом кандидат с уверенностью 80%, до него полторы единицы заряда. Модель считает, что с ним на базу привезёт меньше 30, и отказывается.</p>
+<div class="duo"><figure class="map"><svg viewBox="0 0 294 270" role="img" aria-label="Что известно модели"><use href="#arena" transform="translate(153.4,135.2) scale(52.0,-52.0)"/><circle cx="186.2" cy="161.2" r="13.0" class="soil" data-tip="S1: дорогой грунт ×3,9, измерено на 0,9 м пути, confirmed"/><text x="186.2" y="164.7" class="zl">×3,9</text><line x1="208.5" y1="160.2" x2="49.4" y2="161.2" class="plan" marker-end="url(#arrow)"/><rect x="213.4" y="169.2" width="10" height="10" rx="2" class="ep" data-tip="E1: точка разведки, не проверено 80% окрестности, дорога 1,3 ед."/><text x="218.4" y="165.2" class="idl">E1</text><rect x="239.4" y="143.2" width="10" height="10" rx="2" class="ep" data-tip="E2: точка разведки, не проверено 81% окрестности, дорога 2,4 ед."/><text x="244.4" y="139.2" class="idl">E2</text><rect x="187.4" y="143.2" width="10" height="10" rx="2" class="ep" data-tip="E3: точка разведки, не проверено 57% окрестности, дорога 2,5 ед."/><text x="192.4" y="139.2" class="idl">E3</text><rect x="213.4" y="117.2" width="10" height="10" rx="2" class="ep" data-tip="E4: точка разведки, не проверено 51% окрестности, дорога 3,3 ед."/><text x="218.4" y="113.2" class="idl">E4</text><circle cx="228.8" cy="158.6" r="6.5" class="cand" data-tip="C1: возможно, образец; уверенность 80%, дорога 1,5 ед., оттуда домой 13,0 ед."/><text x="228.8" y="148.6" class="idl">C1 · 80%</text><g data-tip="Подцель 1: вернуться на базу"><circle cx="60.4" cy="172.2" r="8" class="stepc"/><text x="60.4" y="176.2" class="stepn">1</text></g><rect x="44.4" y="156.2" width="10" height="10" rx="2" class="base" data-tip="База"/><circle cx="208.5" cy="160.2" r="6" class="robot" data-tip="Робот: (1,1; −0,5)"/></svg><figcaption><b>Карта по сообщению модели</b>
+<span>Только то, что робот ей написал. Стрелки и номера — её ответ.</span></figcaption></figure>
+<div><h3>Что модель узнала</h3><table class="facts"><tr><th>Миссия</th><td>Заряд важнее образцов: вернись на базу, сохранив не меньше 30 единиц заряда.</td></tr><tr><th>Повод</th><td>заряд дошёл до порога <code>battery_threshold</code></td></tr><tr><th>Время</th><td>28 с из 600</td></tr><tr><th>Заряд</th><td>41,7 из 60; до базы нужно 12,5</td></tr><tr><th>Образцы</th><td>собрано 2 из 5</td></tr><tr><th>Датчик</th><td>показание 0,76, исправен</td></tr><tr><th>Кандидаты</th><td>C1 (80%)</td></tr><tr><th>Точки разведки</th><td>E1, E2, E3, E4</td></tr></table><h3>Что она ответила</h3><div class="said"><div class="lbl">Почему (поле reasoning)</div><p>Миссия: заряд важнее образцов, вернуть ≥30. Заряд 41.7, return_cost 12.5 → прибудем с 29.2, уже на грани. Триггер battery_threshold подтверждает критичность. C1 (conf 0.8, cost_to 1.5, cost_back 13.0) оставил бы 27.2 — ниже 30. Разведка тоже не допустима. Возврат немедленно, исполнитель сам обеспечит аварийный маршрут.</p><div class="lbl">Подцели</div><ol class="steps"><li><span class="stepb">1</span>вернуться на базу</li></ol><div class="lbl">Гипотезы модели</div><p class="muted">нет</p></div></div></div>
+<h3>Дословно</h3>
+<div class="raw"><div class="pane"><div class="who">Робот → модель</div><pre><code>{
+ &quot;mission&quot;: &quot;Заряд важнее образцов: вернись на базу, сохранив не меньше 30 единиц заряда.&quot;,
+ &quot;trigger&quot;: &quot;battery_threshold&quot;,
+ &quot;time_s&quot;: 28.0,
+ &quot;time_limit_s&quot;: 600.0,
+ &quot;battery&quot;: 41.7,
+ &quot;battery_start&quot;: 60.0,
+ &quot;pose&quot;: {
+  &quot;x&quot;: 1.06,
+  &quot;y&quot;: -0.48
+ },
+ &quot;base&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;samples&quot;: {
+  &quot;collected&quot;: 2,
+  &quot;total&quot;: 5
+ },
+ &quot;return_cost&quot;: 12.5,
+ &quot;candidates&quot;: [
+  {
+   &quot;id&quot;: &quot;C1&quot;,
+   &quot;x&quot;: 1.45,
+   &quot;y&quot;: -0.45,
+   &quot;confidence&quot;: 0.8,
+   &quot;cost_to&quot;: 1.5,
+   &quot;cost_back&quot;: 13.0,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;explore_points&quot;: [
+  {
+   &quot;id&quot;: &quot;E1&quot;,
+   &quot;x&quot;: 1.25,
+   &quot;y&quot;: -0.75,
+   &quot;unseen_share&quot;: 0.8,
+   &quot;cost_to&quot;: 1.3,
+   &quot;cost_back&quot;: 12.3,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: 1.75,
+   &quot;y&quot;: -0.25,
+   &quot;unseen_share&quot;: 0.81,
+   &quot;cost_to&quot;: 2.4,
+   &quot;cost_back&quot;: 13.9,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E3&quot;,
+   &quot;x&quot;: 0.75,
+   &quot;y&quot;: -0.25,
+   &quot;unseen_share&quot;: 0.57,
+   &quot;cost_to&quot;: 2.5,
+   &quot;cost_back&quot;: 11.1,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E4&quot;,
+   &quot;x&quot;: 1.25,
+   &quot;y&quot;: 0.25,
+   &quot;unseen_share&quot;: 0.51,
+   &quot;cost_to&quot;: 3.3,
+   &quot;cost_back&quot;: 9.2,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;soil_zones&quot;: [
+  {
+   &quot;id&quot;: &quot;S1&quot;,
+   &quot;x&quot;: 0.63,
+   &quot;y&quot;: -0.5,
+   &quot;radius&quot;: 0.25,
+   &quot;mult&quot;: 3.87,
+   &quot;evidence_m&quot;: 0.89,
+   &quot;status&quot;: &quot;confirmed&quot;
+  }
+ ],
+ &quot;hazards&quot;: [],
+ &quot;sensor&quot;: {
+  &quot;reading&quot;: 0.76,
+  &quot;noise&quot;: 0.05,
+  &quot;status&quot;: &quot;ok&quot;
+ },
+ &quot;recent_events&quot;: [],
+ &quot;alarms&quot;: [],
+ &quot;open_hypotheses&quot;: [
+  {
+   &quot;id&quot;: &quot;H4&quot;,
+   &quot;statement&quot;: &quot;образец лежит около (1.5; -0.4)&quot;
+  }
+ ]
+}</code></pre></div>
+<div class="pane"><div class="who">Модель → робот</div><pre><code>{
+ &quot;reasoning&quot;: &quot;Миссия: заряд важнее образцов, вернуть ≥30. Заряд 41.7, return_cost 12.5 → прибудем с 29.2, уже на грани. Триггер battery_threshold подтверждает критичность. C1 (conf 0.8, cost_to 1.5, cost_back 13.0) оставил бы 27.2 — ниже 30. Разведка тоже не допустима. Возврат немедленно, исполнитель сам обеспечит аварийный маршрут.&quot;,
+ &quot;hypotheses&quot;: [],
+ &quot;subgoals&quot;: [
+  {
+   &quot;type&quot;: &quot;return_base&quot;
+  }
+ ]
+}</code></pre></div></div>
+<p class="where">qwen3.8-flash-next · ответ за 18 с · 2461 токенов на входе, 1166 на выходе · файл кэша <code>3072122a…</code></p></section><section id="c10"><div class="num">Ситуация 10</div><h2>Модель ошиблась: пустой ответ и повторный запрос</h2><p class="tag">Первый ответ не прошёл проверку. Робот отправил модели текст ошибки и получил годный план со второй попытки.</p>
+<div class="duo"><figure class="map"><svg viewBox="0 0 294 270" role="img" aria-label="Что известно модели"><use href="#arena" transform="translate(153.4,135.2) scale(52.0,-52.0)"/><circle cx="208.5" cy="106.6" r="14.6" class="soil" data-tip="S1: дорогой грунт ×2,0, измерено на 1,1 м пути, confirmed"/><text x="208.5" y="110.1" class="zl">×2,0</text><circle cx="185.6" cy="145.6" r="23.5" class="haz" data-tip="Z1: опасная зона"/><text x="185.6" y="149.1" class="zl">!</text><line x1="166.4" y1="29.6" x2="145.6" y2="54.6" class="plan" marker-end="url(#arrow)"/><line x1="145.6" y1="54.6" x2="140.4" y2="44.2" class="plan" marker-end="url(#arrow)"/><rect x="135.4" y="39.2" width="10" height="10" rx="2" class="ep" data-tip="E1: точка разведки, не проверено 97% окрестности, дорога 1,5 ед."/><text x="140.4" y="35.2" class="idl">E1</text><rect x="109.4" y="65.2" width="10" height="10" rx="2" class="ep" data-tip="E2: точка разведки, не проверено 66% окрестности, дорога 3,3 ед."/><text x="114.4" y="61.2" class="idl">E2</text><rect x="135.4" y="91.2" width="10" height="10" rx="2" class="ep" data-tip="E3: точка разведки, не проверено 29% окрестности, дорога 4,0 ед."/><text x="140.4" y="87.2" class="idl">E3</text><rect x="187.4" y="39.2" width="10" height="10" rx="2" class="ep" data-tip="E4: точка разведки, не проверено 9% окрестности, дорога 1,5 ед."/><text x="192.4" y="35.2" class="idl">E4</text><circle cx="145.6" cy="54.6" r="6.5" class="cand" data-tip="C1: возможно, образец; уверенность 85%, дорога 1,7 ед., оттуда домой 6,9 ед."/><text x="145.6" y="44.6" class="idl">C1 · 85%</text><g data-tip="Подцель 1: подъехать и собрать: C1"><circle cx="156.6" cy="65.6" r="8" class="stepc"/><text x="156.6" y="69.6" class="stepn">1</text></g><g data-tip="Подцель 2: разведать: E1"><circle cx="151.4" cy="55.2" r="8" class="stepc"/><text x="151.4" y="59.2" class="stepn">2</text></g><rect x="44.4" y="156.2" width="10" height="10" rx="2" class="base" data-tip="База"/><circle cx="166.4" cy="29.6" r="6" class="robot" data-tip="Робот: (0,2; 2,0)"/></svg><figcaption><b>Карта по сообщению модели</b>
+<span>Только то, что робот ей написал. Стрелки и номера — её ответ.</span></figcaption></figure>
+<div><h3>Что модель узнала</h3><table class="facts"><tr><th>Миссия</th><td>Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.</td></tr><tr><th>Повод</th><td>место, к которому ехали, не подтвердилось <code>candidate_lost</code></td></tr><tr><th>Время</th><td>55 с из 600</td></tr><tr><th>Заряд</th><td>31,1 из 60; до базы нужно 8,6</td></tr><tr><th>Образцы</th><td>собрано 5 из 7</td></tr><tr><th>Датчик</th><td>показание 0,80, исправен</td></tr><tr><th>Кандидаты</th><td>C1 (85%)</td></tr><tr><th>Точки разведки</th><td>E1, E2, E3, E4</td></tr></table><h3>Что она ответила</h3><div class="said"><div class="lbl">Почему (поле reasoning)</div><p>Собрано 5 из 7, заряд 31.1 при возврате 8.6 — запас большой. C1: вероятность 0.85, путь 1.7, возврат 6.9, feasible — еду туда первым. Затем E1: не проверено 97%, путь 1.5, возврат 7.4. На базу рано, 2 образца ещё не найдены.</p><div class="lbl">Подцели</div><ol class="steps"><li><span class="stepb">1</span>подъехать и собрать: C1</li><li><span class="stepb">2</span>разведать: E1</li></ol><div class="lbl">Гипотезы модели</div><ul class="hyp"><li><b>Расход к C1 и E1 выше прогноза из-за близости подтверждённой зоны S1 (×1.98)</b><br><span class="test">Проверка: сравнить расход на пути 1.7 м к C1 с прогнозом cost_to</span></li></ul></div></div></div>
+<h3>Дословно</h3>
+<div class="raw"><div class="pane"><div class="who">Робот → модель</div><pre><code>{
+ &quot;mission&quot;: &quot;Собери как можно больше образцов, избегай дорогих зон, вернись на базу до разрядки.&quot;,
+ &quot;trigger&quot;: &quot;candidate_lost&quot;,
+ &quot;time_s&quot;: 54.7,
+ &quot;time_limit_s&quot;: 600.0,
+ &quot;battery&quot;: 31.1,
+ &quot;battery_start&quot;: 60.0,
+ &quot;pose&quot;: {
+  &quot;x&quot;: 0.25,
+  &quot;y&quot;: 2.03
+ },
+ &quot;base&quot;: {
+  &quot;x&quot;: -2.0,
+  &quot;y&quot;: -0.5
+ },
+ &quot;samples&quot;: {
+  &quot;collected&quot;: 5,
+  &quot;total&quot;: 7
+ },
+ &quot;return_cost&quot;: 8.6,
+ &quot;candidates&quot;: [
+  {
+   &quot;id&quot;: &quot;C1&quot;,
+   &quot;x&quot;: -0.15,
+   &quot;y&quot;: 1.55,
+   &quot;confidence&quot;: 0.85,
+   &quot;cost_to&quot;: 1.7,
+   &quot;cost_back&quot;: 6.9,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;explore_points&quot;: [
+  {
+   &quot;id&quot;: &quot;E1&quot;,
+   &quot;x&quot;: -0.25,
+   &quot;y&quot;: 1.75,
+   &quot;unseen_share&quot;: 0.97,
+   &quot;cost_to&quot;: 1.5,
+   &quot;cost_back&quot;: 7.4,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E2&quot;,
+   &quot;x&quot;: -0.75,
+   &quot;y&quot;: 1.25,
+   &quot;unseen_share&quot;: 0.66,
+   &quot;cost_to&quot;: 3.3,
+   &quot;cost_back&quot;: 5.7,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E3&quot;,
+   &quot;x&quot;: -0.25,
+   &quot;y&quot;: 0.75,
+   &quot;unseen_share&quot;: 0.29,
+   &quot;cost_to&quot;: 4.0,
+   &quot;cost_back&quot;: 6.5,
+   &quot;feasible&quot;: true
+  },
+  {
+   &quot;id&quot;: &quot;E4&quot;,
+   &quot;x&quot;: 0.75,
+   &quot;y&quot;: 1.75,
+   &quot;unseen_share&quot;: 0.09,
+   &quot;cost_to&quot;: 1.5,
+   &quot;cost_back&quot;: 9.4,
+   &quot;feasible&quot;: true
+  }
+ ],
+ &quot;soil_zones&quot;: [
+  {
+   &quot;id&quot;: &quot;S1&quot;,
+   &quot;x&quot;: 1.06,
+   &quot;y&quot;: 0.55,
+   &quot;radius&quot;: 0.28,
+   &quot;mult&quot;: 1.98,
+   &quot;evidence_m&quot;: 1.14,
+   &quot;status&quot;: &quot;confirmed&quot;
+  }
+ ],
+ &quot;hazards&quot;: [
+  {
+   &quot;id&quot;: &quot;Z1&quot;,
+   &quot;x&quot;: 0.62,
+   &quot;y&quot;: -0.2,
+   &quot;radius&quot;: 0.4522197911918642
+  }
+ ],
+ &quot;sensor&quot;: {
+  &quot;reading&quot;: 0.8,
+  &quot;noise&quot;: 0.05,
+  &quot;status&quot;: &quot;ok&quot;
+ },
+ &quot;recent_events&quot;: [],
+ &quot;alarms&quot;: [],
+ &quot;open_hypotheses&quot;: [
+  {
+   &quot;id&quot;: &quot;H4&quot;,
+   &quot;statement&quot;: &quot;около (0.6; -0.2) опасная зона радиусом около 0.5 м&quot;
+  }
+ ]
+}</code></pre></div>
+<div class="pane"><div class="who">Модель → робот</div><pre><code>{
  &quot;reasoning&quot;: &quot;Собрано 5 из 7, заряд 31.1 при возврате 8.6 — запас большой. C1: вероятность 0.85, путь 1.7, возврат 6.9, feasible — еду туда первым. Затем E1: не проверено 97%, путь 1.5, возврат 7.4. На базу рано, 2 образца ещё не найдены.&quot;,
  &quot;hypotheses&quot;: [
   {
@@ -524,86 +1466,38 @@
    &quot;target&quot;: &quot;E1&quot;
   }
  ]
-}</pre></div>
-</div>
-<p class="after"><b>Что сделал код.</b> Второй ответ прошёл проверку, план исполнен. Если бы и он не прошёл, решение принял бы запасной
-вариант — правило; робот без плана не остаётся никогда.</p></div>
-<h2>3. Модель в расследовании: автор, критик, рассказчик</h2>
-<p>Расследование начинается, когда агент <code>scientist</code> заметил странность. Здесь: «расход вырос: 6,8 ед/м при прогнозе 2,6».
-Код заранее составил список объяснений с начальными вероятностями и список опытов с их ценой и пользой — это вход для модели.
-Модель <b>GPT-6 Luna</b>. Это записанный отдельный пример, а не прогон: серия на моделях МАИ сейчас идёт (исследование L3).</p>
-<div class="cols">
- <div><h4>Объяснения, которые подготовил код</h4><table><thead><tr><th>Объяснение</th><th>Вероятность до опытов</th></tr></thead><tbody><tr><td>здесь дорогой грунт</td><td>40%</td></tr><tr><td>батарея теряет заряд сама по себе (сбой)</td><td>30%</td></tr><tr><td>заряд ушёл на повороты</td><td>20%</td></tr><tr><td>причина не из этого списка</td><td>10%</td></tr></tbody></table></div>
- <div><h4>Опыты, которые можно поставить</h4><table><thead><tr><th>Опыт</th><th>Цена, ед. заряда</th><th>Польза, бит</th></tr></thead><tbody><tr><td>постоять 2 секунды</td><td>0.05</td><td>0.9</td></tr><tr><td>проехать прямо 0,3 м</td><td>0.8</td><td>0.4</td></tr><tr><td>развернуться на месте на 90°</td><td>0.3</td><td>0.3</td></tr></tbody></table></div>
-</div>
-<div class="cols">
- <div><h4>Автор (модель): какие объяснения проверять и какими опытами</h4><pre class="tall">{
- &quot;consider&quot;: [
-  &quot;soil&quot;,
-  &quot;leak&quot;,
-  &quot;turn&quot;,
-  &quot;other&quot;
- ],
- &quot;extra&quot;: [],
- &quot;plan&quot;: [
-  {
-   &quot;test&quot;: &quot;rest&quot;,
-   &quot;distinguishes&quot;: [
-    &quot;soil&quot;,
-    &quot;leak&quot;,
-    &quot;turn&quot;
-   ],
-   &quot;refutes_if&quot;: &quot;измерено меньше 0.09 ед/с — leak исключается&quot;
-  },
-  {
-   &quot;test&quot;: &quot;spin&quot;,
-   &quot;distinguishes&quot;: [
-    &quot;soil&quot;,
-    &quot;turn&quot;
-   ],
-   &quot;refutes_if&quot;: &quot;измерено меньше 0.35 ед/рад — turn исключается&quot;
-  },
-  {
-   &quot;test&quot;: &quot;straight&quot;,
-   &quot;distinguishes&quot;: [
-    &quot;soil&quot;,
-    &quot;leak&quot;,
-    &quot;turn&quot;
-   ],
-   &quot;refutes_if&quot;: &quot;меньше 4.9 ед/м — soil исключается; больше 4.4 ед/м — leak исключается; больше 3.4 ед/м — turn исключается&quot;
-  }
- ],
- &quot;rationale&quot;: &quot;Пороги для опровержения взяты между предсказаниями с учётом их sigma: rest разделяет leak и остальные, spin — turn и soil, straight даёт различимые пары. Порядок по gain_bits/cost: rest, spin, straight; суммарная стоимость 1.15 ед. при бюджете 2.0.&quot;,
- &quot;source&quot;: &quot;llm&quot;,
- &quot;error&quot;: null
-}</pre></div>
- <div><h4>Критик (та же модель в другой роли): что не так с планом</h4><pre class="tall">{
- &quot;verdict&quot;: &quot;revise&quot;,
- &quot;issues&quot;: [
-  {
-   &quot;kind&quot;: &quot;no_refutation&quot;,
-   &quot;text&quot;: &quot;В условии нет результата, который исключает объяснение: около 0.15 ед/с говорит лишь, что leak не опровергнуто, а около 0.01 — что оно не подтверждается.&quot;,
-   &quot;fix&quot;: &quot;Указать, при каком измеренном расходе в ед/с объяснение leak исключается.&quot;,
-   &quot;target&quot;: &quot;rest&quot;
-  },
-  {
-   &quot;kind&quot;: &quot;no_refutation&quot;,
-   &quot;text&quot;: &quot;Условие не указывает результат, исключающий объяснение: около 0.12 ед/рад лишь не подтверждает turn, а около 0.5 — не опровергает его.&quot;,
-   &quot;fix&quot;: &quot;Указать измеренный диапазон ед/рад, при котором turn исключается.&quot;,
-   &quot;target&quot;: &quot;spin&quot;
-  },
-  {
-   &quot;kind&quot;: &quot;no_refutation&quot;,
-   &quot;text&quot;: &quot;Условия говорят, какие значения поддерживают объяснения, но не задают результат измерения, который исключит soil, leak или turn.&quot;,
-   &quot;fix&quot;: &quot;Для каждого объяснения указать результат измерения в ед/м, при котором оно исключается.&quot;,
-   &quot;target&quot;: &quot;straight&quot;
-  }
- ],
- &quot;source&quot;: &quot;llm&quot;,
- &quot;error&quot;: null
-}</pre></div>
-</div>
-<h4>Рассказчик (модель): вывод по завершённому расследованию</h4><pre>Расход вырос до 6.8 ед/м при прогнозе 2.6 ед/м. Робот проверил, сколько заряда уходит, пока он стоит: при дорогом грунте или тратах на повороты ожидалось 0.01 ед/с, а при сбое батареи — 0.15 ед/с; измерение показало 0.14 ед/с. Расчёт указывает, что батарея теряет заряд сама по себе (сбой). Дальше робот заложит утечку 0.14 ед/с в запас на возврат и поедет на базу раньше.</pre>
-<p class="after"><b>Что остаётся за кодом.</b> Вероятности объяснений после каждого опыта и итоговый вердикт считает программа по измерениям.
-В ответах модели таких полей нет; если модель напишет в тексте вероятность, которой не было во входе, ответ считается ошибочным.</p>
-</body></html>
+}</code></pre></div></div>
+<div class="retry"><div class="pane bad"><div class="who">Первый ответ модели — не принят</div><pre><code>(пустой ответ)</code></pre></div><div class="pane"><div class="who">Робот → модель: сообщение об ошибке</div><pre><code>Ответ не принят. Ошибки:
+- пустой ответ
+- ответ обрезан по лимиту токенов, отвечай короче
+Исправь и верни план заново: один JSON-объект по схеме, без пояснений и без Markdown.</code></pre></div></div><p class="where">DeepSeek-V4-Flash · ответ за 4 с · 2738 токенов на входе, 372 на выходе · файл кэша <code>9b77a487…</code></p></section>
+</main><div id="tip" hidden></div><script>
+(function(){
+  var tip=document.getElementById('tip');
+  function place(e){var p=14,w=tip.offsetWidth,h=tip.offsetHeight,x=e.clientX+p,y=e.clientY+p;
+    if(x+w>innerWidth-8)x=e.clientX-w-p; if(y+h>innerHeight-8)y=e.clientY-h-p; tip.style.left=Math.max(4,x)+'px'; tip.style.top=Math.max(4,y)+'px';}
+  function ru(v,d){return v.toFixed(d).replace('.',',');}
+  var live=null;
+  function clear(){if(live){live.querySelector('.cross').setAttribute('visibility','hidden');live.querySelector('.crossdot').setAttribute('visibility','hidden');live=null;}}
+  document.addEventListener('mousemove',function(e){
+    var el=e.target.closest&&e.target.closest('[data-tip]');
+    if(el){clear();tip.textContent=el.dataset.tip;tip.hidden=false;place(e);return;}
+    var ts=e.target.closest&&e.target.closest('svg.ts');
+    if(ts){
+      if(live&&live!==ts)clear(); live=ts;
+      if(!ts._t){ts._t=JSON.parse(ts.dataset.t);ts._v=JSON.parse(ts.dataset.v);}
+      var r=ts.getBoundingClientRect(),vb=ts.viewBox.baseVal,vx=(e.clientX-r.left)*vb.width/r.width;
+      var x0=+ts.dataset.x0,x1=+ts.dataset.x1,y0=+ts.dataset.y0,y1=+ts.dataset.y1,tm=+ts.dataset.tmax,ym=+ts.dataset.ymax;
+      var t=Math.min(tm,Math.max(0,(vx-x0)/(x1-x0)*tm)),a=ts._t,i=0,best=1e9;
+      for(var k=0;k<a.length;k++){var d=Math.abs(a[k]-t);if(d<best){best=d;i=k;}}
+      var cx=x0+a[i]/tm*(x1-x0),cy=y0-Math.min(ym,Math.max(0,ts._v[i]))/ym*(y0-y1);
+      var c=ts.querySelector('.cross'),dot=ts.querySelector('.crossdot');
+      c.setAttribute('x1',cx);c.setAttribute('x2',cx);c.setAttribute('visibility','visible');
+      dot.setAttribute('cx',cx);dot.setAttribute('cy',cy);dot.setAttribute('visibility','visible');
+      tip.textContent=ru(a[i],0)+'-я секунда: датчик показывает '+ru(ts._v[i],2);tip.hidden=false;place(e);return;
+    }
+    clear();tip.hidden=true;
+  });
+  document.addEventListener('mouseleave',function(){clear();tip.hidden=true;});
+})();
+</script></body></html>

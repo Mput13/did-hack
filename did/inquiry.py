@@ -329,6 +329,9 @@ class Investigator:
             self.active = inquiry
         self.inquiries.append(inquiry)
         inquiry.held, inquiry.est = held or [], est or {}
+        cfg = self.a.cfg                # способ выбора опыта; случайный воспроизводим: зерно — сценарий и номер расследования
+        inquiry.policy = cfg.inquiry_choice
+        inquiry.rng = np.random.default_rng([cfg.inquiry_seed, len(self.inquiries)])
         self._susp = []
         if self.roles is not None and hasattr(obs, 'battery'):     # мгновенная сверка у образца идёт без обсуждения
             self._deliberate(inquiry, obs)
@@ -399,6 +402,7 @@ class Investigator:
         if self.run is None:
             test = q.choose()
             if test is None or a._returning and test.action['kind'] != 'pause':
+                q.stop = q.stop or 'returning'
                 self._conclude(obs)
                 return False
             self.run = {'test': test, 'phase': 'settle', 't': obs.t}
@@ -933,4 +937,8 @@ class Investigator:
 
     def export(self):
         return {'inquiries': [q.to_dict() for q in self.inquiries], 'energy_model': self.model.summary(),
-                'fault_durations': self.durations}
+                'fault_durations': self.durations,
+                # как выбирались опыты (R12): по одной записи на расследование, в том же порядке
+                'choices': [{'id': q.id, 'policy': q.policy, 'stop': q.stop, 'maneuvers': q.maneuvers,
+                             'spent': round(q.spent, 3), 'budget': round(q.budget, 3), 'steps': q.steps}
+                            for q in self.inquiries]}
