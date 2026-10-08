@@ -44,25 +44,25 @@ const R = {
   gzBefore: "8 из 9", gzAfter: "7 из 7",   // G2: возврат на базу в Gazebo
   p1: "6,4",                  // P1: +6,38 [+2,89; +9,78] на нетронутых сценариях 8001–8040, трудный уровень (после ревью)
   wait: 73,                   // R3: −73,35 [−98,52; −49,23] при 15 с ожидания, трудный уровень
-  noWait: 42,                 // R16: +41,9 [+25,0; +59,5] «ехать по правилу» против «стоять и ждать»; работа на ревью
+  noWait: 42,                 // R16: +41,9 [+25,0; +59,5] «ехать по правилу» против «стоять и ждать»; ревью вернуло работу
+  ceiling: "92,5",            // A1: потолок при полном знании, трудный уровень, 160 нетронутых сценариев
+  slam: "96–99%",             // F2: 96,0 / 98,5 / 98,7 % клеток в трёх прогонах Gazebo; работа на втором круге
 };
 
-// Плашки: Г — обзор Gemini, И — инженер, Р — ревью, ✓ — принято, Ч — решение человека, → — одно исследование выросло из другого.
+// Шаги: Г — Gemini (исследователь), И — Claude Opus (инженер; в строке обзоров — ведущий, проверявший ссылки),
+// Р — GPT Sol (ревью), ✓ — принято, → — одно исследование выросло из другого. На слайде вместо букв — логотипы моделей.
+// Цепочки — из docs/requirements_check.html, раздел 8, и research/agenda.yaml; строка без ✓ — работа не принята.
 const LANES = [
-  ["R1, R4. Среда и гипотезы", "ГЧРИРИРИРИ✓", `ревью нашло ${R.reviewFindings} ошибок; ${R.flipped === 2 ? "два вывода" : R.flipped + " вывода"} перевёрнуты`],
-  ["R13. Миссия, заданная словами", "ГИРИ✓", `модель выполняет миссию ${R.mission}, правило — 0 из 6`],
+  ["R1, R4. Среда и гипотезы", "ГРИРИРИРИ✓", `${R.reviewFindings} ошибок найдено, ${R.flipped === 2 ? "два вывода" : R.flipped + " вывода"} перевёрнуты`],
+  ["K1–K4. Обзоры литературы", "ГГГГИ✓", "проверка нашла две выдуманные ссылки"],
+  ["R13. Миссия, заданная словами", "ГИРИ✓", `модель — миссия ${R.mission}, правило — 0 из 6`],
+  ["R3 → R16. Цена ожидания модели", "ГИИ✓→ИР", `ждать — минус ${R.wait} очка; ехать, пока думает: +${R.noWait}`],
+  ["R10. Смена грунта на пути", "ИРИР✓", "выигрыш не показан — так и записано"],
   ["G2. Потеря положения в Gazebo", "ИРИ✓", `возврат на базу в Gazebo: ${R.gzBefore} → ${R.gzAfter}`],
-  ["P1. Где робот теряет очки", "ЧИРИ✓", `пережидание сбоя датчика: +${R.p1} очка на трудном уровне`],
-  ["R3 → R16. Цена ожидания модели", "ГИИ✓→И", `ждать модель — минус ${R.wait} очка → ехать, пока думает: +${R.noWait}`],
-  ["R10. Смена грунта на пути", "ИРИР✓", "выигрыш не показан — честный отрицательный результат"],
-];
-const DECISIONS = [
-  ["«У нас не MVP, делаем в самом амбициозном виде»", "не минимальная версия: два симулятора, 20+ опытов"],
-  ["«Робот-учёный» — идея коллеги", "верных выводов робота — 98,5%"],
-  ["«Исследователи не пишут код»", `в их коде ревью нашло ${R.reviewFindings} ошибок`],
-  ["«Главная цель — результативный робот»", "разбор потерь очков: +6 очков на трудном уровне"],
-  ["«Не два варианта агента, а больше»", "шесть устройств агента и потолок 92,5 очка"],
-  ["«Никакого маршрутизатора моделей»", null],
+  ["P1. Где робот теряет очки", "ИРИ✓", `пережидает сбой датчика: +${R.p1} очка`],
+  ["A1. Новые схемы агента", "ИРИ✓", `не лучше нынешней; потолок — ${R.ceiling} очка`],
+  ["R14. Самокалибровка датчика", "ИР", "ревью вернуло работу; отложена"],
+  ["F2. SLAM вместо готовой карты", "ГИРИ", `совпадение с готовой картой ${R.slam}; правки идут`],
 ];
 
 // ---------- 2. оформление (как в build_checkpoint2.js) ----------
@@ -120,14 +120,24 @@ function bullets(slide, items, o) {
   const paragraphs = items.map((item, k) => ({ text: item, options: { bullet: true, breakLine: k < items.length - 1 } }));
   text(slide, paragraphs, { paraSpaceAfter: 4, ...o });
 }
-// Плашка шага: буква на цветном квадрате. Цвет повторяет букву, а не заменяет её.
-const CHIP = { "Г": C.accent2, "И": C.accent5, "Р": C.accent6, "✓": C.accent3, "Ч": C.accent1 };
-const CHIP_S = 0.27, CHIP_GAP = 0.04;
+// Значок шага: логотип модели на светлой плитке; «принято» — галочка. Логотипы — товарные знаки своих владельцев,
+// файлы взяты из набора @lobehub/icons-static-svg и лежат в assets/logos (svg и png 256×256).
+const LOGOS = path.join(__dirname, "assets", "logos");
+const LOGO = { "Г": path.join(LOGOS, "gemini.png"), "И": path.join(LOGOS, "claude.png"), "Р": path.join(LOGOS, "openai.png") };
+const CHIP_S = 0.28, CHIP_GAP = 0.04;
+function logo(slide, letter, x, y, size, name) {
+  slide.addImage({ path: LOGO[letter], x, y, w: size, h: size, objectName: name });
+}
 function chip(slide, letter, x, y, name) {
-  slide.addText(letter, {
-    shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.04, x, y, w: CHIP_S, h: CHIP_S, fill: { color: CHIP[letter] },
-    color: C.background1, bold: true, fontSize: 13, align: "center", valign: "middle", margin: 0, isTextBox: true, objectName: name,
-  });
+  if (letter === "✓") {
+    slide.addText("✓", {
+      shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.04, x, y, w: CHIP_S, h: CHIP_S, fill: { color: C.accent3 },
+      color: C.background1, bold: true, fontSize: 13, align: "center", valign: "middle", margin: 0, isTextBox: true, objectName: name,
+    });
+    return;
+  }
+  slide.addShape(pres.shapes.ROUNDED_RECTANGLE, { x, y, w: CHIP_S, h: CHIP_S, rectRadius: 0.04, fill: { color: C.background2 }, objectName: `${name}-tile` });
+  logo(slide, letter, x + 0.045, y + 0.045, CHIP_S - 0.09, name);
 }
 
 pres.addSection({ title: SEC });
@@ -158,22 +168,25 @@ pres.addSection({ title: SEC });
   card(s, lx, y0, lw, h, "lead-card");
   text(s, "Ведущий агент", { x: lx + 0.22, y: y0 + 0.16, w: lw - 0.44, h: 0.34, fontSize: 18, bold: true, objectName: "lead-head" });
   bullets(s, ["ведёт план", "пишет задания", "сводит ветки", "пересчитывает числа"], { x: lx + 0.22, y: y0 + 0.6, w: lw - 0.4, h: 1.5, color: C.text2, objectName: "lead-list" });
-  text(s, "Claude Opus 5.5", { x: lx + 0.22, y: y0 + h - 0.42, w: lw - 0.44, h: 0.3, fontSize: 12, color: C.accent5, valign: "bottom", objectName: "lead-model" });
+  logo(s, "И", lx + 0.22, y0 + h - 0.33, 0.19, "lead-logo");
+  text(s, "Claude Opus 5.5", { x: lx + 0.5, y: y0 + h - 0.42, w: lw - 0.72, h: 0.3, fontSize: 12, color: C.accent5, valign: "bottom", objectName: "lead-model" });
   arrow(s, lx + lw + 0.08, mid, rx - 0.08, "arrow-lead-roles");
 
   const rw = (X0 + CW - rx - rgap) / 2, rh = (h - rgap) / 2;
   const roles = [
-    ["Исследователи", "обзоры литературы; кода не пишут", "Gemini 3.8 Flash"],
-    ["Инженеры", "код, опыт, отчёт — каждый в своей копии кода", "Claude Opus 5.5"],
-    ["Ревьюер (проверяющий)", "читает разницу, ищет ошибки, ничего не меняет", "GPT-6.1 Sol"],
-    ["Советники", "редко, только на развилках", "Claude Fable 5.1 и GPT-6 Astra"],
+    ["Исследователи", "обзоры литературы; кода не пишут", "Gemini 3.8 Flash", "Г"],
+    ["Инженеры", "код, опыт, отчёт — каждый в своей копии кода", "Claude Opus 5.5", "И"],
+    ["Ревьюер (проверяющий)", "читает разницу, ищет ошибки, ничего не меняет", "GPT-6.1 Sol", "Р"],
+    ["Советники", "редко, только на развилках", "Fable 5.1 и GPT-6 Astra", "ИР"],
   ];
-  roles.forEach(([head, body, model], i) => {
+  roles.forEach(([head, body, model, marks], i) => {
     const x = rx + (i % 2) * (rw + rgap), y = y0 + Math.floor(i / 2) * (rh + rgap);
     card(s, x, y, rw, rh, `role-${i + 1}-card`);
     text(s, head, { x: x + 0.2, y: y + 0.12, w: rw - 0.4, h: 0.3, bold: true, objectName: `role-${i + 1}-head` });
     text(s, body, { x: x + 0.2, y: y + 0.43, w: rw - 0.35, h: 0.56, color: C.text2, objectName: `role-${i + 1}-body` });
-    text(s, model, { x: x + 0.2, y: y + rh - 0.29, w: rw - 0.4, h: 0.22, fontSize: 12, color: C.accent5, valign: "bottom", objectName: `role-${i + 1}-model` });
+    [...marks].forEach((m, k) => logo(s, m, x + 0.2 + k * 0.25, y + rh - 0.28, 0.19, `role-${i + 1}-logo-${k + 1}`));
+    const mx = x + 0.2 + marks.length * 0.25 + 0.03;
+    text(s, model, { x: mx, y: y + rh - 0.29, w: x + rw - 0.2 - mx, h: 0.22, fontSize: 12, color: C.accent5, valign: "bottom", wrap: false, objectName: `role-${i + 1}-model` });
   });
 
   // цикл одного исследования
@@ -217,58 +230,42 @@ pres.addSection({ title: SEC });
   });
 }
 
-// ---------- слайд 2: решения людей и ход исследований ----------
+// ---------- слайд 2: ход исследований ----------
 {
-  const s = content("Что решали люди и как прошли исследования",
-    "На развилках решал человек; код каждой работы до вливания читала независимая модель-ревьюер", [
-      "Слева — исследования. Каждая плашка — один шаг: обзор, работа инженера, ревью или решение человека.",
-      `В первых двух исследованиях ревью нашло ${R.reviewFindings} ошибок, и два вывода пришлось перевернуть.`,
+  const s = content("Как прошли исследования",
+    "Каждая строка — одно исследование, каждый значок — один шаг: какая модель работала и чем закончилось", [
+      "Каждая строка — одно исследование, каждый значок — один шаг: обзор исследователя, работа инженера или ревью. Галочка — работа принята.",
+      `В первых двух исследованиях ревью нашло ${R.reviewFindings} ошибок, и два вывода пришлось перевернуть. В обзорах литературы проверка нашла две выдуманные ссылки.`,
       `Робот с языковой моделью выполнил миссию, заданную словами, ${R.mission}; робот с простым правилом — ни разу.`,
+      `Ожидание ответа модели стоило ${R.wait} очка; если робот едет, пока модель думает, возвращается ${R.noWait} — эту работу ревью вернуло, она ещё не принята.`,
       `В Gazebo робот вернулся на базу в прогонах ${R.gzBefore}, после правки — ${R.gzAfter}. Разбор потерь дал плюс шесть очков на трудном уровне.`,
-      `Ожидание ответа модели стоило ${R.wait} очка; если робот едет, пока модель думает, возвращается ${R.noWait} — эта работа ещё на ревью.`,
-      "А один опыт выигрыша не показал, и мы говорим об этом прямо.",
-      "Справа — решения людей: не минимальная версия, робот-учёный, исследователи не пишут код, главная цель — результативный робот.",
+      "Не всё закончилось выигрышем: один опыт его не показал, новые схемы агента оказались не лучше нынешней, одну работу ревью вернуло, и мы её отложили.",
       "Качество держится на устройстве процесса, а не на вере в один ответ модели.",
     ]);
 
-  const lw = 6.4, rxx = X0 + lw + 0.3, rww = X0 + CW - rxx, headH = 0.3, y1 = TOP + headH + 0.12, yEnd = 5.99;
-  // легенда плашек
-  const legend = [["Г", "Gemini"], ["И", "инженер"], ["Р", "ревью"], ["✓", "принято"], ["Ч", "решение человека"]];
+  const headH = 0.3, y1 = TOP + headH + 0.14, yEnd = 5.99;
+  // легенда значков
+  const legend = [["Г", "Gemini 3.8 Flash — исследователь"], ["И", "Claude Opus 5.5 — инженер"], ["Р", "GPT-6.1 Sol — ревьюер"], ["✓", "работа принята"]];
   let gx = X0;
   legend.forEach(([letter, word], i) => {
-    const w = word.length * 0.097 + 0.04;
-    chip(s, letter, gx, TOP + 0.015, `legend-${i + 1}-chip`);
-    text(s, word, { x: gx + CHIP_S + 0.07, y: TOP, w, h: headH, fontSize: 13, color: C.text2, valign: "middle", wrap: false, objectName: `legend-${i + 1}-word` });
-    gx += CHIP_S + 0.07 + w + 0.11;
+    const w = word.length * 0.094 + 0.04;
+    chip(s, letter, gx, TOP + 0.01, `legend-${i + 1}-chip`);
+    text(s, word, { x: gx + CHIP_S + 0.08, y: TOP, w, h: headH, fontSize: 13, color: C.text2, valign: "middle", wrap: false, objectName: `legend-${i + 1}-word` });
+    gx += CHIP_S + 0.08 + w + 0.22;
   });
-  // дорожки исследований
+  // строки исследований: название | шаги | итог
+  const nameW = 3.95, chipsX = X0 + nameW + 0.1, chipsW = 10 * (CHIP_S + CHIP_GAP), resX = chipsX + chipsW + 0.15, resW = X0 + CW - resX;
   const lh = (yEnd - y1) / LANES.length;
   LANES.forEach(([name, chain, result], i) => {
-    const y = y1 + i * lh;
-    if (i > 0) s.addShape(pres.shapes.LINE, { x: X0, y: y - 0.03, w: lw, h: 0, line: { color: C.background2, width: 1 }, objectName: `lane-${i + 1}-rule` });
-    const letters = [...chain];
-    const cw = letters.length * (CHIP_S + CHIP_GAP) - CHIP_GAP;
-    text(s, name, { x: X0, y, w: lw - cw - 0.15, h: 0.28, bold: true, valign: "middle", objectName: `lane-${i + 1}-name` });
-    letters.forEach((letter, k) => {
-      const x = X0 + lw - cw + k * (CHIP_S + CHIP_GAP);
-      if (letter === "→") text(s, "→", { x, y, w: CHIP_S, h: 0.28, fontSize: 14, bold: true, color: C.accent5, align: "center", valign: "middle", objectName: `lane-${i + 1}-next` });
-      else chip(s, letter, x, y + 0.005, `lane-${i + 1}-chip-${k + 1}`);
+    const y = y1 + i * lh, cy = y + (lh - CHIP_S) / 2;
+    s.addShape(pres.shapes.LINE, { x: X0, y, w: CW, h: 0, line: { color: C.background2, width: 1 }, objectName: `lane-${i + 1}-rule` });
+    text(s, name, { x: X0, y, w: nameW, h: lh, bold: true, valign: "middle", wrap: false, objectName: `lane-${i + 1}-name` });
+    [...chain].forEach((letter, k) => {
+      const x = chipsX + k * (CHIP_S + CHIP_GAP);
+      if (letter === "→") text(s, "→", { x, y, w: CHIP_S, h: lh, fontSize: 14, bold: true, color: C.accent5, align: "center", valign: "middle", objectName: `lane-${i + 1}-next` });
+      else chip(s, letter, x, cy, `lane-${i + 1}-chip-${k + 1}`);
     });
-    text(s, result, { x: X0, y: y + 0.275, w: lw, h: 0.27, color: C.text2, valign: "middle", objectName: `lane-${i + 1}-result` });
-  });
-
-  // решения людей
-  text(s, "Решения людей", { x: rxx, y: TOP, w: rww, h: headH, bold: true, valign: "middle", objectName: "decisions-head" });
-  const dx = rxx + CHIP_S + 0.12, dw = X0 + CW - dx;
-  const heights = DECISIONS.map(([q, out]) => (q.length > 40 ? 0.54 : 0.28) + (out ? 0.24 : 0));
-  const dgap = (yEnd - y1 - heights.reduce((a, b) => a + b, 0)) / (DECISIONS.length - 1);
-  let dy = y1;
-  DECISIONS.forEach(([quote, out], i) => {
-    const qh = heights[i] - (out ? 0.24 : 0);
-    chip(s, "Ч", rxx, dy + 0.005, `decision-${i + 1}-chip`);
-    text(s, quote, { x: dx, y: dy, w: dw, h: qh, bold: true, valign: "middle", objectName: `decision-${i + 1}-quote` });
-    if (out) text(s, out, { x: dx, y: dy + qh, w: dw, h: 0.24, fontSize: 13, color: C.text2, valign: "middle", objectName: `decision-${i + 1}-out` });
-    dy += heights[i] + dgap;
+    text(s, result, { x: resX, y, w: resW, h: lh, fontSize: 14, color: C.text2, valign: "middle", wrap: false, objectName: `lane-${i + 1}-result` });
   });
 
   // вывод
@@ -301,7 +298,7 @@ function writeSpeech() {
     "- **Вы сами читали код?** Нет. Код каждой работы до вливания читала независимая модель-ревьюер, и ни одна работа не прошла ревью с первого раза. Человек задавал цель, роли и ограничения и принимал решения на развилках — около сорока содержательных сообщений за сутки.",
     "- **Агенты работали сами?** Они работали часами без участия человека, в том числе ночью, но направление, роли и приоритеты задавал человек, и несколько его сообщений развернули работу.",
     `- **Что нашло ревью?** В первых двух исследованиях — шесть ошибок подсчёта и одну ошибку самого робота: разовую потерю заряда от штрафа он принимал за дорогой грунт. Два вывода оказались неверны и исправлены. Всего ревью было ${N.reviews}, и все ${N.reviews} вернули работу на доработку.`,
-    `- **Откуда +${R.noWait} очка?** Исследование R16 на трудном уровне: робот едет, пока модель думает, вместо того чтобы стоять. Измерено на имитаторе модели, работа сдана и ждёт ревью — на слайде у неё нет отметки «принято».`,
+    `- **Откуда +${R.noWait} очка?** Исследование R16 на трудном уровне: робот едет, пока модель думает, вместо того чтобы стоять. Измерено на имитаторе модели; ревью вернуло работу на исправления — на слайде у неё нет отметки «принято».`,
     "- **Почему показываете опыт без выигрыша?** Исследование R10 (смена грунта на пути) выигрыша в очках не показало. Правка оставлена выключенной, результат записан как отрицательный.",
     "- **Где логи разработки?** План исследований — `research/agenda.yaml`, правила — `research/PROTOCOL.md`, отчёты с числами — `research/findings/`, история правок — в git.",
     "");
