@@ -75,6 +75,9 @@ class AgentConfig:
     fault_wait_s: float = 120.0       # бюджет ожидания датчика на весь прогон, с
     fault_wait_charge: float = 3.0    # и по заряду, ед. (по показаниям батареи)
     straight_paths: bool = False      # спрямлять путь по клеткам там, где прямая проходима и не дороже
+    # --- абляция R12 (research/findings/R12.md): как исследователь выбирает опыт; gain — прежнее поведение
+    inquiry_choice: str = 'gain'      # gain | bits | random | cheapest | fixed | worst | blind (did.science.CHOICES)
+    inquiry_seed: int = 0             # зерно случайного выбора; прогон подставляет номер сценария (did/runner.py)
 
     def to_dict(self):
         return asdict(self)

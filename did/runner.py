@@ -118,6 +118,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     elif isinstance(scenario, dict):
         scenario = Scenario.from_dict(scenario)
     cls, cfg = make_agent(agent, config)
+    if getattr(cfg, 'inquiry_choice', 'gain') != 'gain':      # R12: случайный выбор опыта воспроизводим по сценарию
+        cfg = replace(cfg, inquiry_seed=int(scenario.seed))
     arm = arm or cfg.name
     world = FastSim(arena, scenario, rules, seed=seed, **(sim or {}))
     rec = Recorder()
