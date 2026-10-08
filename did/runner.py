@@ -43,7 +43,7 @@ def make_planner(cfg, llm=None, seed=0):
             opts.setdefault('seed', seed)
         client = make_client(**opts)
     return LLMPlanner(client, system_prompt=load_system_prompt(prompt) if prompt else None,
-                      mission=getattr(cfg, 'mission', None))
+                      mission=getattr(cfg, 'mission', None), strategy=getattr(cfg, 'llm_strategy', 'single'))
 
 
 def make_agent(name, config=None):
