@@ -4,6 +4,8 @@
     ./px python -m did.orchestration_eval                       # single, critic, scored, scored_calc
     ./px python -m did.orchestration_eval --strategies vote     # досчитать ещё способ
     ./px python -m did.orchestration_eval --no-run              # пересобрать сводку по записям, без сети
+    ./px python -m did.orchestration_eval --cache-only --out R3_replay --strategies single critic scored scored_calc vote
+                                                                # строгий повтор: ответы только из кэша, сеть не трогается
 
 Два режима времени на каждый способ:
   frozen  — мир стоит, пока модель думает (так устроен быстрый симулятор): качество решений в чистом виде;
@@ -13,6 +15,9 @@
 Ответы модели кэшируются (runs/_llm_cache): повтор не тратит запросов и даёт те же числа. Одновременно идёт
 не больше --jobs прогонов (не больше трёх), в каждом запросы идут по одному.
 Записи — runs/R3_real/<способ>-<режим>/<сценарий>.json.gz, сводка — runs/R3_real/summary.json.
+--cache-only — режим «только кэш» (did/llm.py, cache='only'): адрес и ключ сервера не нужны, запрос, которого в
+кэше нет, останавливает свой прогон (CacheMiss), и такие прогоны перечисляются в конце. --out — другая папка
+в runs/, чтобы повтор не затирал исходные записи.
 """
 import argparse
 import json
@@ -20,6 +25,7 @@ import statistics
 import time
 from concurrent.futures import ProcessPoolExecutor
 
+from .llm import CacheMiss
 from .llm_cache import ReplyCache
 from .recorder import load_trace
 from .runner import RUNS, run_episode
@@ -82,15 +88,19 @@ def _row(strategy, mode, level, seed, wait, file):
 
 
 def _run(task):
-    strategy, mode, level, seed, wait, run = task
+    strategy, mode, level, seed, wait, run, out, cache_only = task
     arm = f'{strategy}-{mode}'
-    file = f'{EXPERIMENT}/{arm}/{level}-{seed}.json.gz'
+    file = f'{out}/{arm}/{level}-{seed}.json.gz'
     if run:
         if strategy == 'rule':
-            run_episode(level, seed, 'adaptive', experiment=EXPERIMENT, arm=arm)
+            run_episode(level, seed, 'adaptive', experiment=out, arm=arm)
         else:
-            run_episode(level, seed, 'adaptive_llm', experiment=EXPERIMENT, arm=arm, llm=dict(LLM),
-                        config={'llm_strategy': strategy, 'llm_wait_s': wait})
+            try:
+                run_episode(level, seed, 'adaptive_llm', experiment=out, arm=arm,
+                            llm={**LLM, 'cache': 'only'} if cache_only else dict(LLM),
+                            config={'llm_strategy': strategy, 'llm_wait_s': wait})
+            except CacheMiss as e:           # строгий повтор: ответа нет в кэше — прогон не досчитан, сеть не тронута
+                return {'miss': str(e), 'strategy': strategy, 'mode': mode, 'level': level, 'seed': seed}
     elif not (RUNS / file).exists():
         return None
     return _row(strategy, mode, level, seed, wait, file)
@@ -127,8 +137,11 @@ def main(argv=None):
     ap.add_argument('--strategies', nargs='+', choices=(*STRATEGIES, 'vote'), default=list(STRATEGIES))
     ap.add_argument('--jobs', type=int, choices=(1, 2, 3), default=3, help='одновременных прогонов (и запросов)')
     ap.add_argument('--no-run', action='store_true', help='не считать прогоны, собрать сводку по записям')
+    ap.add_argument('--cache-only', action='store_true',
+                    help='ответы модели только из кэша; чего в кэше нет — прогон не считается, сеть не трогается')
+    ap.add_argument('--out', default=EXPERIMENT, help=f'папка записей и сводки в runs/ (по умолчанию {EXPERIMENT})')
     args = ap.parse_args(argv)
-    path = RUNS / EXPERIMENT / 'summary.json'
+    path = RUNS / args.out / 'summary.json'
     path.parent.mkdir(parents=True, exist_ok=True)
     old = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
     summary = {'model': MODEL, 'llm': LLM, 'scenarios': [f'{lv}-{sd}' for lv, sd in SCENARIOS],
@@ -138,6 +151,7 @@ def main(argv=None):
     run = not args.no_run
     calls_before = ReplyCache().calls().get(MODEL, 0)
     t0 = time.time()
+    missed = []                              # прогоны строгого повтора, которым не хватило ответа в кэше
 
     def put(rows):
         keys = {(r['strategy'], r['mode'], r['level'], r['seed']) for r in rows}
@@ -148,13 +162,20 @@ def main(argv=None):
         path.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding='utf-8')
 
     with ProcessPoolExecutor(max_workers=args.jobs) as pool:
-        batch = lambda strategy, mode, wait: [r for r in pool.map(                      # noqa: E731
-            _run, [(strategy, mode, lv, sd, wait, run) for lv, sd in SCENARIOS]) if r]
+        def batch(strategy, mode, wait):
+            rows = [r for r in pool.map(_run, [(strategy, mode, lv, sd, wait, run, args.out, args.cache_only)
+                                               for lv, sd in SCENARIOS]) if r]
+            missed.extend(r for r in rows if 'miss' in r)
+            return [r for r in rows if 'miss' not in r]
+
         put(batch('rule', 'frozen', 0.0))                    # правило без модели: точка отсчёта, запросов нет
         for strategy in args.strategies:
             frozen = batch(strategy, 'frozen', 0.0)
             if len(frozen) < len(SCENARIOS):
-                print(f'{strategy}: записей режима frozen нет, пропуск', flush=True)
+                print(f'{strategy}: записей режима frozen не хватает ({len(frozen)} из {len(SCENARIOS)}), пропуск',
+                      flush=True)
+                missed.extend({'miss': 'не считался: нет времени ожидания (режим frozen неполон)', 'strategy': strategy,
+                               'mode': 'charged', 'level': lv, 'seed': sd} for lv, sd in SCENARIOS if args.cache_only)
                 continue
             per_decision, per_run, replaced = decision_time(frozen)
             wait = round(per_decision, 1)
@@ -177,6 +198,10 @@ def main(argv=None):
     made = ReplyCache().calls().get(MODEL, 0) - calls_before
     print(f'настоящих обращений к модели за этот запуск: {made}; всего по счётчику кэша: '
           f"{summary['real_calls_total']}; {time.time() - t0:.0f} с; сводка: {path}")
+    if args.cache_only:
+        print(f'только кэш: не досчитано прогонов — {len(missed)}')
+        for m in missed:
+            print(f"  {m['strategy']}-{m['mode']} {m['level']}-{m['seed']}: {m['miss']}")
 
 
 if __name__ == '__main__':
