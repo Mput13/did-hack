@@ -165,7 +165,9 @@ def test_window_keeps_only_recent_path(arena):
     for i in range(30):
         x0 = -1.9 + 0.06 * i
         bot._on_segment(x0, -0.5, x0 + 0.06, -0.5, 2.5 * 0.06, 0.0, float(i))
-    assert 0.15 <= sum(s[2] for s in bot._fresh) < 0.21 + 1e-9
+    # Окно — наименьший набор последних отрезков длиной не меньше 0,15 м: без самого старого уже короче.
+    kept = sum(s[2] for s in bot._fresh)
+    assert kept == pytest.approx(0.18) and kept - bot._fresh[0][2] < 0.15 <= kept
     assert bot._fresh[-1][0] == pytest.approx(-1.9 + 0.06 * 29.5)
     assert not Agent(arena, make_config('adaptive'), 7)._fresh
 
