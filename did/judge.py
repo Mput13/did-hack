@@ -96,6 +96,10 @@ class Judge:
             self._end('timeout')
 
     def _start_fault(self, kind, t, duration, source):
+        if '+' in kind:                 # два сбоя разом: батарея и датчик ломаются независимо
+            for part in kind.split('+'):
+                self._start_fault(part, t, duration, source)
+            return
         if kind == 'sensor_stuck' and kind not in self.faults:
             self._stuck = self._last_reading
         if kind == 'sensor_noise':

@@ -49,13 +49,24 @@ for (const dir of fs.readdirSync(RUNS)) {
   const f = path.join(RUNS, dir, "summary.json");
   if (/^E\d+$/.test(dir) && fs.existsSync(f)) EXP[dir] = readJson(f);
 }
-const LLM_FILE = path.join(RUNS, "llm_real", "gpt-6-luna.summary.json");
-const LLM = fs.existsSync(LLM_FILE) ? readJson(LLM_FILE) : null;
+const llmSummary = (name) => { const f = path.join(RUNS, "llm_real", `${name}.summary.json`); return fs.existsSync(f) ? readJson(f) : null; };
+const LLM = llmSummary("gpt-6-luna");          // планировщик на большой модели
+const QWEN = llmSummary("qwen2.5-3b");         // локальная модель через Ollama
+// Сколько слабых мест в расследованиях нашло второе мнение другой модели (все исправлены) — со слов команды, не из файла.
+const SECOND_OPINION_FIXES = 8;
 
 const ru = (v, d = 1) => Number(v).toFixed(d).replace(".", ",").replace("-", "−");
 const int = (v) => String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 const pct = (v, d = 0) => ru(v * 100, d);
 const r1 = (v) => Math.round(v * 1000) / 10;         // доля → проценты с одним знаком
+// Согласование с числом: pl(3262, "прогон", "прогона", "прогонов") → «прогона».
+const pl = (n, one, few, many) => {
+  const a = Math.abs(Math.round(n)) % 100, b = a % 10;
+  return a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many;
+};
+const nRuns = (n) => `${int(n)} ${pl(n, "прогон", "прогона", "прогонов")}`;
+const nSeries = (n) => `${n} ${pl(n, "серия", "серии", "серий")}`;
+const nChecks = (n) => `${n} ${pl(n, "автоматическая проверка", "автоматические проверки", "автоматических проверок")}`;
 
 function group(exp, arm, level, condition = null) {
   const g = EXP[exp].groups.find((x) => x.arm === arm && String(x.level) === level && (condition === null || x.condition === condition));
@@ -71,7 +82,9 @@ function pair(exp, metric, a, b, level, condition = null) {
 const runsOf = (e) => (typeof EXP[e].runs === "number" ? EXP[e].runs : EXP[e].runs.length);
 const EXP_IDS = Object.keys(EXP).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
 const TOTAL_RUNS = EXP_IDS.reduce((s, e) => s + runsOf(e), 0);
-const TESTS = D.tests && D.tests.ok ? D.tests.passed : null;
+// Проверки: если последний полный прогон прошёл — число прошедших, иначе число найденных в проекте.
+const TESTS = D.tests ? ((D.tests.ok && D.tests.passed) || D.tests.collected || null) : null;
+const TESTS_PASS = Boolean(D.tests && D.tests.ok && D.tests.passed);
 
 // E1: адаптивный против фиксированного плана
 const LEVELS = ["easy", "medium", "hard"];
@@ -93,13 +106,41 @@ const E10 = {
   ret: ["scientist", "adaptive", "fixed"].map((a) => r1(mean("E10", a, "hard", "returned"))),
   correct: mean("E10", "scientist", "all", "inq_correct"),
   retPair: pair("E10", "returned", "scientist", "adaptive", "hard"),
+  scorePair: pair("E10", "score", "scientist", "adaptive", "hard"),
   n: group("E10", "scientist", "hard").n,
 };
+E10.home = ["scientist", "adaptive"].map((a) => Math.round(mean("E10", a, "hard", "returned") * group("E10", a, "hard").n));
+// Выводы исследователя на трудном уровне, сверенные со скрытой правдой: суммы по записям прогонов.
+E10.inq = (() => {
+  if (!Array.isArray(EXP.E10.runs)) return null;
+  const sum = { total: 0, identified: 0, insufficient: 0, correct: 0, partial: 0, wrong: 0, faults: 0, faults_found: 0 };
+  for (const r of EXP.E10.runs) {
+    const q = r.arm === "scientist" && r.level === "hard" && r.metrics && r.metrics.inquiries;
+    if (q) for (const k of Object.keys(sum)) sum[k] += q[k] || 0;
+  }
+  return sum.identified ? sum : null;
+})();
+// Память между прогонами (E11): есть ли хоть одно подтверждённое улучшение.
+const MEMORY_HELPS = Boolean(EXP.E11 && EXP.E11.claims.some((c) => c.status === "supported"));
 // E8: уход одометрии
 const E8 = {
   lidar: mean("E8", "lidar", "medium", "returned", "moderate"),
   odom: mean("E8", "odom", "medium", "returned", "moderate"),
 };
+// Слова на слайдах зависят от того, что показали данные: серии пересчитываются, статусы могут смениться.
+const claimStatus = (exp, metric, a, b) => (EXP[exp].claims.find((x) => x.metric === metric && x.a === a && x.b === b) || {}).status;
+const WARN = [];
+const expect = (ok, msg) => { if (!ok) WARN.push(msg); };
+E1.moreSamples = E1.diff.status === "supported";
+E1.retWord = E1.ret.status === "inconclusive" ? "same" : (E1.ret.mean >= 0 ? "notWorse" : "worse");
+E10.retBetter = E10.retPair.status === "supported";
+const E9_BEST = E9.every((e) => e.share <= E9[0].share);
+expect(claimStatus("E2", "score", "adaptive", "no_soil") === "inconclusive" && claimStatus("E2", "score", "adaptive", "no_hazard") === "inconclusive",
+  "E2: обучение грунтам или память об опасных зонах теперь показывают вклад — поправьте блок «Не решено» на слайде 7.");
+expect(Math.abs(pair("E3", "score", "adaptive", "fixed", "hard", "none").mean - pair("E3", "score", "adaptive", "fixed", "hard", "soil").mean) < 5,
+  "E3: преимущество при изменениях среды заметно отличается от преимущества без них — поправьте блок «Не решено» на слайде 7.");
+expect(E9_BEST, "E9: карта вероятностей больше не лучшая стратегия — поправьте слайд 9.");
+expect(E1.moreSamples, "E1: утверждение «адаптивный собирает больше образцов» больше не подтверждается — поправьте слайд 8.");
 const GZ = D.gazebo;
 const gz = (level) => GZ.runs.find((r) => r.level === level);
 const GZ_ALL_HOME = GZ.runs.every((r) => r.gazebo.returned && r.gazebo.collisions === 0);
@@ -137,9 +178,9 @@ if (DEMO && !["Запуск", "Маршрут", "Миссия"].every((w) => DEM
 const STEPS = [
   ["Запуск", "одна команда поднимает мир, робота, судью и пульт"],
   ["Карта", DEMO_FIRST_MAP ? `робот ещё стоит, а лидар уже видит ${DEMO_FIRST_MAP}% пола` : "лидар строит карту с первой секунды"],
-  ["Задача", "точка или маршрут щелчком по карте — или миссия: собрать образцы"],
-  ["Движение", "путь в обход столбов; положение поправляется по лидару"],
-  ["Результат", "образцы собраны, робот на базе; счёт судьи и журнал гипотез"],
+  ["Задача", "точка, маршрут щелчком по карте или миссия"],
+  ["Движение", "путь в обход столбов, положение — по лидару"],
+  ["Результат", "образцы собраны, робот на базе, счёт судьи"],
 ];
 // Из снимков показа берём один с пультом и один с окном Gazebo, если по именам их можно различить.
 function pickShots(files) {
@@ -376,14 +417,14 @@ pres.addSection({ title: SEC_A });
     image(s, ASSET(f.file), { x, y: y0, w: fw, h: fh }, `frame-${i + 1}`, `Кадр прогона: ${f.label}`);
     text(s, `${ru(f.t, 0)} с · заряд ${ru(f.battery, 0)} · собрано ${f.collected} из ${f.total}`,
       { x: x - 0.15, y: y0 + fh + 0.04, w: fw + 0.3, h: 0.28, fontSize: 13, bold: true, align: "center", valign: "middle", objectName: `frame-${i + 1}-state` });
-    text(s, `Журнал: «${quote(f.quote)}»`, { x: x - 0.15, y: y0 + fh + 0.34, w: fw + 0.3, h: 0.5, fontSize: 11, color: C.text2, align: "center", objectName: `frame-${i + 1}-quote` });
+    text(s, `Журнал: «${quote(f.quote)}»`, { x: x - 0.15, y: y0 + fh + 0.32, w: fw + 0.3, h: 0.36, fontSize: 11, color: C.text2, align: "center", objectName: `frame-${i + 1}-quote` });
   };
   const legend = () => text(s, `Кадры — ${runLine}. Синее — где агент ждёт образец, жёлтые кольца — где образцы на самом деле, зелёное — собрано, красное — штраф.`,
-    { x: X0, y: 6.54, w: CW, h: 0.26, fontSize: 11, color: C.accent5, align: "center", valign: "middle", objectName: "frames-legend" });
+    { x: X0, y: 6.42, w: CW, h: 0.38, fontSize: 11, color: C.accent5, align: "center", valign: "top", objectName: "frames-legend" });
   const center = DEMO_SHOTS[0] || (fs.existsSync(LAB_SHOT) ? LAB_SHOT : null);
   if (DEMO_SHOTS.length >= 2) {
     // Снимки показа: два рядом, во всю ширину.
-    const w = (CW - 0.3) / 2, h = 3.3;
+    const w = (CW - 0.3) / 2, h = 3.1;
     DEMO_SHOTS.forEach((file, i) => {
       const x = X0 + i * (w + 0.3);
       const r = image(s, file, { x, y: y0, w, h, align: "top" }, `shot-${i + 1}`, shotCaption(file));
@@ -395,8 +436,8 @@ pres.addSection({ title: SEC_A });
     frame(st.frames[0], 0, X0, fw);
     frame(st.frames[st.frames.length - 1], st.frames.length - 1, X0 + CW - fw, fw);
     const cap = DEMO_SHOTS[0] ? shotCaption(center)
-      : `Веб-лаборатория: тот же прогон в проигрывателе${LAB_META && LAB_META.time_s ? `, ${ru(LAB_META.time_s, 0)} с` : ""} — карта, графики, журнал гипотез`;
-    const r = image(s, center, { x: X0 + fw + 0.25, y: y0, w: cw, h: 3.2, align: "top" }, "scenario-shot", cap);
+      : `Веб-лаборатория: тот же прогон в проигрывателе${LAB_META && LAB_META.time_s ? `, ${ru(LAB_META.time_s, 0)} с` : ""}`;
+    const r = image(s, center, { x: X0 + fw + 0.25, y: y0, w: cw, h: 3.05, align: "top" }, "scenario-shot", cap);
     text(s, cap, { x: X0 + fw + 0.25, y: r.y + r.h + 0.05, w: cw, h: 0.26, fontSize: 12, color: C.text2, align: "center", valign: "middle", objectName: "scenario-shot-caption" });
     legend();
   } else {
@@ -461,7 +502,7 @@ pres.addSection({ title: SEC_A });
   const by = 5.45, bh2 = 1.2, bw2 = 3.55, bgap = (CW - 3 * bw2) / 2;
   const chain = [
     ["Запись прогона", "путь, заряд, решения и гипотезы агента"],
-    ["Серии опытов", `${EXP_IDS.length} серий на одинаковых сценариях; ${ru(fast, 1)} с на прогон`],
+    ["Серии опытов", `${nSeries(EXP_IDS.length)} на одинаковых сценариях; ${ru(fast, 1)} с на прогон`],
     ["Веб-лаборатория и пульт", "графики, проигрыватель прогонов, управление показом"],
   ];
   chain.forEach(([head, sub], i) => {
@@ -484,7 +525,7 @@ pres.addSection({ title: SEC_A });
     ["Py", "Python, NumPy, SciPy", "агент, судья, быстрый симулятор и статистика опытов"],
     ["ИИ", "Языковая модель", "выбирает подцели; ответ проверяется, при сбое решает запасное правило"],
     ["Web", "Веб-лаборатория", "графики опытов, проигрыватель прогонов и пульт в браузере"],
-    ["тест", "pytest", `${TESTS ? TESTS + " автоматических проверок" : "автоматические проверки"}; запуск одной командой`],
+    ["тест", "pytest", `${TESTS ? nChecks(TESTS) : "автоматические проверки"}; запуск одной командой`],
   ];
   const s = content(SEC_A, "Используемые технологии и их назначение", "Мир и робот — из официальных пакетов; агент, судья и стенд для опытов — свои", [
     "Мир и робот взяты из официальных пакетов без изменений: ROS 2 Jazzy, Gazebo и TurtleBot3 Burger.",
@@ -514,7 +555,7 @@ pres.addSection({ title: SEC_A });
   ]);
   const rows = [
     ["Карта", `готовая сетка арены с клеткой ${ru(nav.grid_m * 100, 0)} см и своя карта по лидару: совпадают на ${pct(map.agreement)}%`],
-    ["Положение", `одометрия (счёт пути по колёсам) и поправка по лидару: скан совмещается с картой, ошибка ${med} см`],
+    ["Положение", `одометрия и поправка по лидару: скан совмещается с картой, ошибка ${med} см`],
     ["Путь", `алгоритм Дейкстры по цене клеток; ближе ${ru(nav.inflate_m * 100, 0)} см к стенам робот не едет`],
     ["Ведение", `руль на точку пути в ${ru(nav.lookahead_m * 100, 0)} см впереди; скорости колёсам — 10 раз в секунду`],
   ];
@@ -550,15 +591,19 @@ pres.addSection({ title: SEC_B });
     ["Поиск образцов по карте вероятностей", "Оценка грунта по расходу, возврат по запасу заряда", "Журнал гипотез и расследования с выбором опыта",
       "Память между прогонами", `Планировщик на языковой модели: ${llmShare}`, "Веб-лаборатория и запуск одной командой"],
   ];
+  const qwenItem = QWEN
+    ? `Локальная Qwen: счёт ${QWEN.score_mean < QWEN.rule_score_mean ? "пока ниже правила" : "не ниже правила"}`
+    : "Локальная модель Qwen";
   const wip = ["Пульт и показ полного сценария в Gazebo", "Роли модели «автор» и «критик» в расследованиях",
-    "Локальная модель Qwen", "Конструктор исследования", "Построение карты через SLAM (бонус)"];
-  const open = ["Адаптация к изменениям среды пока не прибавляет очков", "Обучение грунтам и память об опасных зонах вклада не показали",
+    qwenItem, "Конструктор исследования", "Построение карты через SLAM (бонус)"];
+  const open = ["Адаптация к изменениям среды пока не прибавляет очков",
+    MEMORY_HELPS ? "Обучение грунтам и память об опасных зонах вклада не показали" : "Обучение грунтам и память — об опасных зонах и между прогонами — вклада не показали",
     "Правила судьи — наши допущения"];
   const s = content(SEC_B, "Что уже реализовано и что в работе", "Основа работает и проверена опытами; показ в Gazebo и роли модели доделываются", [
     "Слева то, что уже работает и проверено: стенд, навигация, поиск образцов, журнал гипотез, расследования, память и планировщик на языковой модели.",
-    `Это подтверждают ${TESTS || "автоматические"} автоматических проверок и ${int(TOTAL_RUNS)} прогонов в ${EXP_IDS.length} сериях опытов.`,
+    `Это подтверждают ${TESTS ? nChecks(TESTS) : "автоматические проверки"} и ${nRuns(TOTAL_RUNS)} в сериях опытов.`,
     "В работе — пульт и показ полного сценария в Gazebo, роли модели в расследованиях, локальная модель и конструктор исследования.",
-    "И честно о нерешённом: адаптация к изменениям среды пока не прибавляет очков, а правила судьи — наши допущения.",
+    `И честно о нерешённом: адаптация к изменениям среды пока не прибавляет очков${MEMORY_HELPS ? "" : ", память между прогонами результата не меняет"}, а правила судьи — наши допущения.`,
   ]);
   const lx = X0, lw = 7.05, lh = BOTTOM - TOP;
   card(s, lx, TOP, lw, lh, "done-card");
@@ -566,31 +611,37 @@ pres.addSection({ title: SEC_B });
   text(s, "Реализовано и проверено", { x: lx + 1.0, y: TOP + 0.22, w: 3.9, h: 0.5, fontSize: 18, bold: true, valign: "middle", objectName: "done-head" });
   text(s, [
     { text: TESTS ? String(TESTS) : "есть", options: { bold: true, color: C.text1 } },
-    { text: " проверок", options: { breakLine: true } },
+    { text: ` ${pl(TESTS || 5, "проверка", "проверки", "проверок")}`, options: { breakLine: true } },
     { text: int(TOTAL_RUNS), options: { bold: true, color: C.text1 } },
-    { text: " прогонов" },
+    { text: ` ${pl(TOTAL_RUNS, "прогон", "прогона", "прогонов")}` },
   ], { x: lx + 5.0, y: TOP + 0.14, w: lw - 5.25, h: 0.66, fontSize: 14, color: C.text2, align: "right", valign: "middle", objectName: "done-stats" });
   done.forEach((items, i) => bullets(s, items, { x: lx + 0.25 + i * 3.35, y: TOP + 0.95, w: 3.2, h: 3.85, fontSize: 14, paraSpaceAfter: 7, objectName: `done-list-${i + 1}` }));
-  const rx = lx + lw + 0.25, rw = X0 + CW - rx, h1 = 2.6, h2 = lh - h1 - 0.25;
+  const rx = lx + lw + 0.25, rw = X0 + CW - rx, h1 = 2.38, h2 = lh - h1 - 0.25;
   card(s, rx, TOP, rw, h1, "wip-card");
   hexBadge(s, wip.length, rx + 0.25, TOP + 0.2, 0.5, "wip-badge", C.accent1, 15);
   text(s, "В работе", { x: rx + 1.0, y: TOP + 0.2, w: 3, h: 0.5, fontSize: 18, bold: true, valign: "middle", objectName: "wip-head" });
-  bullets(s, wip, { x: rx + 0.25, y: TOP + 0.85, w: rw - 0.5, h: h1 - 0.95, fontSize: 14, paraSpaceAfter: 3, objectName: "wip-list" });
+  bullets(s, wip, { x: rx + 0.25, y: TOP + 0.8, w: rw - 0.5, h: h1 - 0.88, fontSize: 14, paraSpaceAfter: 2, objectName: "wip-list" });
   const y2 = TOP + h1 + 0.25;
   card(s, rx, y2, rw, h2, "open-card", C.text2);
   hexBadge(s, open.length, rx + 0.25, y2 + 0.18, 0.5, "open-badge", C.accent5, 15);
   text(s, "Не решено — говорим прямо", { x: rx + 1.0, y: y2 + 0.18, w: rw - 1.2, h: 0.5, fontSize: 18, bold: true, valign: "middle", color: C.background1, objectName: "open-head" });
-  bullets(s, open, { x: rx + 0.25, y: y2 + 0.8, w: rw - 0.5, h: h2 - 0.88, fontSize: 13, paraSpaceAfter: 4, color: C.background1, objectName: "open-list" });
+  bullets(s, open, { x: rx + 0.25, y: y2 + 0.78, w: rw - 0.5, h: h2 - 0.86, fontSize: 13, paraSpaceAfter: 3, color: C.background1, objectName: "open-list" });
 }
 
 // ---------- 8. результаты: E1 ----------
 {
   const d = E1.diff;
-  const s = content(SEC_B, "Реальные результаты: серии опытов", "Адаптивный агент собирает больше образцов на всех уровнях; на базу оба возвращаются одинаково", [
-    "Главный опыт: два агента проходят одни и те же сценарии, которых при отладке не видели.",
-    `Адаптивный собирает больше на всех уровнях, в среднем на ${pct(d.mean)} процентных пунктов: из ${d.n} сценариев он выиграл в ${d.a_higher} и проиграл в ${d.b_higher}.`,
-    "А вот вторая половина гипотезы не подтвердилась: на базу оба возвращаются почти всегда, разницы нет.",
-  ]);
+  const retLead = { same: "на базу оба возвращаются одинаково", notWorse: "и на базу возвращается не реже", worse: "но на базу возвращается реже" }[E1.retWord];
+  const retNote = { same: "А вот вторая половина гипотезы не подтвердилась: на базу оба возвращаются почти всегда, разницы нет.",
+    notWorse: "И на базу он возвращается не реже фиксированного.", worse: "Но на базу он возвращается реже — это цена более длинного поиска." }[E1.retWord];
+  const retTile = { same: "возврат на базу у адаптивного и у фиксированного: разницы нет", notWorse: "возврат на базу у адаптивного и у фиксированного: адаптивный не реже",
+    worse: "возврат на базу у адаптивного и у фиксированного: адаптивный реже" }[E1.retWord];
+  const s = content(SEC_B, "Реальные результаты: серии опытов",
+    E1.moreSamples ? `Адаптивный агент собирает больше образцов на всех уровнях; ${retLead}` : "Адаптивный агент против фиксированного плана на одинаковых сценариях", [
+      "Главный опыт: два агента проходят одни и те же сценарии, которых при отладке не видели.",
+      `Адаптивный собирает ${d.mean >= 0 ? "больше" : "меньше"}, в среднем на ${pct(Math.abs(d.mean))} процентных пунктов: из ${d.n} сценариев он выиграл в ${d.a_higher} и проиграл в ${d.b_higher}.`,
+      retNote,
+    ]);
   text(s, "Доля собранных образцов, %", { x: X0, y: TOP, w: 7.3, h: 0.3, fontSize: 14, bold: true, objectName: "e1-chart-title" });
   s.addChart(pres.charts.BAR, [
     { name: "Фиксированный план", labels: LEVELS, values: E1.fixed },
@@ -601,21 +652,28 @@ pres.addSection({ title: SEC_B });
     dataLabelPosition: "outEnd", dataLabelFormatCode: "0.0", ...labelText, ...axisText, ...quietFrame, ...legendText,
     objectName: "e1-chart", altText: "Доля собранных образцов по уровням: фиксированный план и агент с адаптацией",
   });
-  text(s, `Опыт E1: ${runsOf("E1")} прогонов в быстром симуляторе, по ${E1.n} одинаковых сценариев на уровень; при отладке агент их не видел.`,
+  text(s, `Опыт E1: ${nRuns(runsOf("E1"))} в быстром симуляторе, по ${E1.n} одинаковых сценариев на уровень; при отладке агент их не видел.`,
     { x: X0, y: 6.38, w: 7.3, h: 0.42, fontSize: 11, color: C.accent5, objectName: "e1-note" });
   const tx = 8.3, tw = X0 + CW - tx, th = 1.5, tg = (BOTTOM - TOP - 3 * th) / 2;
-  statTile(s, tx, TOP, tw, th, `+${pct(d.mean)} п. п.`, `собранных образцов в среднем; 95% интервал — от ${pct(d.ci[0])} до ${pct(d.ci[1])}`, "e1-tile-1");
+  statTile(s, tx, TOP, tw, th, `${d.mean >= 0 ? "+" : "−"}${pct(Math.abs(d.mean))} п. п.`, `собранных образцов в среднем; 95% интервал — от ${pct(d.ci[0])} до ${pct(d.ci[1])}`, "e1-tile-1");
   statTile(s, tx, TOP + th + tg, tw, th, `${d.a_higher} из ${d.n}`, `сценариев адаптивный агент выиграл; проиграл — ${d.b_higher}`, "e1-tile-2");
-  statTile(s, tx, TOP + 2 * (th + tg), tw, th, `${pct(E1.retA)}% и ${pct(E1.retF)}%`, "возврат на базу у адаптивного и у фиксированного: разницы нет", "e1-tile-3");
+  statTile(s, tx, TOP + 2 * (th + tg), tw, th, `${pct(E1.retA)}% и ${pct(E1.retF)}%`, retTile, "e1-tile-3");
 }
 
 // ---------- 9. результаты: поиск и исследователь ----------
 {
-  const s = content(SEC_B, "Реальные результаты: поиск и исследователь", "Карта вероятностей находит почти все образцы; исследователь верно называет причину сбоев", [
-    `Слева стратегии поиска: спираль и подъём по сигналу из условия задачи против нашей карты вероятностей. Карта находит ${ru(E9[0].share)} процента образцов и тратит меньше заряда.`,
-    `Справа агент-исследователь: он держит несколько объяснений странности и проверяет их опытом. Причину он называет верно в ${pct(E10.correct)} процентах случаев.`,
-    "На базу на трудном уровне он возвращается чаще, но эта разница пока в пределах погрешности.",
-  ]);
+  const rp = E10.retPair;
+  const retText = E10.retBetter
+    ? `Исследователь возвращается чаще адаптивного на ${pct(rp.mean, 1)} п. п. (95% интервал — от ${pct(rp.ci[0], 1)} до ${pct(rp.ci[1], 1)})${E10.scorePair.status === "supported" ? "" : "; по счёту разницы нет"}.`
+    : "Разница в возврате с адаптивным агентом пока в пределах погрешности.";
+  const s = content(SEC_B, "Реальные результаты: поиск и исследователь",
+    `${E9_BEST ? "Карта вероятностей находит больше образцов, чем простые правила" : "Стратегии поиска образцов"}; исследователь ${E10.retBetter ? "чаще возвращается на базу" : "верно называет причину сбоев"}`, [
+      `Слева стратегии поиска: спираль и подъём по сигналу из условия задачи против нашей карты вероятностей. Карта находит ${ru(E9[0].share)} процента образцов${claimStatus("E9", "battery_used", "adaptive", "gradient") === "supported" ? " и тратит меньше заряда" : ""}.`,
+      E10.inq ? `Справа агент-исследователь: он держит несколько объяснений странности и проверяет их опытом. На трудном уровне он вынес ${E10.inq.identified} выводов о причине, неверных из них ${E10.inq.wrong}, ещё ${E10.inq.partial} верны частично.`
+        : `Справа агент-исследователь: он держит несколько объяснений странности и проверяет их опытом. Причину он называет верно в ${pct(E10.correct, 1)} процента случаев.`,
+      E10.retBetter ? `И на трудном уровне он вернулся на базу в ${E10.home[0]} прогонах из ${E10.n}, адаптивный агент — в ${E10.home[1]}. По счёту разницы ${E10.scorePair.status === "supported" ? "в его пользу" : "при этом нет"}.`
+        : "На базу на трудном уровне он возвращается чаще, но эта разница пока в пределах погрешности.",
+    ]);
   const lw = 5.9;
   text(s, "Стратегии поиска: доля собранных образцов, %", { x: X0, y: TOP, w: lw, h: 0.3, fontSize: 14, bold: true, objectName: "e9-chart-title" });
   s.addChart(pres.charts.BAR, [{ name: "Доля собранных образцов, %", labels: E9.map((e) => e.label), values: E9.map((e) => e.share) }], {
@@ -639,10 +697,12 @@ pres.addSection({ title: SEC_B });
   });
   const ty = TOP + 2.9, th = 1.3;
   card(s, rx, ty, rw, th, "e10-tile-card");
-  text(s, `${pct(E10.correct)}%`, { x: rx + 0.25, y: ty, w: 1.55, h: th, fontSize: 36, bold: true, valign: "middle", objectName: "e10-tile-value" });
-  text(s, "причин названо верно: исследователь держит несколько объяснений и проверяет их опытом",
-    { x: rx + 1.85, y: ty, w: rw - 2.05, h: th, fontSize: 14, color: C.text2, valign: "middle", objectName: "e10-tile-label" });
-  text(s, `Опыт E10: усложнённые правила — у одного симптома несколько причин; по ${E10.n} прогонов. Разница в возврате с адаптивным агентом пока в пределах погрешности.`,
+  const q = E10.inq;
+  text(s, q ? `${q.wrong} из ${q.identified}` : `${pct(E10.correct, 1)}%`, { x: rx + 0.25, y: ty, w: 2.3, h: th, fontSize: 34, bold: true, valign: "middle", objectName: "e10-tile-value" });
+  text(s, q ? `выводов исследователя о причине неверны; ещё ${q.partial} верны частично. Найдено ${pct(q.faults_found / q.faults)}% настоящих сбоев`
+    : "причин названо верно: исследователь держит несколько объяснений и проверяет их опытом",
+    { x: rx + 2.6, y: ty, w: rw - 2.8, h: th, fontSize: 14, color: C.text2, valign: "middle", objectName: "e10-tile-label" });
+  text(s, `Опыт E10: усложнённые правила — у одного симптома несколько причин; по ${E10.n} прогонов. ${retText}`,
     { x: rx, y: 6.2, w: rw, h: 0.6, fontSize: 11, color: C.accent5, objectName: "e10-note" });
 }
 
@@ -651,11 +711,18 @@ pres.addSection({ title: SEC_B });
   const ser = GZ.series[SERIES_LEVEL];
   const med = `${ru(GZ.agent_median_cm[0])}–${ru(GZ.agent_median_cm[1])}`;
   const before = GZ.before_fix;
-  const s = content(SEC_B, "Реальные результаты: Gazebo", "С поправкой по лидару прогоны в Gazebo повторяют быстрый симулятор с точностью до одного образца", [
+  const gzGap = Math.max(...GZ.runs.map((r) => Math.abs(r.gazebo.samples_collected - r.fastsim.samples_collected)));
+  const same = GZ.runs.filter((r) => r.gazebo.samples_collected === r.fastsim.samples_collected).map((r) => r.level);
+  const differ = GZ.runs.filter((r) => r.gazebo.samples_collected !== r.fastsim.samples_collected);
+  const s = content(SEC_B, "Реальные результаты: Gazebo",
+    gzGap === 0 ? "С поправкой по лидару прогоны в Gazebo повторяют быстрый симулятор"
+      : gzGap === 1 ? "С поправкой по лидару прогоны в Gazebo повторяют быстрый симулятор с точностью до одного образца"
+        : "Прогоны в Gazebo и в быстром симуляторе на одних и тех же сценариях", [
     "Серии считаются в быстром симуляторе, поэтому мы проверили перенос в Gazebo с настоящей физикой.",
     `Сначала одометрия, то есть счёт пути по колёсам, уходила${before && before.odom_max_cm >= 100 ? " больше чем на метр" : " на десятки сантиметров"}. Причину нашли: первые тридцать секунд после появления в мире робот покачивается, и манёвры в это время сбивают одометрию.`,
     `Теперь агент ждёт и сверяет положение с лидаром: ошибка около двух сантиметров, максимум ${ru(GZ.agent_max_cm)}.`,
-    `Лёгкий и средний уровни совпали с быстрым симулятором полностью, на трудном собрано ${gz("hard").gazebo.samples_collected} образцов против ${gz("hard").fastsim.samples_collected}.`,
+    differ.length ? `Уровни ${same.join(" и ")} совпали с быстрым симулятором полностью, на ${differ.map((r) => r.level).join(" и ")} собрано ${differ.map((r) => `${r.gazebo.samples_collected} против ${r.fastsim.samples_collected}`).join(", ")}.`
+      : "По числу собранных образцов все три уровня совпали с быстрым симулятором.",
   ]);
   const lw = 4.25;
   text(s, "Собрано образцов: один и тот же сценарий", { x: X0, y: TOP, w: lw, h: 0.3, fontSize: 14, bold: true, objectName: "gz-table-title" });
@@ -687,7 +754,7 @@ pres.addSection({ title: SEC_B });
     ...axisText, catAxisLabelFontSize: 12, ...quietFrame, ...legendText, legendFontSize: 13,
     objectName: "gz-chart", altText: "Ошибка положения во времени: одометрия уходит на десятки сантиметров, с поправкой по лидару остаётся около двух",
   });
-  text(s, `Серия E8, ${runsOf("E8")} прогонов: при таком уходе одометрии возврат на базу — ${pct(E8.lidar)}% с поправкой и ${pct(E8.odom)}% без неё.`,
+  text(s, `Серия E8, ${nRuns(runsOf("E8"))}: при таком уходе одометрии возврат на базу — ${pct(E8.lidar)}% с поправкой и ${pct(E8.odom)}% без неё.`,
     { x: cx, y: 6.2, w: cw2, h: 0.6, fontSize: 11, color: C.accent5, objectName: "gz-note" });
 
   const tx = cx + cw2 + 0.3, tw = X0 + CW - tx, th = 1.52, tg = (BOTTOM - TOP - 3 * th) / 2;
@@ -705,17 +772,16 @@ pres.addSection({ title: SEC_B });
 // ---------- 11. как использовали ИИ ----------
 pres.addSection({ title: SEC_C });
 {
-  const first = LLM ? Math.round(LLM.first_ok_share * LLM.requests) : null;
   const s = content(SEC_C, "Как использовали ИИ при разработке", "Ассистент вёл разработку, вторая модель давала второе мнение, третья планирует внутри робота", [
     "Весь стенд написан за полтора дня в диалоге с ИИ-ассистентом. Он работал как ведущий инженер: делил работу на параллельные ветки, около десяти, и раздавал их вспомогательным агентам.",
-    "По сложным вопросам мы запрашивали второе мнение у другой модели.",
-    LLM ? `Третья модель работает внутри робота как планировщик: ${pct(LLM.first_ok_share)} процентов её планов годны с первого раза.` : "Третья модель работает внутри робота как планировщик верхнего уровня.",
+    `По сложным вопросам мы запрашивали второе мнение у другой модели: в расследованиях она нашла ${SECOND_OPINION_FIXES} слабых мест, все исправлены.`,
+    LLM ? `Третья модель работает внутри робота как планировщик: ${pct(LLM.first_ok_share)} процентов её планов годны с первого раза${QWEN ? `. Локальная Qwen тоже даёт годные планы, но по счёту пока уступает простому правилу: ${ru(QWEN.score_mean, 0)} против ${ru(QWEN.rule_score_mean, 0)}` : ""}.` : "Третья модель работает внутри робота как планировщик верхнего уровня.",
     "Главное — ошибки искал не глаз, а стенд: тесты и серии прогонов нашли четыре серьёзные ошибки, они на слайде.",
   ]);
   const cards = [
     ["Ассистент — ведущий инженер", "Стенд написан за полтора дня в диалоге с Claude Code в среде T3 Code. Работа делилась на параллельные ветки, около десяти, и раздавалась вспомогательным агентам."],
-    ["Второе мнение", "По сложным вопросам запрашивали второе мнение у другой модели — GPT-6 Astra."],
-    ["ИИ внутри робота", LLM ? `Языковая модель GPT-6 Luna выбирает подцели: ${pct(LLM.first_ok_share)}% годных планов с первого раза — ${first} из ${LLM.requests} запросов.` : "Языковая модель выбирает подцели верхнего уровня; ответы проверяются."],
+    ["Второе мнение", `По сложным вопросам запрашивали второе мнение у другой модели — GPT-6 Astra. В расследованиях она нашла ${SECOND_OPINION_FIXES} слабых мест, все исправлены.`],
+    ["ИИ внутри робота", LLM ? `Модель выбирает подцели. GPT-6 Luna: ${pct(LLM.first_ok_share)}% годных планов с первого раза, счёт ${ru(LLM.score_mean, 0)} против ${ru(LLM.rule_score_mean, 0)} у правила.${QWEN ? ` Локальная Qwen: ${pct(QWEN.first_ok_share)}% годных, но счёт ${ru(QWEN.score_mean, 0)}.` : ""}` : "Языковая модель выбирает подцели верхнего уровня; ответы проверяются."],
   ];
   const w = (CW - 2 * 0.25) / 3, h = 2.4;
   cards.forEach(([head, body], i) => {
@@ -735,7 +801,7 @@ pres.addSection({ title: SEC_C });
   found.forEach((items, i) => bullets(s, items, { x: X0 + 0.3 + i * (CW / 2 - 0.1), y: y2 + 0.58, w: CW / 2 - 0.5, h: h2 - 0.66, fontSize: 14, color: C.background1, paraSpaceAfter: 4, objectName: `found-list-${i + 1}` }));
   text(s, [
     { text: "Качество процесса: ", options: { bold: true } },
-    { text: `${TESTS ? TESTS + " автоматических проверок" : "автоматические проверки"}, воспроизводимые серии прогонов, история в git. ` },
+    { text: `${TESTS ? nChecks(TESTS) : "автоматические проверки"}, воспроизводимые серии прогонов, история в git. ` },
     { text: "Навыки ассистента: ", options: { bold: true } },
     { text: "построение графиков, сборка презентаций, запуск других моделей." },
   ], { x: X0, y: y2 + h2 + 0.08, w: CW, h: BOTTOM - (y2 + h2 + 0.08), fontSize: 13, color: C.text2, valign: "middle", objectName: "process-line" });
@@ -743,21 +809,41 @@ pres.addSection({ title: SEC_C });
 
 // ---------- текст доклада ----------
 function writeSpeech() {
+  const WPS = 2.2;                                   // слов в секунду при спокойной речи
+  const words = (t) => t.split(/\s+/).filter(Boolean).length;
+  const spoken = (p) => p.notes.filter((n) => !n.startsWith("ЗДЕСЬ — ЖИВОЙ ПОКАЗ"));
+  const secs = SPEECH_PARTS.map((p) => Math.round(words(spoken(p).join(" ")) / WPS / 5) * 5);
+  const total = secs.reduce((a, b) => a + b, 0);
+  const mmss = (t) => `${Math.floor(t / 60)} мин ${String(t % 60).padStart(2, "0")} с`;
+  const e3 = (c) => ru(pair("E3", "score", "adaptive", "fixed", "hard", c).mean, 0);
+  const e2 = (b) => pair("E2", "score", "adaptive", b, "hard");
   const lines = [
     "# Текст доклада ко второму чекпоинту",
     "",
-    "Пять минут: около четырёх на слайды и около одной на живой показ. Числа в тексте подставлены из тех же файлов, что и на слайдах.",
-    "Текст пересобирается вместе с презентацией (`node build_checkpoint2.js`), править его руками в этом файле не нужно — правьте в скрипте.",
+    `Слайды целиком — около ${mmss(total)} спокойной речи (время у каждого слайда посчитано по числу слов). Живой показ — отдельно, после слайда 3.`,
+    "Числа в тексте подставлены из тех же файлов, что и на слайдах. Текст пересобирается вместе с презентацией",
+    "(`node build_checkpoint2.js`) и лежит в заметках к слайдам; править его нужно в скрипте, а не здесь.",
     "",
   ];
   SPEECH_PARTS.forEach((p, i) => {
-    lines.push(`## Слайд ${i + 1}. ${p.title}`, "");
+    lines.push(`## Слайд ${i + 1}. ${p.title} (≈ ${secs[i]} с)`, "");
     for (const n of p.notes) lines.push(n.startsWith("ЗДЕСЬ — ЖИВОЙ ПОКАЗ") ? `\n**▶ ${n}**` : n);
     lines.push("");
   });
-  lines.push("## Если времени не хватает", "",
-    "Слайды 5 (технологии) и 9 (поиск и исследователь) можно показать по одной фразе: они не нужны, чтобы понять остальное.",
-    "Если живой показ не запустился — рассказывать по кадрам слайда 3: это запись настоящего прогона в Gazebo.", "");
+  lines.push("## Если на всё пять минут вместе с показом", "",
+    "Полный сценарий показа из `docs/demo_script.md` сам занимает около пяти минут, поэтому нужно выбрать заранее:",
+    "",
+    "- **Показ главный.** Слайды 2, 3, 7, 8 и 10 — по одной-две фразы (около полутора минут), затем пульт: карта из одной точки, маршрут, «Ехать», запуск миссии. Слайды 4, 5, 6, 9 и 11 оставить для ответов на вопросы.",
+    "- **Слайды главные.** Весь текст выше, а показ — одна минута: маршрут из трёх точек и «Ехать». Итог миссии есть на слайдах 1 и 3.",
+    "- **Показ не запустился.** Рассказывать по слайду 3: кадры и снимок проигрывателя — запись настоящего прогона в Gazebo. Запасной вариант без Gazebo описан в `docs/demo_script.md`.",
+    "",
+    "## К вопросам жюри", "",
+    `- **Почему адаптация к изменениям среды не видна в счёте?** Преимущество адаптивного агента на трудном уровне примерно одинаково без событий и с ними: ${e3("none")} очков без событий, ${e3("soil")} при смене грунтов, ${e3("hazard")} при новой опасной зоне, ${e3("sensor")} при сбое датчика (опыт E3). Выигрыш даёт поиск образцов, а не реакция на изменения — это мы говорим прямо.`,
+    `- **Какие механизмы реально помогают?** Контроль датчика (+${ru(e2("no_sensor_health").mean)} очка) и расчёт запаса на возврат (+${ru(e2("static_reserve").mean)}). Обучение грунтам и память об опасных зонах вклада не показали (опыт E2).`,
+    "- **Чьи правила подсчёта?** Наши: расход заряда, формула датчика, штрафы и очки в условии не заданы. Агент видит стенд только через каналы из условия, поэтому судью можно заменить судьёй организаторов; цифры тогда нужно пересчитать.",
+    LLM ? `- **Настоящая языковая модель проверена?** Да: GPT-6 Luna, ${LLM.requests} запросов на ${LLM.scenarios} сценариях, ${pct(LLM.first_ok_share)}% годных планов с первого раза, счёт ${ru(LLM.score_mean)} против ${ru(LLM.rule_score_mean)} у правила; ответ в среднем ${ru(LLM.latency_ms.median / 1000, 0)} с (медиана), робот в это время стоит.${QWEN ? ` Локальная Qwen 2.5 отвечает за ${ru(QWEN.latency_ms.median / 1000, 0)} с и даёт ${pct(QWEN.first_ok_share)}% годных планов, но счёт ${ru(QWEN.score_mean)}: слишком рано едет домой.` : ""}` : "- **Настоящая языковая модель проверена?** Сводки прогона нет в runs/llm_real.",
+    `- **Насколько можно верить быстрому симулятору?** На трёх сверочных сценариях Gazebo собрал ${GZ.runs.map((r) => `${r.gazebo.samples_collected} из ${r.gazebo.samples_total}`).join(", ")}, быстрый симулятор — ${GZ.runs.map((r) => `${r.fastsim.samples_collected} из ${r.fastsim.samples_total}`).join(", ")}. Это три прогона, а не серия.`,
+    "");
   fs.writeFileSync(SPEECH, lines.join("\n"));
 }
 
@@ -768,6 +854,7 @@ function writeSpeech() {
   console.log("готово:", OUT);
   console.log("доклад:", SPEECH);
   console.log(`снимков показа: ${SHOTS.length}${DEMO_SHOTS.length ? " (на слайде: " + DEMO_SHOTS.map((f) => path.basename(f)).join(", ") + ")" : ""}; сценарий показа: ${DEMO ? "docs/demo_script.md, шагов " + DEMO_STEP_NAMES.length : "файла нет"}; серий: ${EXP_IDS.length}, прогонов: ${TOTAL_RUNS}, проверок: ${TESTS}`);
+  for (const w of WARN) console.warn("ВНИМАНИЕ: " + w);
   if (!ARGS.has("--no-pdf")) {
     const render = path.join(__dirname, "render_checkpoint2.js");
     if (fs.existsSync(render)) spawnSync(process.execPath, [render], { stdio: "inherit" });

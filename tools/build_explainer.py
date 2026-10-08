@@ -166,6 +166,22 @@ def science_story():
     return out
 
 
+def inquiry_accuracy(exp='E10', arm='scientist', level='hard'):
+    """Сверка выводов исследователя со скрытой правдой по всем прогонам серии: строки по темам."""
+    rows = {k: {'correct': 0, 'partial': 0, 'wrong': 0, 'insufficient': 0, 'unverifiable': 0}
+            for k in ('energy', 'fault', 'sensor')}
+    runs = 0
+    for path in sorted((RUNS / exp / arm).glob(f'{level}-*.json.gz')):
+        runs += 1
+        for q in load_trace(path).get('inquiries', []):
+            if q.get('conclusion') and q.get('verdict') in rows.get(q['topic'], {}):
+                rows[q['topic']][q['verdict']] += 1
+    total = sum(sum(r.values()) for r in rows.values())
+    return {'runs': runs, 'rows': rows, 'total': total,
+            'identified': total - sum(r['insufficient'] for r in rows.values()),
+            'wrong': sum(r['wrong'] for r in rows.values())} if runs else None
+
+
 def main():
     arena = load_arena()
     stories = []
@@ -195,8 +211,9 @@ def main():
         'gazebo': gazebo,
         'experiments': {p.stem: experiment(p.stem) for p in sorted((ROOT / 'experiments').glob('E*.yaml'))},
         'science': science_story(),
+        'inq_accuracy': inquiry_accuracy(),
         'kb': _json(RUNS / '_knowledge' / 'kb.json'),
-        'llm_real': {p.name.split('.')[0]: {k: v for k, v in _json(p).items() if k not in ('runs',)}
+        'llm_real': {p.name.removesuffix('.summary.json'): {k: v for k, v in _json(p).items() if k not in ('runs',)}
                      for p in sorted((RUNS / 'llm_real').glob('*.summary.json'))},
         'roles': {p.stem: _json(p) for p in sorted((RUNS / 'llm_real' / 'roles').glob('*.json'))},
         'soil_demo': soil_demo(arena),

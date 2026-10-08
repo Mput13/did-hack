@@ -2,7 +2,7 @@
 
 import {
   h, fill, icon, loading, errorBox, select, getArena, getOptions, getScenario, runEpisode, href, runHref, compareHref,
-  go, num, count, plural, LEVELS, LEVEL_ORDER, levelName, EVENT_NAMES, multLabel,
+  go, num, count, LEVEL_ORDER, levelName, EVENT_NAMES, multLabel, agentLabel,
 } from './common.js';
 import { createArena, arenaLegend } from './arena.js';
 
@@ -84,12 +84,14 @@ export async function render(root, ctx) {
   if (!ctx.alive()) return;
 
   const levels = (options.levels || []).slice().sort((a, b) => LEVEL_ORDER.indexOf(a.id) - LEVEL_ORDER.indexOf(b.id));
-  const agents = options.agents || [];
+  const agents = (options.agents || []).map((a) => ({ id: a.id, label: agentLabel(a.id, options) }));
   const state = {
     level: levels.some((l) => l.id === ctx.query.level) ? ctx.query.level : (levels.some((l) => l.id === 'hard') ? 'hard' : levels[0].id),
     seed: Math.min(MAX_SEED, Math.max(1, parseInt(ctx.query.seed, 10) || 3)),
+    rules: ctx.query.rules === 'science' ? 'science' : null,       // усложнённые правила среды для пробных прогонов
     sc: null, pinned: null, token: 0,
   };
+  const address = () => href('/scenarios', { level: state.level, seed: state.seed, rules: state.rules });
 
   // --- выбор уровня и номера ---
   const levelBtns = levels.map((l) => {
@@ -121,9 +123,27 @@ export async function render(root, ctx) {
   const eventsHost = h('div', { class: 'lb-events' });
   const thumbsHost = h('div', { class: 'lb-thumbs' });
 
-  const agentSel = select(agents.map((a) => ({ value: a.id, label: a.label })), agents.some((a) => a.id === 'adaptive') ? 'adaptive' : (agents[0] || {}).id, () => {});
+  const has = (id) => agents.some((a) => a.id === id);
+  const agentSel = select(agents.map((a) => ({ value: a.id, label: a.label })), state.rules && has('scientist') ? 'scientist' : has('adaptive') ? 'adaptive' : (agents[0] || {}).id, () => {});
   const aSel = select(agents.map((a) => ({ value: a.id, label: a.label })), agents.some((a) => a.id === 'fixed') ? 'fixed' : (agents[0] || {}).id, () => {});
-  const bSel = select(agents.map((a) => ({ value: a.id, label: a.label })), agents.some((a) => a.id === 'adaptive') ? 'adaptive' : (agents[1] || agents[0] || {}).id, () => {});
+  const bSel = select(agents.map((a) => ({ value: a.id, label: a.label })), state.rules && has('scientist') ? 'scientist' : has('adaptive') ? 'adaptive' : (agents[1] || agents[0] || {}).id, () => {});
+  // Правила среды для пробных прогонов: обычные или усложнённые (несколько причин расхода, сбои после штрафа).
+  const ruleBtns = [
+    { id: null, label: 'Обычные' },
+    { id: 'science', label: 'Со сбоями и скрытыми расходами' },
+  ].map((r) => {
+    const btn = h('button', { class: 'lb-seg__btn', type: 'button', 'aria-pressed': String(state.rules === r.id), text: r.label });
+    btn.addEventListener('click', () => {
+      state.rules = r.id;
+      ruleBtns.forEach((x) => x.btn.setAttribute('aria-pressed', String(x.id === state.rules)));
+      ruleHint.hidden = !state.rules;
+      // исследователь раскрывается именно на усложнённых правилах — предлагаем его
+      if (state.rules && has('scientist') && agentSel.value === 'adaptive') agentSel.value = 'scientist';
+      history.replaceState(null, '', address());
+    });
+    return { id: r.id, btn };
+  });
+  const ruleHint = h('p', { class: 'lb-muted', hidden: !state.rules, text: 'Заряд уходит ещё на повороты и на вес собранных образцов, показания батареи шумят, а штраф в опасной зоне может вызвать утечку заряда или сбой датчика. На таких правилах агент-исследователь ведёт расследования.' });
   const runBtn = h('button', { class: 'lb-btn lb-btn--primary', type: 'button' }, icon('play'), 'Прогнать агента');
   const cmpBtn = h('button', { class: 'lb-btn lb-btn--primary', type: 'button' }, icon('pair'), 'Сравнить двух агентов');
   const actionProblem = h('div', { class: 'lb-rerun__problem', role: 'alert', hidden: true });
@@ -137,7 +157,7 @@ export async function render(root, ctx) {
   runBtn.addEventListener('click', async () => {
     working(runBtn, true);
     try {
-      const res = await runEpisode(state.level, state.seed, agentSel.value);
+      const res = await runEpisode(state.level, state.seed, agentSel.value, state.rules);
       go(runHref(res.file));
     } catch (e) {
       working(runBtn, false);
@@ -153,8 +173,8 @@ export async function render(root, ctx) {
     }
     working(cmpBtn, true);
     try {
-      const ra = await runEpisode(state.level, state.seed, aSel.value);
-      const rb = await runEpisode(state.level, state.seed, bSel.value);
+      const ra = await runEpisode(state.level, state.seed, aSel.value, state.rules);
+      const rb = await runEpisode(state.level, state.seed, bSel.value, state.rules);
       go(compareHref(ra.file, rb.file));
     } catch (e) {
       working(cmpBtn, false);
@@ -291,7 +311,7 @@ export async function render(root, ctx) {
   function set(level, seed) {
     state.level = level;
     state.seed = Math.min(MAX_SEED, Math.max(1, Math.round(seed) || 1));
-    history.replaceState(null, '', href('/scenarios', { level: state.level, seed: state.seed }));
+    history.replaceState(null, '', address());
     load();
   }
 
@@ -323,6 +343,10 @@ export async function render(root, ctx) {
         h('div', { class: 'lb-card' }, eventsHost),
         h('div', { class: 'lb-card lb-try' },
           h('div', { class: 'lb-eyebrow', text: 'Проверить на этом сценарии' }),
+          h('div', { class: 'lb-switch' },
+            h('span', { class: 'lb-switch__name', text: 'Правила среды' }),
+            h('div', { class: 'lb-seg', role: 'group', 'aria-label': 'Правила среды' }, ruleBtns.map((x) => x.btn))),
+          ruleHint,
           h('div', { class: 'lb-try__row' }, h('label', { class: 'lb-field' }, h('span', { text: 'Вариант агента' }), agentSel), runBtn),
           h('div', { class: 'lb-try__row lb-try__row--two' },
             h('label', { class: 'lb-field' }, h('span', { text: 'Первый вариант' }), aSel),
@@ -336,6 +360,6 @@ export async function render(root, ctx) {
         h('span', { class: 'lb-muted', text: 'Генератор каждый раз раскладывает образцы и зоны заново' })),
       thumbsHost));
 
-  if (!ctx.query.level || !ctx.query.seed) history.replaceState(null, '', href('/scenarios', { level: state.level, seed: state.seed }));
+  if (!ctx.query.level || !ctx.query.seed) history.replaceState(null, '', address());
   await load();
 }

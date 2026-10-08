@@ -160,6 +160,25 @@ class SampleBelief:
         """Частично вернуться к исходному незнанию: показаниям за последнее время нельзя верить."""
         self.p = (1.0 - alpha) * self.p + alpha * self.prior
 
+    def predict(self, x, y, p=None):
+        """Какое показание датчик должен выдать в точке (x, y), если верить карте: (среднее, разброс).
+
+        Показание задаёт ближайший образец. Вероятность, что ближайший лежит в данной клетке, — это
+        «в клетке есть образец, а во всех более близких нет». p — карта, по умолчанию текущая.
+        """
+        p = self.p if p is None else p
+        f = 1.0 - np.hypot(self.cx - x, self.cy - y) / self.range
+        idx = np.nonzero(f > 0.0)[0]
+        if len(idx) == 0:
+            return 0.0, 0.0
+        order = idx[np.argsort(-f[idx], kind='stable')]
+        q, f = p[order], f[order]
+        closer_empty = np.exp(np.concatenate(([0.0], np.cumsum(np.log1p(-q))[:-1])))
+        w = q * closer_empty                     # остаток вероятности — «в радиусе датчика пусто», показание 0
+        mean = float((w * f).sum())
+        var = float((w * f * f).sum()) - mean * mean
+        return mean, math.sqrt(max(var, 0.0) + (0.4 * self.res / self.range) ** 2)
+
     def prob_within(self, x, y, r):
         near = np.hypot(self.cx - x, self.cy - y) <= r
         return float(1.0 - np.exp(np.log1p(-self.p[near]).sum())) if near.any() else 0.0

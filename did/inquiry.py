@@ -8,6 +8,7 @@
 """
 import math
 from collections import deque
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -55,6 +56,8 @@ class Investigator:
         self._path = [0.0, 0.0]        # пройдено метров и накручено радиан: сколько поворотов приходится на метр
         self._wait_from = None         # с какого времени робот стоит и ждёт, пока оживёт залипший датчик
         self._pre_penalty = 0.0        # среднее показание датчика перед штрафом
+        self._pre_belief = None        # карта образцов на момент штрафа: (карта, сколько образцов было собрано)
+        self._doubt_until = -1e9       # до какого времени к датчику остаётся вопрос, который закроет сверка у образца
         self._quiet_until = 0.0
         self._penalty_t = -1e9
         self._collect_t = -1e9
@@ -261,7 +264,7 @@ class Investigator:
         self.inquiries.append(inquiry)
         inquiry.held, inquiry.est = held or [], est or {}
         self._susp = []
-        if self.roles is not None:
+        if self.roles is not None and hasattr(obs, 'battery'):     # мгновенная сверка у образца идёт без обсуждения
             self._deliberate(inquiry, obs)
         alts = '; '.join(f'«{x.statement}» {x.prior:.0%}' for x in inquiry.alternatives)
         self.a.journal.add(obs.t, 'inquiry', f"{inquiry.id}. Странность: {inquiry.anomaly['text']}. "
@@ -545,6 +548,9 @@ class Investigator:
             self.a.journal.add(obs.t, 'inquiry', 'Опыт прерван штрафом: измерение не учитываю, сначала выезжаю из зоны')
         zs = [v for _, _, _, v in self._z][-5:]
         self._pre_penalty = float(np.mean(zs)) if zs else 0.0
+        if self._pre_belief is None or obs.t - self._pre_belief[2] > 6.0 or self._pre_belief[1] != self.a.collected:
+            # Показания после штрафа могут быть испорчены сбоем, поэтому прогноз строится по карте «до».
+            self._pre_belief = (self.a.belief.p.copy(), self.a.collected, obs.t)
 
     def _open_checkup(self, obs):
         """Проверка после штрафа. Батарея и датчик проверяются одной паузой, но как два отдельных вопроса:
@@ -568,8 +574,13 @@ class Investigator:
         self._start(q, obs)
         if self.sensor['mode'] != 'ok':
             return
-        if self._pre_penalty > 0.25:
-            self.companion = self._open_sensor(obs, 'checkup', ref=self._pre_penalty, jump=0.2, activate=False)
+        # Что датчик должен показывать здесь, если он исправен: прогноз по карте образцов, какой она была до штрафа.
+        # Прежнее показание для сравнения не годится: робот успел отъехать, и оно изменилось бы само.
+        snap = self._pre_belief
+        mu, spread = a.belief.predict(obs.x, obs.y, snap[0]) if snap and snap[1] == a.collected else (0.0, 1.0)
+        self._doubt_until = obs.t + 40.0
+        if mu > 0.25:
+            self.companion = self._open_sensor(obs, 'checkup', ref=mu, jump=0.2, spread=spread, activate=False)
         else:
             # Сигнал у нуля: шум, залипание и занижение сейчас неотличимы от нормы. Проверим, когда появится сигнал.
             self._recheck_until = obs.t + 25.0
@@ -587,8 +598,73 @@ class Investigator:
         self._z.clear()
 
     def on_collect(self, t):
+        self._calibrate(t)
         self._collect_t = t
         self._z.clear()
+
+    def _calibrate(self, t):
+        """Сверка датчика с известной точкой. Образец только что взят — значит, он лежал ближе радиуса сбора,
+        и исправный датчик обязан был показывать почти единицу. Это единственное место, где расстояние до
+        образца известно без самого датчика, поэтому здесь занижение показаний отличается от нормы наверняка."""
+        a, s, r = self.a, self.sensor, self.a.rules
+        seen = [(x, y, v) for tt, x, y, v in self._z if t - tt <= 1.0]
+        if len(seen) < 4 or self.active is not None or s['mode'] == 'stuck':
+            return
+        if s['mode'] == 'noise' and not s.get('assumed'):
+            return                              # шум уже установлен опытом; когда он кончится, покажет разброс
+        vals = np.array([v for _, _, v in seen])
+        zbar, zstd, n = float(vals.mean()), float(vals.std()), len(vals)
+        if zstd < 1e-9 and zbar < 1.0:
+            return                              # одинаковые показания: похоже на залипание, сверять нечего
+        nominal = a.health.nominal
+        quiet = a.health.sigma < 1.8 * nominal  # разброс за последние секунды в норме
+        near = 1.0 - 0.5 * r.collect_radius_m / r.sensor_range_m       # среднее показание в радиусе сбора
+        width = math.hypot(0.3 * r.collect_radius_m / r.sensor_range_m, 0.02)
+        asked = t <= max(self._doubt_until, self._recheck_until) or s['mode'] != 'ok'
+        normal = zbar >= near - 2.5 * width and zstd <= 2.2 * nominal
+        if not asked and normal:
+            return                              # показания такие, какими и должны быть; вопросов к датчику нет
+        bias = s.get('bias', 0.2)
+        # У самого образца показание упирается в единицу, и по пяти отсчётам шум от нормы не отличить.
+        # Поэтому про шум здесь спрашивается у оценки разброса за последние пять секунд.
+        prior = {'ok': 0.6, 'bias': 0.3} if normal else {'ok': 0.3, 'bias': 0.6}
+        prior = {k: v * (0.95 if quiet else 0.5) for k, v in prior.items()}
+        prior['noise'] = 0.05 if quiet else 0.5
+        text = (f'образец взят, значит он был ближе {r.collect_radius_m:.1f} м; датчик при этом показывал {zbar:.2f}'
+                + ('' if zbar >= near - 2.5 * width else f' вместо ожидаемых {near:.2f}')
+                + ('' if zstd <= 2.2 * nominal else f', разброс {zstd:.2f} при норме {nominal:.2f}'))
+        obs = SimpleNamespace(t=t, x=seen[-1][0], y=seen[-1][1])
+        calm, loud = (1.1 * nominal, 0.45 * nominal), (3.2 * nominal, 1.4 * nominal)   # у единицы шум срезается
+        q = Inquiry(self._qid(), t, 'sensor',
+                    {'text': text, 'x': round(obs.x, 2), 'y': round(obs.y, 2), 'observed': round(zbar, 3),
+                     'expected': round(near, 3), 'unit': 'показание', 'trigger': 'collect'},
+                    [Alternative('ok', 'датчик исправен: у образца он показывает столько, сколько должен', prior['ok']),
+                     Alternative('bias', f'показания занижены примерно на {bias:.2f} (сбой)', prior['bias']),
+                     Alternative('noise', 'датчик образцов стал шуметь сильнее (сбой)', prior['noise']),
+                     Alternative(OTHER, 'причина не из этого списка', 0.1)],
+                    [TestOption('at_sample', 'сверить показание с известной точкой: образец взят, расстояние до него известно',
+                                cost=0.0, duration_s=0.0, unit='показание',
+                                predictions={'ok': (near, width), 'bias': (near - bias, math.hypot(width, 0.04)),
+                                             'noise': (near - 0.04, 5.0 * nominal / math.sqrt(n))},
+                                action={'kind': 'none'}, sigma=nominal / math.sqrt(n)),
+                     TestOption('at_sample_std', 'там же измерить разброс показаний',
+                                cost=0.0, duration_s=0.0, unit='разброс',
+                                predictions={'ok': calm, 'bias': calm, 'noise': loud},
+                                action={'kind': 'none'}, sigma=0.01)],
+                    energy_budget=1.0)
+        q.ref, q.jump, q.trigger, q.last_z = near, float(np.clip(near - zbar, 0.1, 0.35)), 'collect', seen[-1][2]
+        self._start(q, obs)
+        q.record('at_sample_std', zstd, 0.01, t, cost=0.0, maneuver=False)
+        q.record('at_sample', zbar, nominal / math.sqrt(n), t, cost=0.0, maneuver=False)
+        a.journal.add(t, 'inquiry', f'{q.id}. Измерено: показание {zbar:.2f}, разброс {zstd:.2f}. Теперь: '
+                      + '; '.join(f"«{x.statement.split(',')[0]}» {q.posterior[x.id]:.0%}" for x in q.alternatives),
+                      inquiry=q.id)
+        if q.settled:
+            self._doubt_until = self._recheck_until = -1e9
+            if q.best[0] == 'ok' and s['mode'] in ('bias', 'noise'):
+                self._recovered(s['mode'], t, 'у взятого образца датчик показал норму')
+                a.health.degraded = False
+        self._conclude(obs)
 
     def reading(self, z, obs, sigma):
         """Показание датчика → (показание для карты образцов или None, шум). Здесь же ищутся сбои датчика."""
@@ -635,7 +711,7 @@ class Investigator:
         elif self.sensor['mode'] == 'ok':
             self._open_sensor(obs, 'noise', ref=float(np.mean([v for _, _, _, v in self._z])) if self._z else 0.0)
 
-    def _open_sensor(self, obs, trigger, ref=0.0, jump=0.0, activate=True):
+    def _open_sensor(self, obs, trigger, ref=0.0, jump=0.0, activate=True, spread=0.1):
         a = self.a
         nominal, est = a.health.nominal, max(a.health.sigma, 2.5 * a.health.nominal)
         penalty = obs.t - self._penalty_t < 45.0
@@ -661,11 +737,16 @@ class Investigator:
                                          'ok': (nominal, 0.4 * nominal)},
                             action={'kind': 'pause'}, sigma=0.012)]
         if trigger in ('shift', 'checkup'):
-            tests.append(TestOption('listen_shift', 'там же сравнить среднее показание с прежним',
+            tests.append(TestOption('listen_shift', 'там же сравнить среднее показание с ожидаемым по карте образцов'
+                                    if trigger == 'checkup' else 'там же сравнить среднее показание с прежним',
                                     cost=0.0, duration_s=PAUSE_S, unit='сдвиг',
-                                    # после штрафа робот успел проехать, поэтому «прежнее» показание неточно
-                                    predictions=({'bias': (-jump, 0.1), 'ok': (0.0, 0.1), 'noise': (0.0, 0.14),
-                                                  'stuck': (0.0, 0.25)} if trigger == 'checkup' else
+                                    # после штрафа сравнение идёт с прогнозом по карте образцов; его
+                                    # разброс честно говорит, насколько карта здесь уверена
+                                    predictions=({'bias': (-min(jump, ref), math.hypot(spread, 0.03)),
+                                                  'ok': (0.0, math.hypot(spread, 0.03)),
+                                                  'noise': (0.0, math.hypot(spread, 0.1)),
+                                                  'stuck': (self._pre_penalty - ref, 0.08)}
+                                                 if trigger == 'checkup' else
                                                  {'bias': (-jump, 0.05), 'ok': (0.0, 0.04), 'noise': (0.0, 0.12),
                                                   'stuck': (-jump, 0.2)}),
                                     action={'kind': 'pause'}, sigma=0.02))
@@ -682,9 +763,10 @@ class Investigator:
         a, t = self.a, obs.t
         until = t + self.know.get('fault_s', FAULT_S)
         if status != 'identified':
+            self._doubt_until = t + 40.0      # вопрос остался: его закроет сверка у ближайшего взятого образца
             a.health.degraded = True          # на всякий случай верим датчику меньше
             a.health.sigma = max(a.health.sigma, 2.0 * a.health.nominal)
-            self.sensor = {'mode': 'noise', 't0': q.t_open, 'until': until}
+            self.sensor = {'mode': 'noise', 't0': q.t_open, 'until': until, 'assumed': True}
             return 'причина не установлена: временно снижаю вес показаний датчика вдвое'
         if best == 'ok':
             return 'датчику верю как раньше'
@@ -704,6 +786,10 @@ class Investigator:
 
     def _recovered(self, kind, t, why):
         t0 = self.sensor.get('t0', t)
+        if self.sensor.get('assumed'):          # сбой не был установлен, осторожность была на всякий случай
+            self.a.journal.add(t, 'inquiry', f'Датчику снова верю как обычно: {why}', tag='sensor_recovered')
+            self.sensor = {'mode': 'ok'}
+            return
         self.durations.append((f'sensor_{kind}', round(t - t0, 1)))
         self.a.journal.add(t, 'inquiry', f'Сбой датчика закончился: {why} (длился около {t - t0:.0f} с)',
                            tag='sensor_recovered')

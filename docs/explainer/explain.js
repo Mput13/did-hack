@@ -553,6 +553,7 @@
     F['story.seed'] = story.seed;
     for (const arm of ['fixed', 'adaptive']) { const r = story[arm].result; F[`story.${arm}`] = `${r.samples_collected} из ${r.samples_total}`; F[`story.${arm}.score`] = num(r.score, 1); }
     F.route_len = num(D.route.length, 1); F.route_n = D.route.points.length;
+    if (D.inq_accuracy) for (const k of ['runs', 'total', 'identified', 'wrong']) F['inq_accuracy.' + k] = D.inq_accuracy[k];
     F.gz_n = D.gazebo.length;
     F.gz_ok = D.gazebo.filter(p => p.gazebo.result.returned && p.gazebo.result.samples_collected >= p.fastsim.result.samples_collected - 1 && p.gazebo.result.penalties <= p.fastsim.result.penalties).length;
     if (E.E6) for (const a of ['llm', 'llm_faulty']) { const rs = E.E6.runs.filter(r => r.arm === a); const calls = rs.reduce((n, r) => n + (r.llm_calls || 0), 0), bad = rs.reduce((n, r) => n + (r.llm_failed || 0), 0); const fb = rs.reduce((n, r) => n + ((r.plans && r.plans.fallback) || 0), 0), pl = rs.reduce((n, r) => n + Object.values(r.plans || {}).reduce((x, y) => x + y, 0), 0); F[`e6.${a}.calls`] = num(calls / (rs.length || 1), 0); F[`e6.${a}.bad`] = pct(calls ? bad / calls : 0); F[`e6.${a}.fb`] = pct(pl ? fb / pl : 0); F[`e6.${a}.n`] = rs.length; }
@@ -900,6 +901,14 @@
       <tr><td>Секунда простоя</td><td>${num(m.per_s.value, 3)} ± ${num(m.per_s.sigma, 3)} ед.</td><td>${num(RULES.drain_idle_per_s, 2)}</td></tr></tbody>`;
   })();
 
+  (() => {
+    const t = $('inq-acc'), a = D.inq_accuracy; if (!t) return;
+    if (!a) { t.outerHTML = '<p class="warn">Опыт E10 на момент сборки не посчитан.</p>'; return; }
+    const NAME = { energy: 'Почему вырос расход (грунт, утечка, повороты)', fault: 'Батарея после штрафа (утечка или нет)', sensor: 'Датчик образцов (шум, залипание, занижение, исправен)' };
+    t.innerHTML = '<thead><tr><th style="width:38%">О чём вывод</th><th>Верно</th><th>Частично</th><th>Неверно</th><th>«Недостаточно данных»</th><th>Проверить нечем</th></tr></thead><tbody>' +
+      Object.entries(a.rows).map(([k, r]) => `<tr><td>${NAME[k] || k}</td><td><b>${r.correct}</b></td><td>${r.partial}</td><td>${r.wrong}</td><td>${r.insufficient}</td><td>${r.unverifiable}</td></tr>`).join('') + '</tbody>';
+  })();
+
   /* ---------------------------------------------------------------- память */
 
   (() => {
@@ -917,8 +926,9 @@
     const t = $('llm-real'); if (!t) return;
     const rows = Object.entries(D.llm_real || {});
     if (!rows.length) { t.outerHTML = '<p class="warn">Прогонов с настоящей моделью на момент сборки нет.</p>'; return; }
-    const NAME = { 'gpt-6-luna_v1': 'GPT-6 Luna, первый вариант запроса', 'gpt-6-luna': 'GPT-6 Luna, доработанный запрос и схема ответа' };
-    rows.sort((a, b) => (a[0] > b[0] ? -1 : 1));
+    const NAME = { 'gpt-6-luna_v1': 'GPT-6 Luna, первый вариант запроса', 'gpt-6-luna': 'GPT-6 Luna, доработанный запрос и схема ответа', 'qwen2.5-3b': 'Qwen 2.5 (3 млрд параметров), локально на ноутбуке' };
+    const ORDER = ['gpt-6-luna_v1', 'gpt-6-luna', 'qwen2.5-3b'];
+    rows.sort((a, b) => (ORDER.indexOf(a[0]) + 99) % 99 - (ORDER.indexOf(b[0]) + 99) % 99);
     t.innerHTML = `<thead><tr><th>Модель и запрос</th><th>Обращений</th><th>Годный план с первого раза</th><th>После исправления</th><th>Отказ в запасное правило</th><th>Время ответа, медиана</th><th>Счёт: модель / правило</th></tr></thead><tbody>` +
       rows.map(([k, v]) => `<tr><td>${NAME[k] || k}</td><td>${v.requests}</td><td><b>${pct(v.first_ok_share)}</b></td><td>${pct(v.repaired_share)}</td><td>${pct(v.fallback_share)}</td><td>${num(v.latency_ms.median / 1000, 0)} с</td><td>${num(v.score_mean_complete, 1)} / ${num(v.rule_score_mean_complete, 1)} <small>(${v.complete_runs} прогонов)</small></td></tr>`).join('') + '</tbody>';
   })();

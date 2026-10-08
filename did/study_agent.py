@@ -381,12 +381,12 @@ class StudyAgent(LawMixin, Agent):
                 continue
             c['gain'] = self._gain(c)
             c['score'] = c['gain'] / (c['e_travel'] + c['e_meas'] + 0.05 + TIME_PRICE * (c['t_travel'] + c['t_meas']))
-            if best is None or c['score'] > best['score']:
+            useful = need or not est or c['gain'] >= MIN_GAIN * est['sigma']
+            if useful and (best is None or c['score'] > best['score']):
                 best = c
-        if best is None:
-            return self._conclude(obs, 'no_site' if not cands else 'time' if blocked == {'time'} else 'budget')
-        if est and not need and best['gain'] < MIN_GAIN * est['sigma']:
-            return self._conclude(obs, 'no_gain')
+        if best is None:                           # полезного и доступного замера нет: что именно мешает
+            return self._conclude(obs, 'no_site' if not cands else 'budget' if 'budget' in blocked else
+                                  'time' if 'time' in blocked else 'no_gain')
         what = self._name(best)
         if need or not est:
             why = 'это часть минимального набора замеров'
@@ -926,7 +926,7 @@ class StudyAgent(LawMixin, Agent):
                 self.conclusion = (f"{head}. Требуемая точность ±{spec.stop.rel_error:.1%} достигнута: получено "
                                    f"±{est['rel']:.1%} за {n} {plural(n, 'замер', 'замера', 'замеров')}.")
             elif est['rel'] <= spec.stop.rel_error:
-                self.status = 'not_reached'        # по шуму прибора точность есть, но повторов меньше, чем просили
+                self.status = 'incomplete'         # по шуму прибора точность есть, но повторов меньше, чем просили
                 need = self._required()
                 what = ('контрольных пробегов' if need and need[0] == 'control' else 'замеров в исследуемом месте')
                 self.conclusion = (f"{head}. Погрешность по шуму прибора уже ±{est['rel']:.1%} при требуемых "
@@ -982,8 +982,11 @@ class StudyAgent(LawMixin, Agent):
         if skipped:
             self.failures.append(f"{len(skipped)} из {len(self.measurements)} замеров не учтены: "
                                  + '; '.join(sorted({m['note'] for m in skipped})))
+        spec_out = spec.to_dict()
+        if self.q == 'sensor_law' and not spec_out.get('hypotheses'):      # объяснения не заданы: взяты стандартные
+            spec_out['hypotheses'] = [x.model_dump(exclude_none=True) for x in self._hyps]
         report = {
-            'version': 1, 'spec': spec.to_dict(), 'status': self.status, 'task': describe(spec),
+            'version': 1, 'spec': spec_out, 'status': self.status, 'task': describe(spec),
             'plan': self._plan_out(),
             'measurements': [self._meas_out(m) for m in self.measurements],
             'estimate': None if est is None else {

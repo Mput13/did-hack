@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-08T04:55:32",
+ "generated": "2026-10-08T05:15:05",
  "task": {
   "truth": "task_truth.png",
   "robot_view": "task_robot_view.png",
@@ -479,13 +479,15 @@
   "settle_until_s": 35.0
  },
  "tests": {
-  "passed": 265,
-  "line": "265 passed, 1 skipped in 32.30s",
+  "collected": 289,
+  "when": "2026-10-08T05:15:07",
+  "passed": 288,
+  "line": "288 passed, 1 skipped in 44.51s",
   "ok": true,
-  "when": "2026-10-08T04:02:09",
+  "run_when": "2026-10-08T05:15:07",
   "failed": 0,
   "skipped": 1,
-  "error": 0
+  "errors": 0
  },
  "rules": {
   "battery_start": 60.0,

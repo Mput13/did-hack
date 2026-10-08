@@ -199,7 +199,9 @@ def score_inquiries(inquiries, scenario, world):
         out['tests'] += len(measured)
         out['energy'] += sum(x['cost'] for x in measured)       # цена — заряд, реально ушедший на манёвр
         out['quick'] += 0 if measured else 1
-        t0, t1 = q['t_open'] - 4.0, q['t_close'] or q['t_open']
+        # странность возникает раньше, чем открыто расследование; сверка у образца смотрит только на последнюю секунду
+        lead = 1.0 if q['anomaly'].get('trigger') == 'collect' else 4.0
+        t0, t1 = q['t_open'] - lead, q['t_close'] or q['t_open']
         active = {k for k, a, b in faults if a <= t1 and b >= t0}
         if q['topic'] == 'energy':
             soils = after if (change is not None and after is not None and change <= q['t_open']) else scenario.soils

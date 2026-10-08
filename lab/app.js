@@ -21,6 +21,8 @@ const ROUTES = [
   { re: /^\/scenarios$/, view: scenarios, nav: 'scenarios', title: 'Сценарии' },
   { re: /^\/knowledge$/, view: knowledge, nav: 'knowledge', title: 'Знания' },
   { re: /^\/live$/, view: live, nav: 'live', title: 'Живой прогон', wide: true },
+  // #/study — конструктор исследования: задание пользователя → замеры робота → отчёт с погрешностью.
+  { re: /^\/study$/, view: { render: (...a) => import('./views/study.js').then((m) => m.render(...a)) }, nav: 'study', title: 'Конструктор исследования' },
   // #/pilot — пульт: модуль подгружается при первом открытии страницы.
   { re: /^\/pilot$/, view: { render: (...a) => import('./views/pilot.js').then((m) => m.render(...a)) }, nav: 'pilot', title: 'Пульт', wide: true },
 ];

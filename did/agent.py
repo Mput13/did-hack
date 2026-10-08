@@ -50,6 +50,7 @@ class AgentConfig:
     science: bool = False             # вести расследования: несколько объяснений странности и опыт (did/inquiry.py)
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
     risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
+    foresight_choice: str = 'planner'  # среди прошедших по риску выбирает: planner — правило планировщика, score — счёт
 
     def to_dict(self):
         return asdict(self)
@@ -68,8 +69,9 @@ PRESETS = {
     'scientist': AgentConfig(name='scientist', science=True),
     'scientist_llm': AgentConfig(name='scientist_llm', science=True, planner='llm'),
     # Те же агенты, но цель и момент возврата выбираются сравнением будущих маршрутов с учётом риска.
-    'scientist_fs': AgentConfig(name='scientist_fs', science=True, foresight=True),
-    'adaptive_fs': AgentConfig(name='adaptive_fs', foresight=True),
+    # Порог риска 15% подобран на отладочных сценариях 1–80: при 5% возврат почти всегда, но образцов меньше.
+    'scientist_fs': AgentConfig(name='scientist_fs', science=True, foresight=True, risk_limit=0.15),
+    'adaptive_fs': AgentConfig(name='adaptive_fs', foresight=True, risk_limit=0.15),
     # Отключение по одному механизму: что именно даёт выигрыш.
     'no_soil': AgentConfig(name='no_soil', learn_soil=False, detect_change=False),
     'no_change': AgentConfig(name='no_change', detect_change=False),
@@ -703,7 +705,7 @@ class Agent:
         moved_goal = self._path_goal is None or math.dist(self._path_goal, target) > 0.08
         stale = self._path_version != self._cost_version and t - self._path_t > 1.5
         if moved_goal or stale:
-            graph = self.graph if not self._returning else self.fs.home_graph() if self.fs else self.home_graph
+            graph = self.home_graph if self._returning else self.graph
             pts, cost = graph.plan((obs.x, obs.y), target)
             if pts is None:
                 self._command(io, 0.0, 0.0)

@@ -2823,8 +2823,18 @@ function createLlm(host, api) {
 function pct(p) {
   if (p == null) return '—';
   if (p > 0 && p < 0.005) return 'меньше 1 %';
-  if (p > 0.995 && p < 1) return 'больше 99 %';
+  if (p >= 0.995 && p < 1) return 'больше 99 %';
   return `${num(p * 100, 0)} %`;
+}
+/**
+ * Число с единицей опыта. В поле unit бывает и настоящая единица («ед/с»), и название величины («разброс»),
+ * и множитель («× к обычному полу») — пишем так, чтобы читалось по-русски.
+ */
+function withUnit(text, unit) {
+  if (!unit) return text;
+  if (unit[0] === '×') return `×${text}${unit.slice(1)}`;
+  if (/\//.test(unit) || /^(ед|м|см|с|%|°|бит)/.test(unit)) return `${text} ${unit}`;
+  return `${unit} ${text}`;
 }
 const bitsWord = (v) => (Math.abs(v - Math.round(v)) < 1e-9 ? plural(Math.round(v), 'бит', 'бита', 'бит') : 'бита');
 
@@ -2862,7 +2872,6 @@ function predScale(test, show) {
   const span = ax.hi - ax.lo;
   const d = digitsFor(span);
   const pos = (v) => clamp(((v - ax.lo) / span) * 100, 0, 100);
-  const unit = test.unit ? ` ${test.unit}` : '';
 
   const root = h('div', 'rp-sc');
   const rows = test.preds.length;
@@ -2881,7 +2890,7 @@ function predScale(test, show) {
   if (ms) {
     const x = pos(ms.value);
     const lab = h('span', 'rp-sc-mlabel');
-    lab.append(h('span', null, 'измерено '), h('b', null, `${num(ms.value, d)}${unit}`));
+    lab.append(h('span', null, 'измерено '), h('b', null, withUnit(num(ms.value, d), test.unit)));
     lab.style.left = `${x.toFixed(2)}%`;
     lab.dataset.side = x < 28 ? 'left' : x > 72 ? 'right' : 'mid';
     top.appendChild(lab);
@@ -2915,7 +2924,7 @@ function predScale(test, show) {
     const dot = h('i', 'rp-sc-dot');
     dot.style.left = `${pos(p.mean).toFixed(2)}%`;
     track.append(band, dot);
-    track.title = `${p.alt.letter}. ${p.alt.statement}: предсказание ${num(p.mean, d)} ± ${num(p.sigma, d)}${unit}`;
+    track.title = `${p.alt.letter}. ${p.alt.statement}: предсказание ${withUnit(`${num(p.mean, d)} ± ${num(p.sigma, d)}`, test.unit)}`;
     const val = h('span', `rp-sc-val ${cls}`, `${num(p.mean, d)} ± ${num(p.sigma, d)}`);
     val.style.gridRow = row;
     const mark = h('span', `rp-sc-fit ${cls}`);
@@ -2959,7 +2968,7 @@ function predScale(test, show) {
   unitNote.style.gridRow = String(rows + 2);
   root.append(axis, unitNote);
   root.setAttribute('role', 'img');
-  root.setAttribute('aria-label', `Опыт «${test.name}». ${ms ? `Измерено ${num(ms.value, d)}${unit}. ` : ''}Предсказания объяснений: ${said.join('; ')}.`);
+  root.setAttribute('aria-label', `Опыт «${test.name}». ${ms ? `Измерено: ${withUnit(num(ms.value, d), test.unit)}. ` : ''}Предсказания объяснений: ${said.join('; ')}.`);
   return root;
 }
 
@@ -3051,7 +3060,7 @@ function createInquiries(host, api) {
         text.appendChild(tag);
       } else if (out) {
         text.appendChild(h('span', 'rp-alt-tag', 'отпало'));
-      } else if (post != null && c && c.status !== 'identified') {
+      } else if (post != null && post >= 0.1 && c && c.status !== 'identified') {
         text.appendChild(h('span', 'rp-alt-tag rp-alt-tag-keep', 'не исключено'));
       }
       const bars = h('div', 'rp-alt-bars');
@@ -3080,7 +3089,11 @@ function createInquiries(host, api) {
     const box = stepBox(3, 'Опыт: что предсказывали объяснения и что вышло');
     const tests = q.tests;
     if (!tests.length) {
-      box.appendChild(h('div', 'rp-empty', 'Опытов, которые различили бы объяснения, не нашлось.'));
+      // Бывает, что новый опыт не нужен: объяснения уже различил прежний. Причину агент пишет в примечании.
+      const c0 = q.conclusion;
+      box.appendChild(h('p', 'rp-q-big rp-q-big-soft', c0 && c0.status === 'identified' ? 'Новый опыт не понадобился' : 'Опыт не ставился'));
+      box.appendChild(h('p', 'rp-q-plain', q.note ? cap(q.note) : (c0 && c0.status === 'identified'
+        ? 'Объяснения удалось различить по тому, что агент уже знал.' : 'Опытов, которые различили бы объяснения, не нашлось.')));
       return box;
     }
     box.appendChild(h('p', 'rp-q-note', 'Агент берёт опыт, где больше всего пользы на единицу заряда. Польза — на сколько бит опыт уменьшит сомнения: один бит — вдвое меньше.'));
@@ -3112,7 +3125,8 @@ function createInquiries(host, api) {
         const fillEl = h('i');
         fillEl.style.width = `${clamp((x.eff / maxEff) * 100, 0, 100).toFixed(1)}%`;
         bar.appendChild(fillEl);
-        eff.append(bar, h('b', null, x.free ? 'почти бесплатно' : `${num(x.eff, x.eff >= 10 ? 0 : 1)} бит на ед. заряда`));
+        const effShown = +(x.eff >= 10 ? x.eff.toFixed(0) : x.eff.toFixed(1));
+        eff.append(bar, h('b', null, x.free ? 'почти бесплатно' : `${num(effShown, x.eff >= 10 ? 0 : 1)} ${bitsWord(effShown)} на ед. заряда`));
         eff.title = 'Польза опыта на единицу заряда: чем длиннее полоса, тем выгоднее опыт';
         el.appendChild(eff);
       }
@@ -3193,7 +3207,7 @@ function createInquiries(host, api) {
     }
     const notes = [];
     if (INQ_SOURCE_RU[q.source]) notes.push(cap(INQ_SOURCE_RU[q.source]));
-    if (q.note) notes.push(cap(q.note));
+    if (q.note && q.tests.length) notes.push(cap(q.note));          // без опытов примечание уже показано в третьем шаге
     if (notes.length) box.appendChild(h('p', 'rp-q-note', notes.join('. ')));
     return box;
   }

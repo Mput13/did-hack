@@ -131,6 +131,7 @@ body[data-wide] { --lb-max: 1800px; }
 .lb-btn--primary:hover { background: #2a3138; border-color: #2a3138; }
 .lb-btn--icon { width: 42px; padding: 0; }
 .lb-btn--busy { opacity: 0.7; cursor: progress; }
+.lb-btn--small { height: 32px; padding: 0 12px; font-size: 14.5px; border-radius: 8px; }
 
 .lb-input, .lb-select {
   height: 42px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 9px; background-color: var(--surface);

@@ -105,7 +105,10 @@ export const getExperiment = (id) => api.get(`/api/experiment/${encodeURICompone
 export const getTrace = (file) => api.get(`/api/trace?file=${encodeURIComponent(file)}`);
 export const getScenario = (level, seed) =>
   api.get(`/api/scenario?level=${encodeURIComponent(level)}&seed=${encodeURIComponent(seed)}`);
-export const runEpisode = (level, seed, agent) => api.post('/api/run', { level, seed, agent });
+/** Один прогон в быстром симуляторе. rules: 'science' — правила с несколькими причинами расхода и сбоями. */
+export const runEpisode = (level, seed, agent, rules) => api.post('/api/run', rules ? { level, seed, agent, rules } : { level, seed, agent });
+/** По записи прогона: шёл ли он по усложнённым правилам. */
+export const rulesOf = (trace) => (trace && trace.rules && trace.rules.faults ? 'science' : null);
 
 // --- фоновые серии -----------------------------------------------------------------------------
 
@@ -396,6 +399,8 @@ export const AGENT_LABELS = {
   adaptive_llm: 'С адаптацией, планирует языковая модель',
   scientist: 'Исследователь: ведёт расследования',
   scientist_llm: 'Исследователь с языковой моделью',
+  scientist_fs: 'Исследователь, сравнивает будущие маршруты',
+  adaptive_fs: 'С адаптацией, сравнивает будущие маршруты',
   spiral: 'Спираль',
   gradient: 'Подъём по сигналу',
   no_soil: 'Без обучения грунтам',

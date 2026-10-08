@@ -2,10 +2,11 @@
 
 import {
   h, fill, icon, dot, loading, errorBox, emptyBox, select, getTrace, getArena, getOptions, getIndex, getExperiment, runEpisode,
-  href, runHref, compareHref, go, num, REASONS, EVENT_NAMES, levelName, armColors, agentColor, agentLabel, byScenario,
-  condName,
+  href, runHref, compareHref, go, num, count, REASONS, EVENT_NAMES, levelName, armColors, agentColor, agentLabel, byScenario,
+  condName, ruLevels, rulesOf,
 } from './common.js';
 import { mountPlayer, destroyPlayer } from './player.js';
+import { applyDemo, demoKinds } from './demo.js';
 
 /** Плитки с итогом прогона. */
 export function resultTiles(result, rules) {
@@ -40,6 +41,56 @@ export function detectChips(result) {
       `${EVENT_NAMES[k].toLowerCase()} — ${d[k] != null ? `заметил через ${num(d[k], 1)} с` : 'не заметил'}`)));
 }
 
+/** Расследования агента в этом прогоне: сколько, чем закончились, что сказал судья. */
+export function inquiryChips(trace, onShow) {
+  const list = Array.isArray(trace.inquiries) ? trace.inquiries : [];
+  const sum = trace.result && trace.result.inquiries && typeof trace.result.inquiries === 'object' ? trace.result.inquiries : null;
+  const by = (status) => list.filter((q) => q && q.conclusion && q.conclusion.status === status).length;
+  const total = sum && Number.isFinite(Number(sum.total)) ? Number(sum.total) : list.length;
+  if (!total) return null;
+  const identified = sum && sum.identified != null ? Number(sum.identified) : by('identified');
+  const insufficient = sum && sum.insufficient != null ? Number(sum.insufficient) : by('insufficient');
+  const chip = (text, tone, ic) => h('span', { class: `lb-chip lb-chip--plain${tone ? ` lb-yn--${tone}` : ''}` }, ic ? icon(ic, 14) : null, text);
+  const chips = [
+    chip(`причина найдена: ${identified}`, identified ? 'yes' : '', identified ? 'check' : null),
+    chip(`недостаточно данных: ${insufficient}`, '', insufficient ? 'question' : null),
+  ];
+  if (sum && (sum.correct != null || sum.wrong != null)) {
+    const wrong = Number(sum.wrong) || 0;
+    chips.push(chip(`судья: верных выводов ${Number(sum.correct) || 0}, ошибочных ${wrong}`, wrong ? 'no' : 'yes', wrong ? 'cross' : 'check'));
+  }
+  if (sum && Number.isFinite(Number(sum.energy))) chips.push(chip(`на опыты ушло ${num(sum.energy, 2)} ед. заряда`));
+  return h('div', { class: 'lb-detects' },
+    h('span', { class: 'lb-muted', text: `${count(total, 'расследование', 'расследования', 'расследований')} агента:` }),
+    chips,
+    list.length && onShow ? h('button', { class: 'lb-btn lb-btn--small', type: 'button', onclick: onShow }, 'Показать расследования', icon('right', 14)) : null);
+}
+
+/** Знания из прошлых прогонов, с которыми агент начал этот прогон. Вид поля ещё не устоялся — читаем терпимо. */
+export function knowledgeChips(k) {
+  if (k == null || k === false) return null;
+  const LABEL = {
+    used: 'взято из памяти', applied: 'применено', priors: 'исходных оценок', rules: 'правил', added: 'новых', new: 'новых',
+    learned: 'записано новых', updated: 'уточнено', confirmed: 'подтвердилось', contradicted: 'опровергнуто', retired: 'снято',
+    tentative: 'предварительных', runs: 'прогонов в памяти',
+  };
+  const parts = [];
+  if (typeof k === 'number') parts.push(`правил: ${k}`);
+  else if (Array.isArray(k)) parts.push(`правил: ${k.length}`);
+  else if (typeof k === 'object') {
+    for (const [key, v] of Object.entries(k)) {
+      const n = typeof v === 'number' ? v : Array.isArray(v) ? v.length : v && typeof v === 'object' ? Object.keys(v).length : null;
+      if (n == null) continue;
+      parts.push(`${LABEL[key] || key.replace(/_/g, ' ')}: ${num(n, Number.isInteger(n) ? 0 : 2)}`);
+    }
+  } else if (k === true) parts.push('агент начал прогон со знаниями из памяти');
+  if (!parts.length) return null;
+  return h('div', { class: 'lb-detects' },
+    h('span', { class: 'lb-muted', text: 'Знания из прошлых прогонов:' }),
+    parts.map((t) => h('span', { class: 'lb-chip lb-chip--plain', text: t })),
+    h('a', { class: 'lb-link', href: href('/knowledge') }, 'Открыть знания', icon('right', 14)));
+}
+
 function busy(btn, on) {
   btn.disabled = on;
   btn.classList.toggle('lb-btn--busy', on);
@@ -72,6 +123,10 @@ export async function render(root, ctx) {
     try { exp = await getExperiment(trace.experiment); } catch { exp = null; }
   }
   if (!ctx.alive()) return;
+  // Примеры новых данных для отладки вида: …&demo=inquiry, …&demo=pose (lab/views/demo.js).
+  const demo = demoKinds(ctx.query);
+  if (demo.length) trace = applyDemo(trace, demo);
+  const rules = rulesOf(trace);
 
   const sc = trace.scenario || {};
   const run = exp ? (exp.runs || []).find((r) => r.file === file) : null;
@@ -94,7 +149,7 @@ export async function render(root, ctx) {
     const cond = conds.find((c) => c.id === run.condition);
     label = arm.label;
     color = colors.get(arm.id) || agentColor(agentId);
-    back = h('a', { class: 'lb-back', href: href(`/exp/${exp.spec.id}`) }, icon('left'), `Опыт ${exp.spec.id}: ${exp.spec.title || ''}`);
+    back = h('a', { class: 'lb-back', href: href(`/exp/${exp.spec.id}`) }, icon('left'), `Опыт ${exp.spec.id}: ${ruLevels(exp.spec.title || '')}`);
     eyebrow = `Прогон из опыта ${exp.spec.id}${conds.length > 1 && cond ? ` · условие «${cond.label}»` : ''}`;
     const find = (a, c, lvl, seed) => (exp.runs || []).find((r) => r.arm === a && r.condition === c && r.level === lvl && r.seed === seed);
 
@@ -151,19 +206,21 @@ export async function render(root, ctx) {
       const btn = h('button', { class: 'lb-btn', type: 'button', disabled: seed < 1 }, first ? icon(ic) : null, text, first ? null : icon(ic));
       btn.addEventListener('click', async () => {
         busy(btn, true);
-        try { go(runHref((await runEpisode(sc.level, seed, agentId)).file)); } catch (e) { fail(e); busy(btn, false); }
+        try { go(runHref((await runEpisode(sc.level, seed, agentId, rules)).file)); } catch (e) { fail(e); busy(btn, false); }
       });
       return btn;
     };
     if (sc.level && sc.seed != null && agentId) {
       nav.push(jump(sc.seed - 1, 'Предыдущий', 'left', true), h('span', { class: 'lb-muted lb-runnav__pos', text: 'сценарий' }), jump(sc.seed + 1, 'Следующий', 'right', false));
-      const agents = options && options.agents ? options.agents : [];
+      const agents = (options && options.agents ? options.agents : []).map((a) => ({ id: a.id, label: agentLabel(a.id, options) }));
+      // Сервер мог быть запущен до появления этого варианта — тогда добавляем его в список сами.
+      if (agents.length && !agents.some((a) => a.id === agentId)) agents.unshift({ id: agentId, label: agentLabel(agentId, options) });
       if (agents.length) {
         const other = agents.find((a) => a.id !== agentId && (a.id === 'fixed' || a.id === 'adaptive')) || agents.find((a) => a.id !== agentId);
         const sel = select(agents.map((a) => ({ value: a.id, label: a.label })), agentId, async (v) => {
           if (v === agentId) return;
           sel.disabled = true;
-          try { go(runHref((await runEpisode(sc.level, sc.seed, v)).file)); } catch (e) { fail(e); sel.disabled = false; }
+          try { go(runHref((await runEpisode(sc.level, sc.seed, v, rules)).file)); } catch (e) { fail(e); sel.disabled = false; }
         });
         switches.push(h('label', { class: 'lb-switch' }, h('span', { class: 'lb-switch__name', text: 'Вариант на этом сценарии' }), sel));
         if (other) {
@@ -171,7 +228,7 @@ export async function render(root, ctx) {
           const btn = h('button', { class: 'lb-btn', type: 'button' }, icon('pair'), 'Сравнить');
           btn.addEventListener('click', async () => {
             busy(btn, true);
-            try { go(compareHref(file, (await runEpisode(sc.level, sc.seed, vs.value)).file)); } catch (e) { fail(e); busy(btn, false); }
+            try { go(compareHref(file, (await runEpisode(sc.level, sc.seed, vs.value, rules)).file)); } catch (e) { fail(e); busy(btn, false); }
           });
           switches.push(h('div', { class: 'lb-switch' }, h('span', { class: 'lb-switch__name', text: 'Сравнить с вариантом' }), vs, btn));
         }
@@ -181,6 +238,17 @@ export async function render(root, ctx) {
 
   const result = trace.result || (run && run.metrics) || {};
   const stage = h('div', { class: 'lb-stage' });
+  // Открыть запись сразу на нужном месте: …&t=44.1 (секунды) или …&q=Q2 (вывод расследования).
+  let startAt;
+  if (ctx.query.t != null && ctx.query.t !== '' && Number.isFinite(Number(ctx.query.t))) startAt = Number(ctx.query.t);
+  else if (ctx.query.q) {
+    const q = (trace.inquiries || []).find((x) => x && String(x.id) === String(ctx.query.q));
+    if (q) startAt = Number(q.t_close ?? q.t_open);
+  }
+  const showInquiries = () => {
+    const el = stage.querySelector('.rp-inq');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   fill(root,
     h('header', { class: 'lb-runhead' },
       h('div', { class: 'lb-runhead__main' },
@@ -192,12 +260,21 @@ export async function render(root, ctx) {
       // В опыте текущий вариант виден в переключателе; у отдельного прогона — подписью.
       exp && run && (exp.spec.arms || []).length > 1 ? null : h('span', { class: 'lb-chip lb-chip--big' }, dot(color), label),
       switches,
-      sc.level && sc.seed != null ? h('a', { class: 'lb-link', href: href('/scenarios', { level: sc.level, seed: sc.seed }) }, 'Что спрятано на этой арене') : null),
+      rules ? h('span', { class: 'lb-chip lb-chip--plain', title: 'Заряд уходит ещё на повороты и вес образцов; штраф в опасной зоне может вызвать утечку заряда или сбой датчика' }, 'Усложнённые правила: сбои и несколько причин расхода') : null,
+      sc.level && sc.seed != null ? h('a', { class: 'lb-link', href: href('/scenarios', { level: sc.level, seed: sc.seed, rules }) }, 'Что спрятано на этой арене') : null),
     problem,
+    demo.length ? h('div', { class: 'lb-alert', data: { tone: 'warn' }, role: 'status' },
+      h('div', { class: 'lb-alert__icon' }, icon('info', 20)),
+      h('div', { class: 'lb-alert__body' },
+        h('div', { class: 'lb-alert__title', text: 'В запись подмешан пример для проверки вида страницы' }),
+        h('div', { class: 'lb-alert__text', text: `${[demo.includes('inquiry') ? 'расследования и сводка по ним' : '', demo.includes('pose') ? 'поправка положения по лидару' : ''].filter(Boolean).join(', ')} — не из этого прогона. Сама запись на диске не меняется.` }),
+        h('div', { class: 'lb-alert__actions' }, h('a', { class: 'lb-btn', href: runHref(file) }, 'Показать запись без примера')))) : null,
     resultTiles(result, trace.rules),
     detectChips(result),
+    inquiryChips(trace, showInquiries),
+    knowledgeChips(result.knowledge ?? trace.knowledge),
     stage);
 
-  const player = await mountPlayer(stage, { trace, arena, color });
+  const player = await mountPlayer(stage, { trace, arena, color, startAt });
   ctx.onLeave(() => destroyPlayer(player));
 }

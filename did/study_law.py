@@ -21,7 +21,7 @@ import numpy as np
 
 from .inquiry import FAULT_S
 from .science import OTHER, Alternative, Inquiry, TestOption
-from .study import DEFAULT_LAWS, LAWS, TRAVEL_V, Hypothesis
+from .study import DEFAULT_LAWS, LAWS, TRAVEL_V, Hypothesis, plural
 
 LOC_PAIR_M = 0.03       # ошибка расстояния, когда слушаем с двух сторон (ошибка места образца сокращается)
 LOC_SINGLE_M = 0.08     # и когда точка одна
@@ -191,13 +191,15 @@ class LawMixin:
         if not pts:
             return False
         self._crosses += 1
-        test = TestOption(f'c{self._crosses}', f'{len(pts)} точки вокруг образца в {r:.2f} м от него', cost=len(pts) * r * self._per_m(),
+        n = len(pts)
+        test = TestOption(f'c{self._crosses}', f"{n} {plural(n, 'точка', 'точки', 'точек')} вокруг образца в {r:.2f} м от него",
+                          cost=n * r * self._per_m(),
                           duration_s=30.0, unit='показание', predictions=self._law_pred(r, 2),
                           action={'kind': 'listen', 'd': r, 'stations': pts, 'risk': 0.0}, sigma=self._listen_sigma(len(pts)))
         test.gain_bits = round(self.inq.gain(test), 3)
         self.inq.tests.insert(self._crosses - 1, test)
         self._law = {'test': test, 'todo': list(pts), 'got': [], 'cross': True}
-        self.journal.add(obs.t, 'decision', f'Уточняю место образца: слушаю датчик в {len(pts)} точках вокруг него, в {r:.2f} м. '
+        self.journal.add(obs.t, 'decision', f'Уточняю место образца: слушаю датчик в {n} точках вокруг него, в {r:.2f} м. '
                          'Перекос показаний между точками покажет, куда сдвинуть оценку; среднее по ним — первый опыт '
                          'для сравнения объяснений', inquiry=self.inq.id)
         return True

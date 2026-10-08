@@ -534,6 +534,8 @@
 .rp-q-stepname { font-size: 12px; font-weight: 650; letter-spacing: 0.05em; text-transform: uppercase; color: var(--rp-ink-2); line-height: 1.25; }
 .rp-q-big { font-size: 17px; font-weight: 600; line-height: 1.32; text-wrap: pretty; }
 .rp-q-note { font-size: 12.5px; line-height: 1.38; color: var(--rp-ink-3); }
+.rp-q-big-soft { font-size: 15.5px; }
+.rp-q-plain { font-size: 14px; line-height: 1.38; color: var(--rp-ink-2); }
 .rp-q-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13px; color: var(--rp-ink-2); }
 .rp-q-when { font-size: 13px; font-weight: 600; white-space: nowrap; }
 .rp-q-letter {

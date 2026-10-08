@@ -230,7 +230,8 @@ export function createArena(arena, opts = {}) {
   }
 
   const el = h('div', { class: `lb-arena${thumb ? ' lb-arena--thumb' : ''}` }, svg);
-  return { el, render };
+  // svg и geo (X, Y — мир → рисунок) нужны страницам, которые рисуют поверх арены своё (конструктор исследования).
+  return { el, render, svg, geo };
 }
 
 /** Пояснение к рисунку арены. */

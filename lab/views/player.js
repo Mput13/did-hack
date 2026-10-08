@@ -30,7 +30,7 @@ function staticMap(trace, arena, color) {
 
 /**
  * Один прогон. Возвращает {ok, controller}: controller есть всегда (у заглушки — с update и destroy).
- * opts: {trace, arena, follow, compact, color}
+ * opts: {trace, arena, follow, compact, color, startAt}
  */
 export async function mountPlayer(host, opts) {
   host.replaceChildren(loading('Открываю проигрыватель…'));
@@ -40,7 +40,10 @@ export async function mountPlayer(host, opts) {
     const box = h('div', { class: 'lb-player' });
     host.replaceChildren(box);
     try {
-      const controller = await mod.mountReplay(box, { trace: opts.trace, arena: opts.arena, compact: !!opts.compact, follow: !!opts.follow });
+      const controller = await mod.mountReplay(box, {
+        trace: opts.trace, arena: opts.arena, compact: !!opts.compact, follow: !!opts.follow,
+        startAt: typeof opts.startAt === 'number' ? opts.startAt : undefined,
+      });
       return { ok: true, controller: controller || {} };
     } catch (e) {
       console.error('Проигрыватель упал при запуске:', e);

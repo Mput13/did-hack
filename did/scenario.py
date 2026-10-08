@@ -146,12 +146,34 @@ def _hazard_zone(zid, arena, rng, samples, base, others):
     return Zone(zid, 'circle', round(p[0], 2), round(p[1], 2), r=round(rng.uniform(0.25, 0.33), 2))
 
 
+def _hazard_on_soil(zid, arena, rng, soils, samples, base, others):
+    """Опасная зона внутри дорогого грунта: сбой после штрафа накладывается на дорогой пол."""
+    points = _free_points(arena, rng, 0.15)
+
+    def ok(p, gap):
+        return (soil_mult(soils, *p) > 1.0 and math.dist(p, base) > 1.0
+                and all(math.dist(p, s) > 0.45 for s in samples)
+                and all(math.dist(p, (o.x, o.y)) > gap for o in others))
+
+    for gap in (0.9, 0.6, 0.0):
+        try:
+            p = _place(points, lambda q: ok(q, gap))
+            return Zone(zid, 'circle', round(p[0], 2), round(p[1], 2), r=round(rng.uniform(0.25, 0.33), 2))
+        except Exception:      # noqa: BLE001 — подходящей точки нет, ослабить требование к разносу зон
+            continue
+    return None
+
+
 def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, events=None,
-             event_window=(20.0, 70.0)):
+             event_window=(20.0, 70.0), fault_kinds=None, hazard_on_soil=False, soil_mults=None):
     """Сценарий уровня easy/medium/hard. Параметры n_* и events переопределяют таблицу уровней.
 
     event_window — в какие секунды прогона случаются события hard: окно подобрано под длительность
     прогона (1,5–3 минуты), чтобы изменения застали агента в работе.
+
+    Три параметра строят «ловушки» для проверки расследований: fault_kinds — из каких сбоев выбирать
+    (запись вида 'leak+sensor_bias' даёт два сбоя разом), hazard_on_soil — ставить опасные зоны на
+    дорогой грунт, soil_mults — заменить множители грунта (например, едва заметные [1.5]).
     """
     spec = LEVELS[level]
     rng = np.random.default_rng([seed, sum(level.encode())])
@@ -171,6 +193,8 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
 
     mults = list(SOIL_MULTS[level])
     rng.shuffle(mults)
+    if soil_mults:
+        mults = [float(soil_mults[i % len(soil_mults)]) for i in range(len(mults))]
     soils = []
     for i in range(n_soils):
         soils.append(_soil_zone(chr(ord('A') + i), mults[i % len(mults)], arena, rng, soils, base))
@@ -203,10 +227,20 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
                          'duration': round(float(rng.uniform(25, 40)), 1), 'sigma': 0.25})
     timeline.sort(key=lambda e: e['t'])
 
+    if hazard_on_soil and soils:
+        # Отдельный генератор: остальная расстановка совпадает со сценарием без ловушки.
+        rng3 = np.random.default_rng([seed, sum(level.encode()), 3])
+        moved = []
+        for z in hazards:
+            m = _hazard_on_soil(z.id, arena, rng3, soils, samples, base, moved)
+            moved.append(m or z)
+        hazards = moved
+
     # Виды сбоев назначаются отдельным генератором случайных чисел: расстановка прежних серий не меняется.
     rng2 = np.random.default_rng([seed, sum(level.encode()), 2])
+    kinds = list(fault_kinds) if fault_kinds else list(FAULT_KINDS)
     for z in hazards + [e['zone'] for e in timeline if e['type'] == 'new_hazard']:
-        z.fault = str(rng2.choice(FAULT_KINDS))
+        z.fault = str(rng2.choice(kinds))
         z.fault_s = round(float(rng2.uniform(20, 30)), 1)
     for e in timeline:
         if e['type'] == 'sensor_fault':

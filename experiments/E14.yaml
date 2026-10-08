@@ -1,0 +1,36 @@
+title: Ловушки для исследователя
+kind: science
+rules: science
+question: Где расследования ошибаются, если среду нарочно сделать неудобной для них?
+hypothesis: >-
+  Исследователь не выдаёт ложных причин и в неудобных условиях: когда сбоев нет вовсе, когда утечка
+  накладывается на дорогой грунт, когда батарея и датчик ломаются одновременно и когда грунт дороже
+  обычного совсем немного. В трудных случаях он отвечает «недостаточно данных», а не называет не ту причину.
+method: >-
+  Те же трудные сценарии, но генератор расставляет ловушки: все опасные зоны дают сбой одного вида,
+  зоны стоят на дорогом грунте, сбоя два сразу или сбоев нет. В каждом условии выводы исследователя
+  сверяются со скрытой правдой. Рядом тот же сценарий проходит адаптивный агент без расследований.
+expect: >-
+  Доля верных выводов остаётся высокой везде, кроме занижения показаний датчика; там вырастет число
+  исходов «недостаточно данных».
+refute: >-
+  Гипотеза опровергнута, если хотя бы в одном условии исследователь называет неверную причину чаще
+  чем в одном выводе из десяти.
+arms:
+  - {id: adaptive, label: С адаптацией, agent: adaptive}
+  - {id: scientist, label: Исследователь, agent: scientist}
+levels: [hard]
+seeds: 40
+conditions:
+  - {id: base, label: Обычный сценарий}
+  - {id: clean, label: Сбоев нет вовсе, rules: {faults: false}}
+  - {id: leak, label: Только утечки, scenario: {fault_kinds: [leak], n_hazards: 3}}
+  - {id: leak_soil, label: Утечка на дорогом грунте, scenario: {fault_kinds: [leak], n_hazards: 3, hazard_on_soil: true}}
+  - {id: bias, label: Только занижение датчика, scenario: {fault_kinds: [sensor_bias], n_hazards: 3}}
+  - {id: stuck, label: Только залипание датчика, scenario: {fault_kinds: [sensor_stuck], n_hazards: 3}}
+  - {id: double, label: Батарея и датчик сразу, scenario: {fault_kinds: [leak+sensor_noise, leak+sensor_stuck, leak+sensor_bias], n_hazards: 3}}
+  - {id: weak_soil, label: Грунт дороже всего в 1,5 раза, scenario: {soil_mults: [1.5]}}
+metrics: [inq_correct, inq_wrong, inq_insufficient, faults_found, returned, score, inq_total, inq_energy]
+claims:
+  - {metric: returned, a: scientist, b: adaptive, text: В ловушках исследователь возвращается не реже адаптивного, better: higher}
+  - {metric: score, a: scientist, b: adaptive, text: В ловушках исследователь набирает не меньше очков, better: higher}

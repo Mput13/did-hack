@@ -8,18 +8,18 @@
   опасность — где ещё есть ненайденные опасные зоны и чем кончится въезд (штраф, утечка заряда);
   образец   — есть ли он в кандидате на самом деле;
   расход    — сколько на самом деле стоит метр;
-  сбой      — сколько ещё продлится идущая утечка;
+  сбой      — сколько ещё продлится утечка, идущая сейчас;
   перемены  — не устарела ли карта там, где робот уже ездил.
 
 Каждый вариант плана («C1 → домой», «E2 → домой», «C1 → C2 → домой», «сразу домой») проигрывается
-во всех мирах: сколько образцов, какой счёт, сколько заряда останется на базе. Выбирается вариант
-с наибольшей ожидаемой ценностью среди тех, где вероятность не вернуться не выше порога; если таких
-нет — домой. Пути считаются один раз (CostGraph), миры — массивами numpy.
+во всех мирах: сколько образцов, какой счёт, сколько заряда останется на базе, как часто робот не
+вернётся. Годятся варианты, где вероятность не вернуться не выше порога; если таких нет — домой.
+Среди годных выбирает либо правило планировщика, либо наибольший ожидаемый счёт (Settings.choice).
+Пути считаются один раз (CostGraph), миры — массивами numpy; решение занимает единицы миллисекунд.
 
 Две части: Foresight — сам расчёт на отрезках пути (его проверяют tests/test_foresight.py на
 игрушечных входах), Advisor — связка с агентом: строит варианты из его карт и пишет таблицу в журнал.
 """
-import copy
 import math
 import time
 from dataclasses import dataclass, replace
@@ -40,7 +40,7 @@ class Settings:
     worlds: int = 48                  # сколько состояний среды в выборке
     risk_limit: float = 0.05          # допустимая вероятность не вернуться
     choice: str = 'planner'           # кто выбирает среди прошедших по риску: planner — правило планировщика
-    #                                   («выгода на единицу заряда»), score — наибольшая ожидаемая ценность
+    #                                   («выгода на единицу заряда»), score — наибольший ожидаемый счёт
     abort_margin: float = 1.3         # в пути от цели отказываемся, когда риск выше порога во столько раз
     # --- чего агент не знает о полу
     soil_rate: float = 0.20           # зон дорогого грунта на метр непроверенного пола: исходное предположение
@@ -62,9 +62,7 @@ class Settings:
     dwell: float = 0.3                # ед. заряда на подъезд вплотную и сбор
     turn_back_below: float = 2.0      # встретив неожиданность, агент повернёт назад, если иначе на базе осталось бы меньше
     # --- ценность
-    explore_value: float = 0.3        # какая доля «неясной массы» вокруг точки разведки превращается в образцы
-    future_per_unit: float = 0.5      # очков за единицу заряда, оставшегося на следующие цели (0 — не учитывать)
-    safe_bias: float = 8.0            # маршрут «по проверенному»: во сколько раз дороже непроверенная клетка
+    explore_value: float = 0.6        # какая доля «неясной массы» вокруг точки разведки превращается в образцы
     pairs: int = 3                    # пары «Ci → Cj → домой» строятся для стольких лучших кандидатов
     seed: int = 0
 
@@ -75,22 +73,21 @@ DEFAULTS = Settings()                 # отладочные серии подм
 class Leg:
     """Отрезок пути глазами агента: шаги, оценка множителя грунта, доля непроверенного пола."""
 
-    __slots__ = ('ds', 'dm', 'unk', 'open', 'cell', 'risk', 'metres', 'length', 'unknown_m', 'est', 'hot')
+    __slots__ = ('ds', 'dm', 'unk', 'open', 'cell', 'risk', 'metres', 'length', 'unknown_m', 'hot')
 
-    def __init__(self, ds, mult, unk, cell, risk=0.0, est=None):
+    def __init__(self, ds, mult, unk, cell, risk=0.0):
         self.ds = np.asarray(ds, dtype=float)             # длина шага, м
         self.unk = np.asarray(unk, dtype=float)           # 0 — пол проверен колёсами, 1 — там не ездили
         self.open = self.unk > 0.5
         self.cell = np.asarray(cell, dtype=np.intp)       # клетка сетки миров под каждым шагом
         self.risk = float(risk)                           # вероятность задеть уже найденную опасную зону
-        self.length = float(self.ds.sum())
-        self.dm = self.ds * np.asarray(mult, dtype=float)              # те же шаги в метрах обычного пола
-        self.metres = float(self.dm.sum())                             # весь отрезок по оценке агента
-        self.unknown_m = float(self.ds @ self.unk)
         mult = np.asarray(mult, dtype=float)
+        self.length = float(self.ds.sum())
+        self.dm = self.ds * mult                          # те же шаги в метрах обычного пола по оценке агента
+        self.metres = float(self.dm.sum())
+        self.unknown_m = float(self.ds @ self.unk)
         # Сколько метров прибавится, если уже известный дорогой грунт на пути подорожает до верхнего множителя.
         self.hot = self.ds * np.where(mult > 1.4, np.maximum(HOT_MULT - mult, 0.0), 0.0)
-        self.est = self.metres if est is None else float(est)          # цена пути, по которой агент выбирает маршрут
 
 
 @dataclass
@@ -107,7 +104,7 @@ class Option:
     id: str
     label: str
     steps: list           # [Step]; пусто — «сразу домой»
-    homes: dict           # маршрут → [(Leg, оценка)]: домой от последней цели, от предпоследней, …, от старта
+    homes: list           # [(Leg, цена по оценке агента)]: домой от последней цели, от предпоследней, …, от старта
     subgoals: list = None
 
 
@@ -157,11 +154,10 @@ class Worlds:
         self.extra = np.zeros((m, self.w * self.h))               # (множитель − 1) дорогого грунта по клеткам
         self.danger = np.zeros((m, self.w * self.h), dtype=bool)  # ненайденная опасная зона в клетке
         self.rates = None
-        self.set_rates(0.0, 0.0, s.soil_mults)
 
     def set_rates(self, n_soil, n_hazard, mults):
         """Сколько зон грунта и опасных зон в среднем на арене и какими бывают множители."""
-        key = (round(n_soil, 1), round(n_hazard, 2), tuple(mults))
+        key = (round(n_soil * 4) / 4, round(n_hazard * 10) / 10, tuple(mults))   # мелкие сдвиги миры не меняют
         if key == self.rates:
             return
         self.rates = key
@@ -235,7 +231,6 @@ COLUMNS = [
     # ключ, подпись, единица — для таблицы в интерфейсе
     ('samples', 'Образцов', 'шт.'),
     ('score', 'Счёт', 'очки'),
-    ('value', 'Ценность', 'очки'),
     ('risk', 'Не вернуться', 'доля'),
     ('battery_p5', 'Заряд на базе, худший случай', 'ед.'),
     ('battery_p50', 'Заряд на базе, обычно', 'ед.'),
@@ -249,19 +244,23 @@ COLUMNS = [
 class Foresight:
     """Расчёт: варианты плана × возможные миры → таблица показателей и выбор."""
 
-    def __init__(self, bounds=(-3.0, -3.0, 3.0, 3.0), settings=None, centres=None, rules=None):
+    def __init__(self, bounds=(-3.0, -3.0, 3.0, 3.0), settings=None, centres=None, rules=None, area=None):
         from .config import Rules
-        self.s = settings or DEFAULTS
+        s = self.s = settings or DEFAULTS
         self.rules = rules or Rules()
-        self.worlds = Worlds(bounds, self.s, centres)
+        self.worlds = Worlds(bounds, s, centres)
+        # Пока своих наблюдений нет — исходные частоты зон на метр, пересчитанные в число зон на площади.
+        area = area or (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
+        self.worlds.set_rates(s.soil_rate * area / sum(s.soil_radius), s.hazard_rate * area / sum(s.hazard_radius),
+                              s.soil_mults)
 
-    def compare(self, options, battery, per_m, left=1, load=0.0, leak=0.0, pending=(0.0, 0.0)):
-        """Таблица: по строке на вариант (с лучшим для него маршрутом домой).
+    def compare(self, options, battery, per_m, load=0.0, leak=0.0, pending=(0.0, 0.0)):
+        """Таблица: по строке на вариант.
 
-        battery — заряд сейчас; per_m — заряд на метр обычного пола по оценке агента; left — сколько
-        образцов ещё не собрано; load — на какую долю каждый новый образец удорожает метр;
-        leak — сколько заряда ещё заберёт идущая утечка; pending — (вероятность, ед.): утечка,
-        которая могла начаться после недавнего штрафа, но ещё не подтверждена и не исключена.
+        battery — заряд сейчас; per_m — заряд на метр обычного пола по оценке агента; load — на какую
+        долю каждый новый образец удорожает метр; leak — сколько заряда ещё заберёт идущая утечка;
+        pending — (вероятность, ед.): утечка, которая могла начаться после недавнего штрафа, но ещё
+        не подтверждена и не исключена.
         """
         w, s, r = self.worlds, self.s, self.rules
         start = battery - leak * (0.5 + w.u_now) - (w.u_pending < pending[0]) * pending[1]
@@ -270,25 +269,17 @@ class Foresight:
         if r.faults:
             hit_loss = hit_loss + (w.u_leak < s.p_leak) * r.leak_per_s * (
                 s.leak_s[0] + w.u_leak_s * (s.leak_s[1] - s.leak_s[0]))
-        ctx = (start, per_m * s.per_m_factor, max(0, left), load, hit_loss)
-        rows = []
-        for opt in options:
-            best = None
-            for route in opt.homes:
-                row = self._play(opt, route, ctx)
-                if best is None or _better(row, best, s.risk_limit):
-                    best = row
-            rows.append(best)
-        return rows
+        ctx = (start, per_m * s.per_m_factor, load, hit_loss)
+        return [self._play(opt, ctx) for opt in options]
 
-    def _play(self, opt, route, ctx):
-        """Один вариант с одним маршрутом домой во всех мирах сразу."""
+    def _play(self, opt, ctx):
+        """Один вариант во всех мирах сразу."""
         w, s, r = self.worlds, self.s, self.rules
-        start, per_m, left, load, hit_loss = ctx
+        start, per_m, load, hit_loss = ctx
         idle = r.drain_idle_per_s / s.speed                 # заряд за время в пути, на метр
         b = start.copy()
         got = np.zeros(w.n)                                 # собрано образцов в этом варианте
-        found = 0.0                                         # ожидаемые находки разведки
+        found = np.zeros(w.n)                               # ожидаемые находки разведки
         spent = np.zeros(w.n)
         hits = np.zeros(w.n)
         out = []                                            # метры каждого отрезка «туда» по мирам
@@ -310,7 +301,7 @@ class Foresight:
 
         # Домой: по плану от последней цели либо назад по своему следу до точки, откуда дорога уже посчитана.
         # Агент выберет по своей оценке (след к тому времени проверен), а заплатит — по правде мира.
-        alts = opt.homes[route]
+        alts = opt.homes
         est, true_m, true_h = [], [], []
         back = 0.0
         for i, (leg, cost) in enumerate(alts):
@@ -346,7 +337,8 @@ class Foresight:
             e2 = m2 * per_m + idle * m2
             b2 = start - e2 - h2 * hit_loss
             turn = sur.any(axis=1) & (b < s.turn_back_below) & (b2 > b)
-            b, spent, hits, got = (np.where(turn, x, y) for x, y in ((b2, b), (e2, spent), (h2, hits), (0.0, got)))
+            b, spent, hits, got, found = (np.where(turn, x, y) for x, y in (
+                (b2, b), (e2, spent), (h2, hits), (0.0, got), (0.0, found)))
 
         sd = s.per_m_sd * spent + 0.15                      # неточность самой оценки расхода
         p_back = ndtr(b / sd)                               # вероятность вернуться в этом мире
@@ -355,35 +347,20 @@ class Foresight:
                  + p_back * (r.pts_return + r.pts_battery_left * left_b))
         end = np.maximum(b + sd * w.z, 0.0)                 # заряд на базе с учётом разброса расхода
         p5, p50, p95 = np.percentile(end, [5, 50, 95])
-        # Вариант — не конец прогона: заряд, который останется даже в худшем случае, пойдёт на следующие цели.
-        future = min(r.pts_sample * max(left - float(got.mean()), 0.0), s.future_per_unit * float(p5)) \
-            if opt.steps else 0.0
         risk = float(1.0 - p_back.mean())
-        return {'id': opt.id, 'label': opt.label, 'route': route,
-                'samples': round(float(got.mean() + found), 2), 'score': round(float(score.mean()), 2),
-                'value': round(float(score.mean()) + future, 2), 'risk': round(risk, 4),
-                'battery_p5': round(float(p5), 1), 'battery_p50': round(float(p50), 1),
+        return {'id': opt.id, 'label': opt.label,
+                'samples': round(float(np.mean(got + found)), 2), 'score': round(float(score.mean()), 2),
+                'risk': round(risk, 4), 'battery_p5': round(float(p5), 1), 'battery_p50': round(float(p50), 1),
                 'battery_p95': round(float(p95), 1), 'cost': round(float(spent.mean()), 1),
                 'hits': round(float(hits.mean()), 2), 'unknown_m': round(unknown_m, 1),
                 'ok': bool(risk <= s.risk_limit)}
 
     def choose(self, rows):
-        """Наибольшая ценность при риске не выше порога; если никто не проходит — домой самым надёжным путём."""
+        """Наибольший ожидаемый счёт при риске не выше порога; если никто не проходит — домой."""
         ok = [r for r in rows if r['ok']]
         if ok:
-            return max(ok, key=lambda r: r['value'])
-        homes = [r for r in rows if r['id'] == 'home'] or rows
-        return min(homes, key=lambda r: r['risk'])
-
-
-def _better(a, b, limit):
-    """Какой из двух маршрутов домой оставить для варианта: проходящий по риску и более ценный."""
-    if a['ok'] != b['ok']:
-        return a['ok']
-    return a['value'] > b['value'] if a['ok'] else a['risk'] < b['risk']
-
-
-ROUTES = {'fast': 'коротким путём', 'safe': 'по проверенному полу'}
+            return max(ok, key=lambda r: r['score'])
+        return next((r for r in rows if r['id'] == 'home'), None) or min(rows, key=lambda r: r['risk'])
 
 
 class Advisor:
@@ -391,40 +368,42 @@ class Advisor:
 
     def __init__(self, agent, settings=None):
         a = self.a = agent
-        self.s = settings or replace(DEFAULTS, risk_limit=getattr(a.cfg, 'risk_limit', DEFAULTS.risk_limit))
+        self.s = settings or replace(DEFAULTS, risk_limit=getattr(a.cfg, 'risk_limit', DEFAULTS.risk_limit),
+                                     choice=getattr(a.cfg, 'foresight_choice', DEFAULTS.choice))
         arena = a.arena
         X, Y = arena.cell_centers()
         free = arena.clear >= 0.10
         bounds = (arena.x0, arena.y0, arena.x0 + arena.w * arena.res, arena.y0 + arena.h * arena.res)
-        self.core = Foresight(bounds, self.s, np.column_stack([X[free], Y[free]]), a.rules)
         self.area = float(arena.free.sum()) * arena.res ** 2
-        self.safe = copy.copy(a.home_graph)       # тот же граф с другими ценами: домой только по проверенному полу
-        self.route = 'fast'                       # каким из двух маршрутов сейчас ехать домой
+        self.core = Foresight(bounds, self.s, np.column_stack([X[free], Y[free]]), a.rules, self.area)
         self.log = []                             # все решения прогона: таблицы «варианты × показатели»
         self.kappa = 1.0
         self.rates = (self.s.soil_rate, self.s.hazard_rate)   # зон грунта и опасных зон на метр непроверенного пола
         self._unk = np.ones(arena.free.shape)
-        self._version = None
-        self._safe_field = None
+        self._soil_version = None
         self._p = {}                              # цель → вероятность образца на момент выбора
 
     # --- что агент знает и чего не знает --------------------------------------------------------
 
     def _sync(self):
-        """Обновить то, от чего зависят миры: проверенный пол, частоты зон, маршрут по проверенному."""
+        """Обновить то, от чего зависят миры: какой пол проверен и как часто встречаются зоны."""
         a, s = self.a, self.s
         soil = a.soil
+        key = (soil.version, len(a.hazard_map.zones))
+        if key == self._soil_version:
+            return
+        self._soil_version = key
         seen = soil.dist > 0.03                                  # клетки грунта, по которым робот проехал сам
         if a.cfg.learn_soil:
             # Проверено — там, где проехал; рядом со следом — отчасти (по сглаженной оценке модели грунта).
             self._unk = np.where(soil._fine(seen.astype(float), 0.0) > 0.5, 0.0, 1.0 - soil.confidence_grid())
         new_m = float(seen.sum()) * soil.res                     # сколько нового пола уже проверено колёсами
         zones = soil.zones() if a.cfg.learn_soil else []
-        # Частота на метр непроверенного пола: исходное предположение плюс то, что встретилось на своём пути.
         found = []
         for z in zones:                                          # одна зона, задетая в двух местах, — одна находка
             if all(math.hypot(z['x'] - q['x'], z['y'] - q['y']) > 0.9 for q in found):
                 found.append(z)
+        # Частота на метр непроверенного пола: исходное предположение плюс то, что встретилось на своём пути.
         lam_s = (s.soil_rate * s.soil_weight_m + len(found)) / (s.soil_weight_m + new_m)
         lam_h = (s.hazard_rate * s.hazard_weight_m + len(a.hazard_map.zones)) / (s.hazard_weight_m + new_m)
         self.rates = (lam_s, lam_h)
@@ -432,16 +411,9 @@ class Advisor:
         self.core.worlds.set_rates(lam_s * self.area / sum(s.soil_radius), lam_h * self.area / sum(s.hazard_radius),
                                    mults)
         # Обычный пол у агента без модели поворотов и груза выходит дороже номинала: то же ждём от нового пола.
-        plain = (soil.dist > 0.03) & (soil.drain < 1.45 * soil.dist)
+        plain = seen & (soil.drain < 1.45 * soil.dist)
         d = float(soil.dist[plain].sum())
         self.kappa = float(np.clip(soil.drain[plain].sum() / d, 1.0, 1.6)) if d > 1.0 else 1.0
-        if self._version != a._cost_version or self._safe_field is None:
-            self._version = a._cost_version
-            bias = 1.0 + s.safe_bias * self._unk
-            if a.hazards:
-                bias = bias * (1.0 + a.cfg.hazard_weight * a._risk)
-            self.safe.set_cost(soil.mult_grid() if a.cfg.learn_soil else None, bias=bias)
-            self._safe_field = self.safe.field(*a.base)
 
     def _context(self, obs):
         a, s, r = self.a, self.s, self.a.rules
@@ -459,42 +431,50 @@ class Advisor:
             since, unclear = obs.t - a._hazard_t, True
         if r.faults and unclear and since < s.leak_s[1]:         # после штрафа утечку ещё никто не исключил
             pending = (s.p_leak, r.leak_per_s * (s.leak_s[1] - since))
-        return {'battery': obs.battery, 'per_m': per_m, 'left': a.n_samples - a.collected,
-                'load': float(a.inv.model.mean[1]) / per_m if a.inv else 0.0, 'leak': leak, 'pending': pending}
+        return {'battery': obs.battery, 'per_m': per_m, 'leak': leak, 'pending': pending,
+                'load': float(a.inv.model.mean[1]) / per_m if a.inv else 0.0}
 
     # --- пути → отрезки ---------------------------------------------------------------------------
 
-    def _leg(self, graph, pred, node, origin, est=None):
-        """Путь по дереву pred от node до источника поля — как отрезок для расчёта."""
-        nodes = []
-        while node >= 0:
-            nodes.append(node)
-            node = pred[node]
-        n = np.asarray(nodes, dtype=np.intp)
+    def _leg(self, graph, n, origin):
+        """Узлы графа по порядку движения — как отрезок для расчёта."""
+        n = np.asarray(n, dtype=np.intp)
         if len(n) < 2:
-            return Leg([], [], [], [], 0.0, est)
+            return Leg([], [], [], [])
         x, y = graph.xs[n], graph.ys[n]
-        mx, my = 0.5 * (x[1:] + x[:-1]), 0.5 * (y[1:] + y[:-1])
-        u = self._unk[graph.iy[n], graph.ix[n]]
+        iy, ix = graph.iy[n], graph.ix[n]
+        u = self._unk[iy, ix]
         unk = 0.5 * (u[1:] + u[:-1])
         mult = 0.5 * (graph.mult[n[1:]] + graph.mult[n[:-1]]) + unk * (self.kappa - 1.0)
         # Риск уже найденных зон; рядом с роботом не считается: он там стоит, и штрафа нет.
         far = np.hypot(x - origin[0], y - origin[1]) > 0.3
-        risk = float(self.a._risk[graph.iy[n], graph.ix[n]][far].max()) if far.any() else 0.0
-        return Leg(np.hypot(np.diff(x), np.diff(y)), mult, unk, self.core.worlds.cells(mx, my), risk, est)
+        risk = float(self.a._risk[iy, ix][far].max()) if self.a.hazards and far.any() else 0.0
+        cell = self.core.worlds.cells(0.5 * (x[1:] + x[:-1]), 0.5 * (y[1:] + y[:-1]))
+        return Leg(np.hypot(np.diff(x), np.diff(y)), mult, unk, cell, risk)
+
+    @staticmethod
+    def _chain(pred, node):
+        """Узлы пути по дереву pred: от node к источнику поля."""
+        nodes = []
+        while node >= 0:
+            nodes.append(node)
+            node = pred[node]
+        return nodes
+
+    def _to(self, pred, x, y, origin):
+        """Путь от источника поля pred до (x, y), в порядке движения."""
+        return self._leg(self.a.graph, self._chain(pred, self.a.graph.node(x, y))[::-1], origin)
 
     def _home(self, x, y, origin):
-        """Дорога домой из (x, y) двумя маршрутами: {маршрут: (отрезок, цена пути по оценке агента)}."""
+        """Дорога домой из (x, y) тем путём, каким поедет агент: (отрезок, цена пути по оценке агента)."""
         a = self.a
         if a._base_dist is None:
             a._home_cost(x, y)
-        out = {}
-        for route, graph, (dist, pred) in (('fast', a.home_graph, (a._base_dist, a._base_pred)),
-                                           ('safe', self.safe, self._safe_field)):
-            node = graph.node(x, y)
-            if math.isfinite(dist[node]):
-                out[route] = (self._leg(graph, pred, node, origin, float(dist[node])), float(dist[node]))
-        return out
+        node = a.home_graph.node(x, y)
+        cost = float(a._base_dist[node])
+        if not math.isfinite(cost):
+            return None
+        return self._leg(a.home_graph, self._chain(a._base_pred, node), origin), cost
 
     def _options(self, obs, targets):
         """Варианты плана: домой, каждая цель и домой, пары лучших кандидатов."""
@@ -502,40 +482,38 @@ class Advisor:
         origin = (obs.x, obs.y)
         dist, pred = a.graph.field(obs.x, obs.y)
         here = self._home(obs.x, obs.y, origin)
-        opts = [Option('home', 'сразу домой', [], {r: [h] for r, h in here.items()}, [{'type': 'return_base'}])]
+        opts = [Option('home', 'сразу домой', [], [here], [{'type': 'return_base'}])]
         steps = {}
         for k, (tg, kind, p) in enumerate(targets):
             node = a.graph.node(tg['x'], tg['y'])
             ix, iy = a.arena.w2g(tg['x'], tg['y'])
-            if not math.isfinite(dist[node]) or a._risk[iy, ix] >= 0.5:
+            home = self._home(tg['x'], tg['y'], origin)
+            if home is None or not math.isfinite(dist[node]) or a._risk[iy, ix] >= 0.5:
                 continue
-            st = Step(tg['id'], kind, p, self._leg(a.graph, pred, node, origin), k)
-            homes = self._home(tg['x'], tg['y'], origin)
+            st = Step(tg['id'], kind, p, self._to(pred, tg['x'], tg['y'], origin), k)
             sg = {'type': 'investigate' if kind == 'candidate' else 'explore', 'target': tg['id']}
-            steps[tg['id']] = (st, homes, sg, tg)
-            opts.append(Option(tg['id'], f"{tg['id']} → домой", [st],
-                               {r: [homes[r], here[r]] for r in homes if r in here}, [sg]))
+            steps[tg['id']] = (st, home, sg, tg)
+            opts.append(Option(tg['id'], f"{tg['id']} → домой", [st], [home, here], [sg]))
         top = sorted((i for i, v in steps.items() if v[0].kind == 'candidate'), key=lambda i: -steps[i][0].p)[:s.pairs]
-        for i in top:
-            st_i, homes_i, sg_i, tg_i = steps[i]
+        for i in top if len(top) > 1 else ():
+            st_i, home_i, sg_i, tg_i = steps[i]
             _, pred_i = a.graph.field(tg_i['x'], tg_i['y'])
             for j in top:
                 if j == i:
                     continue
-                st_j, homes_j, sg_j, tg_j = steps[j]
-                leg = self._leg(a.graph, pred_i, a.graph.node(tg_j['x'], tg_j['y']), origin)
+                st_j, home_j, sg_j, tg_j = steps[j]
+                leg = self._to(pred_i, tg_j['x'], tg_j['y'], origin)
                 opts.append(Option(f'{i}+{j}', f'{i} → {j} → домой', [st_i, replace(st_j, leg=leg)],
-                                   {r: [homes_j[r], homes_i[r], here[r]] for r in homes_j if r in homes_i and r in here},
-                                   [sg_i, sg_j]))
-        return [o for o in opts if o.homes]
+                                   [home_j, home_i, here], [sg_i, sg_j]))
+        return opts
 
     # --- решения ----------------------------------------------------------------------------------
 
     def plan(self, obs, state):
         """Выбор цели сравнением вариантов. Возвращает план в формате планировщика.
 
-        Заодно помечает в состоянии, какие цели проходят по риску: языковая модель (если план за ней)
-        выбирает уже только из них — тогда возвращается None.
+        Заодно помечает в состоянии, какие цели проходят по риску: если план за языковой моделью,
+        она выбирает уже только из них — тогда возвращается None.
         """
         t0 = time.perf_counter()
         a = self.a
@@ -543,38 +521,41 @@ class Advisor:
         self._sync()
         targets = [(c, 'candidate', c['confidence']) for c in state['candidates']]
         targets += [(p, 'explore', min(1.0, p['unseen_share'] * left)) for p in state['explore_points']]
-        options = self._options(obs, targets) if left > 0 else self._options(obs, [])
+        options = self._options(obs, targets if left > 0 else [])
         rows = self.core.compare(options, **self._context(obs))
         by_id = {r['id']: r for r in rows}
-        floor = by_id['home']['value']                          # цель должна быть не хуже, чем «сразу домой»
+        # Цель годится, если проходит по риску и окупает его прибавку: ожидаемые образцы стоят не меньше,
+        # чем то, что теряется при невозврате, умноженное на добавленную вероятность не вернуться.
+        home, r = by_id['home'], a.rules
+        loss = r.pts_return + r.pts_battery_left * home['battery_p50']
+        for row in rows:
+            row['worth'] = bool(row['id'] == 'home' or r.pts_sample * row['samples'] >= (row['risk'] - home['risk']) * loss)
         for tg in state['candidates'] + state['explore_points']:
-            tg['feasible'] = tg['id'] in by_id and by_id[tg['id']]['ok'] and by_id[tg['id']]['value'] >= floor
+            tg['feasible'] = tg['id'] in by_id and by_id[tg['id']]['ok'] and by_id[tg['id']]['worth']
         self._p = {tg['id']: p for tg, _, p in targets}
         best = self.core.choose(rows)
         subgoals, note = next(o for o in options if o.id == best['id']).subgoals, ''
         if self.s.choice == 'planner' or a.cfg.planner == 'llm':
             if a.cfg.planner == 'llm':
-                rec = self._record(obs, state['trigger'], rows, best, (time.perf_counter() - t0) * 1e3)
+                rec = self._record(obs, state['trigger'], rows, best, t0)
                 a.journal.add(obs.t, 'observe', self._text(rows, best) + ' Выбор среди прошедших по риску — за моделью.',
                               foresight=rec)
                 return None
             inner = HeuristicPlanner().plan(state)             # правило выбирает среди прошедших по риску
-            first = inner['subgoals'][0]
-            best = by_id[first.get('target', 'home')]
+            best = by_id[inner['subgoals'][0].get('target', 'home')]
             subgoals, note = inner['subgoals'], ' По правилу планировщика: ' + inner['reasoning']
         for tg in state['candidates'] + state['explore_points']:
             tg['feasible'] = tg['feasible'] or any(sg.get('target') == tg['id'] for sg in subgoals)
-        rec = self._record(obs, state['trigger'], rows, best, (time.perf_counter() - t0) * 1e3)
-        self.route = best['route']
+        rec = self._record(obs, state['trigger'], rows, best, t0)
         return {'reasoning': self._text(rows, best) + note, 'hypotheses': [], 'subgoals': subgoals,
                 'source': 'foresight', 'exchanges': [], 'error': None, 'data': {'foresight': rec}}
 
     def check(self, obs):
-        """Раз в секунду: не пора ли домой, а на обратном пути — каким маршрутом ехать."""
+        """Раз в секунду: не пора ли домой. Сравниваются «ехать дальше к текущей цели» и «сразу домой»."""
         a, s = self.a, self.s
         t = obs.t
         if a._returning:
-            return self._reroute(obs)
+            return
         if a.collected >= a.n_samples:
             return a._go_home(t, 'все образцы собраны')
         if a.rules.time_limit_s - t <= a._home_cost(obs.x, obs.y) / a.rules.drain_per_m / 0.15 + 10.0:
@@ -586,66 +567,41 @@ class Advisor:
         self._sync()
         origin = (obs.x, obs.y)
         here = self._home(obs.x, obs.y, origin)
-        _, pred = a.graph.field(obs.x, obs.y)
-        node = a.graph.node(sg['x'], sg['y'])
-        homes = self._home(sg['x'], sg['y'], origin)
-        routes = [r for r in homes if r in here]
-        if not routes:
+        home = self._home(sg['x'], sg['y'], origin)
+        if here is None or home is None:
             return
-        kind = 'candidate' if sg['type'] == 'investigate' else 'explore'
-        name = sg.get('target') or 'цель'
-        st = Step(name, kind, self._p.get(sg.get('target'), 0.5), self._leg(a.graph, pred, node, origin))
-        opts = [Option('home', 'сразу домой', [], {r: [here[r]] for r in routes}),
-                Option(name, f'{name} → домой', [st], {r: [homes[r], here[r]] for r in routes})]
-        home, cont = self.core.compare(opts, **self._context(obs))
-        if cont['risk'] <= s.risk_limit * s.abort_margin:
-            return
-        self.route = home['route']
-        rec = self._record(obs, 'check', [home, cont], home, (time.perf_counter() - t0) * 1e3)
-        a.journal.add(t, 'decision', self._text([home, cont], home), foresight=rec)
-        a._go_home(t, f"если ехать дальше, риск не вернуться {cont['risk']:.0%} — выше порога {s.risk_limit:.0%}")
-
-    def _reroute(self, obs):
-        """Обратный путь: короткий маршрут или по проверенному полу — что сейчас надёжнее."""
-        a = self.a
-        t0 = time.perf_counter()
-        self._sync()
-        here = self._home(obs.x, obs.y, (obs.x, obs.y))
-        if len(here) < 2:
-            return
-        opts = [Option('home', f'домой {ROUTES[r]}', [], {r: [here[r]]}) for r in here]
-        rows = {r['route']: r for r in self.core.compare(opts, **self._context(obs))}
-        cur = rows[self.route]
-        other = rows['safe' if self.route == 'fast' else 'fast']
-        if cur['ok'] and other['ok']:
-            switch = other['value'] > cur['value'] + 0.3
+        pts = a.follower.pts[a.follower.i:]
+        if a._path_goal is not None and math.dist(a._path_goal, (sg['x'], sg['y'])) <= 0.08 and len(pts) > 1:
+            # Путь к цели уже построен исполнителем: берём его остаток, а не считаем заново.
+            xy = np.asarray(pts)
+            ix = np.clip(((xy[:, 0] - a.arena.x0) / a.arena.res).astype(int), 0, a.arena.w - 1)
+            iy = np.clip(((xy[:, 1] - a.arena.y0) / a.arena.res).astype(int), 0, a.arena.h - 1)
+            leg = self._leg(a.graph, a.graph._near[iy, ix], origin)
         else:
-            switch = other['risk'] < cur['risk'] - 0.01
-        if not switch:
+            leg = self._to(a.graph.field(obs.x, obs.y)[1], sg['x'], sg['y'], origin)
+        name = sg.get('target') or 'цель'
+        st = Step(name, 'candidate' if sg['type'] == 'investigate' else 'explore', self._p.get(sg.get('target'), 0.5),
+                  leg)
+        rows = self.core.compare([Option('home', 'сразу домой', [], [here]),
+                                  Option(name, f'{name} → домой', [st], [home, here])], **self._context(obs))
+        if rows[1]['risk'] <= s.risk_limit * s.abort_margin:
             return
-        self.route = other['route']
-        a._path_goal = None
-        rec = self._record(obs, 'route', [other, cur], other, (time.perf_counter() - t0) * 1e3)
-        a.journal.add(obs.t, 'decision', f"Сравнил 2 маршрута домой при {self.s.worlds} возможных состояниях среды: "
-                      f"еду {ROUTES[other['route']]} — риск не вернуться {other['risk']:.0%} против {cur['risk']:.0%}, "
-                      f"на базе останется около {other['battery_p50']:.0f} ед. против {cur['battery_p50']:.0f}.",
-                      foresight=rec)
-
-    def home_graph(self):
-        """Граф, по которому сейчас строится дорога домой."""
-        return self.safe if self.route == 'safe' and self._safe_field is not None else self.a.home_graph
+        rec = self._record(obs, 'check', rows, rows[0], t0)
+        a.journal.add(t, 'decision', self._text(rows, rows[0]), foresight=rec)
+        a._go_home(t, f"если ехать дальше, риск не вернуться {rows[1]['risk']:.0%} — выше порога {s.risk_limit:.0%}")
 
     # --- запись -----------------------------------------------------------------------------------
 
-    def _record(self, obs, trigger, rows, best, ms):
+    def _record(self, obs, trigger, rows, best, t0):
         s = self.s
         rec = {'t': round(obs.t, 1), 'trigger': trigger, 'worlds': s.worlds, 'risk_limit': s.risk_limit,
-               'battery': round(obs.battery, 1), 'chosen': best['id'], 'route': best['route'], 'ms': round(ms, 2),
+               'battery': round(obs.battery, 1), 'chosen': best['id'],
+               'ms': round((time.perf_counter() - t0) * 1e3, 2),
                'unknowns': {'soil_per_m': round(self.rates[0], 3), 'hazard_per_m': round(self.rates[1], 3),
                             'soil_mults': list(self.core.worlds.rates[2]), 'per_m': round(self.a._per_m(), 2),
                             'per_m_sd': s.per_m_sd, 'stale': s.stale},
                'columns': [{'key': k, 'label': label, 'unit': unit} for k, label, unit in COLUMNS],
-               'rows': [{**r, 'route_label': ROUTES[r['route']], 'chosen': r is best} for r in rows]}
+               'rows': [{**r, 'chosen': r is best} for r in rows]}
         self.log.append(rec)
         if self.a.rec is not None and hasattr(self.a.rec, 'add_foresight'):
             self.a.rec.add_foresight(rec)
@@ -653,11 +609,9 @@ class Advisor:
 
     def _text(self, rows, best):
         s = self.s
-        head = f'Сравнил {len(rows)} вариантов при {s.worlds} возможных состояниях среды: '
-        what = (f"«{best['label']}» ({ROUTES[best['route']]})" if best['id'] == 'home'
-                else f"«{best['label']}», обратно {ROUTES[best['route']]}")
-        text = (f"{head}выбрал {what} — ожидаю {best['samples']:.1f} образца, счёт {best['score']:.0f}, "
-                f"риск не вернуться {best['risk']:.1%}, в худшем случае на базе останется {best['battery_p5']:.0f} ед.")
+        text = (f"Сравнил {len(rows)} вариантов при {s.worlds} возможных состояниях среды: выбрал «{best['label']}» — "
+                f"ожидаю {best['samples']:.1f} образца, счёт {best['score']:.0f}, риск не вернуться {best['risk']:.1%}, "
+                f"в худшем случае на базе останется {best['battery_p5']:.0f} ед.")
         if not best['ok']:
             text += f' Ни один вариант не проходит порог {s.risk_limit:.0%}, поэтому домой.'
         bad = [r for r in rows if not r['ok'] and r is not best]

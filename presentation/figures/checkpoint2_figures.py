@@ -418,17 +418,35 @@ def gazebo_numbers():
     return out
 
 
-def run_tests():
+def _pytest(*extra):
     pixi = shutil.which('pixi') or str(Path.home() / '.pixi' / 'bin' / 'pixi')
-    cmd = [pixi, 'run', 'pytest', 'tests', '-q'] if Path(pixi).exists() else [sys.executable, '-m', 'pytest', 'tests', '-q']
+    cmd = [pixi, 'run', 'pytest', 'tests', '-q', *extra] if Path(pixi).exists() else [sys.executable, '-m', 'pytest', 'tests', '-q', *extra]
     p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=900)
-    tail = (p.stdout or '').strip().splitlines()[-1] if p.stdout else ''
-    m = re.search(r'(\d+) passed', tail)
-    out = {'passed': int(m.group(1)) if m else None, 'line': tail, 'ok': p.returncode == 0,
-           'when': time.strftime('%Y-%m-%dT%H:%M:%S')}
-    for key in ('failed', 'skipped', 'error'):
-        mm = re.search(rf'(\d+) {key}', tail)
-        out[key] = int(mm.group(1)) if mm else 0
+    lines = [ln for ln in (p.stdout or '').strip().splitlines() if ln.strip()]
+    return p.returncode, (lines[-1] if lines else '')
+
+
+def count_tests(old, full=False):
+    """Сколько автоматических проверок в проекте (всегда) и сколько из них проходит (с ключом --tests)."""
+    out = {'collected': None, 'when': time.strftime('%Y-%m-%dT%H:%M:%S')}
+    try:
+        _, tail = _pytest('--collect-only')
+        m = re.search(r'(\d+) tests? collected', tail)
+        out['collected'] = int(m.group(1)) if m else None
+    except Exception as e:                                  # нет pixi или pytest: число останется прежним
+        out['error'] = str(e)[:200]
+        out['collected'] = (old or {}).get('collected')
+    if full:
+        code, tail = _pytest()
+        m = re.search(r'(\d+) passed', tail)
+        out.update(passed=int(m.group(1)) if m else None, line=tail, ok=code == 0, run_when=out['when'])
+        for key in ('failed', 'skipped', 'error'):
+            mm = re.search(rf'(\d+) {key}', tail)
+            out[key if key != 'error' else 'errors'] = int(mm.group(1)) if mm else 0
+    elif old and old.get('collected') == out['collected']:  # набор проверок тот же: прошлый полный прогон ещё в силе
+        for key in ('passed', 'line', 'ok', 'failed', 'skipped', 'errors', 'run_when'):
+            if key in old:
+                out[key] = old[key]
     return out
 
 
@@ -450,7 +468,7 @@ def main():
     data['nav'] = fig_path(arena, medium)
     data['title'] = fig_title(arena, medium)
     data['gazebo'] = gazebo_numbers()
-    data['tests'] = run_tests() if args.tests else old.get('tests')
+    data['tests'] = count_tests(old.get('tests'), full=args.tests)
     data['rules'] = {k: hard['rules'].get(k) for k in ('battery_start', 'drain_per_m', 'collect_radius_m',
                                                        'sensor_range_m', 'sensor_hz', 'sensor_sigma')}
     data['levels'] = {}

@@ -11,7 +11,8 @@ API (всё JSON):
   GET  /api/experiment/<id>           описание и сводка опыта (status: not_run, если ещё не запускался)
   GET  /api/trace?file=<путь в runs>  запись прогона целиком
   GET  /api/scenario?level=&seed=     сценарий без прогона (показ генератора)
-  POST /api/run {level, seed, agent}  один прогон в быстром симуляторе, сразу возвращает сводку
+  POST /api/run {level, seed, agent, rules?}  один прогон в быстром симуляторе, сразу возвращает сводку;
+                                      rules: 'science' — правила с несколькими причинами расхода и сбоями
   POST /api/experiment/<id>/run {seeds?}  запустить серию в фоне
   GET  /api/jobs                      фоновые серии: состояние и последние строки вывода
   GET  /api/live                      текущее состояние прогона в Gazebo (если идёт)
@@ -61,6 +62,13 @@ AGENT_LABELS = {
     'no_sensor_health': 'Без контроля датчика',
     'static_reserve': 'Возврат по жёсткому порогу',
     'belief_only': 'Только карта образцов',
+    'adaptive_ig': 'С адаптацией, разведка по ожидаемой пользе',
+    'scientist': 'Исследователь: ведёт расследования',
+    'scientist_llm': 'Исследователь с языковой моделью',
+    'scientist_fs': 'Исследователь, сравнивает будущие маршруты',
+    'adaptive_fs': 'С адаптацией, сравнивает будущие маршруты',
+    'spiral': 'Спираль',
+    'gradient': 'Подъём по сигналу',
 }
 
 
@@ -69,9 +77,19 @@ def options():
     return {
         'levels': [{'id': k, **v} for k, v in LEVELS.items()],
         'agents': [{'id': k, 'label': AGENT_LABELS.get(k, k), 'search': v.search, 'planner': v.planner,
-                    'flags': {f: getattr(v, f) for f in flags}} for k, v in PRESETS.items()],
+                    'flags': {f: getattr(v, f) for f in flags}} for k, v in PRESETS.items()] + _baseline_agents(),
         'rules': Rules().to_dict(),
     }
+
+
+def _baseline_agents():
+    """Простые стратегии поиска (did/baselines.py): их тоже можно запускать со страницы сценариев."""
+    try:
+        from ..baselines import BASELINES
+    except Exception:                         # noqa: BLE001 — модуля может не быть в старой копии кода
+        return []
+    return [{'id': k, 'label': AGENT_LABELS.get(k, k), 'search': cfg.search, 'planner': cfg.planner, 'flags': {}}
+            for k, (_, cfg) in BASELINES.items() if k not in PRESETS]
 
 
 def knowledge():
@@ -208,11 +226,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(*STUDY.api_run(body))
             if path == '/api/run':
                 agent = body.get('agent', 'adaptive')
-                if agent not in PRESETS:
+                if agent not in PRESETS and agent not in {a['id'] for a in _baseline_agents()}:
                     return self._error(400, f'нет агента {agent}')
+                rules = 'science' if body.get('rules') == 'science' else None
                 with _run_lock:
                     summary = run_episode(body.get('level', 'easy'), int(body.get('seed', 1)), agent,
-                                          experiment='adhoc', llm=body.get('llm'))
+                                          experiment='adhoc', llm=body.get('llm'), rules=rules)
                 return self._send(200, summary)
             if path.startswith('/api/experiment/') and path.endswith('/run'):
                 exp_id = path.split('/')[3]
