@@ -35,6 +35,7 @@ METRICS = {
     'hyp_confirmed_correct': ('Верно подтверждённых гипотез', 'доля', 'higher'),
     'hyp_refuted_correct': ('Верных среди опровергнутых', 'доля', 'lower'),
     'hyp_soil_error': ('Ошибка множителя грунта', 'доля', 'lower'),
+    'hyp_verified_share': ('Охват сверкой: доля гипотез, которые удалось сверить', 'доля', 'higher'),
     # исследования по заданию (did/study.py): оценка робота против скрытой правды сценария
     'study_error_pct': ('Ошибка оценки', '% от истины', 'lower'),
     'study_covered': ('Истина в заявленном интервале 95%', 'доля прогонов', 'higher'),
@@ -192,8 +193,7 @@ def score_inquiries(inquiries, scenario, world):
     """
     from .scenario import soil_mult
     faults = fault_intervals(world)
-    change = next((w['t'] for w in world if w['type'] == 'soil_change'), None)
-    after = next((e['soils'] for e in scenario.events if e['type'] == 'soil_change'), None)
+    changes = _applied_events(scenario, world, 'soil_change')
     out = {'total': 0, 'identified': 0, 'insufficient': 0, 'correct': 0, 'partial': 0, 'wrong': 0, 'unverifiable': 0,
            'quick': 0, 'tests': 0, 'energy': 0.0, 'by_cause': {}}
     for q in inquiries:
@@ -210,7 +210,10 @@ def score_inquiries(inquiries, scenario, world):
         t0, t1 = q['t_open'] - lead, q['t_close'] or q['t_open']
         active = {k for k, a, b in faults if a <= t1 and b >= t0}
         if q['topic'] == 'energy':
-            soils = after if (change is not None and after is not None and change <= q['t_open']) else scenario.soils
+            soils = scenario.soils
+            for change_t, ev in changes:           # действует последняя смена грунта, применённая к этому моменту
+                if change_t <= q['t_open']:
+                    soils = ev['soils']
             x, y = q['anomaly']['x'], q['anomaly']['y']
             dear = max(soil_mult(soils, x + dx, y + dy) for dx in (-0.15, 0, 0.15) for dy in (-0.15, 0, 0.15)) >= 1.4
             truth = ({'leak'} if 'leak' in active else set()) | ({'soil'} if dear else set())
@@ -245,6 +248,29 @@ def score_inquiries(inquiries, scenario, world):
     return out
 
 
+SOIL_NEAR_M = 0.2       # окрестность названной точки, в которой ищется дорогой грунт
+
+
+def _zone_distance(z, x, y):
+    """Расстояние от точки до зоны (круг или прямоугольник со сторонами вдоль осей); внутри зоны — ноль."""
+    get = (lambda k, d=0.0: z.get(k, d)) if isinstance(z, dict) else (lambda k, d=0.0: getattr(z, k, d))
+    if (get('shape', 'circle') or 'circle') == 'circle':
+        return max(0.0, math.dist((x, y), (get('x'), get('y'))) - get('r'))
+    return math.hypot(max(0.0, abs(x - get('x')) - get('w') / 2), max(0.0, abs(y - get('y')) - get('h') / 2))
+
+
+def _applied_events(scenario, world, kind):
+    """События сценария одного вида с временем, когда судья их применил: [(время, событие)] по порядку.
+
+    Судья применяет события в порядке расписания и на каждое пишет запись в свой журнал, поэтому k-е событие
+    вида в сценарии — это k-я запись этого вида в журнале; сопоставление по порядку однозначно и тогда, когда
+    времена совпали. Если записи нет (журнал не передан или прогон кончился раньше), берётся время из сценария.
+    """
+    planned = [ev for ev in (getattr(scenario, 'events', []) or []) if ev.get('type') == kind]
+    done = [float(w['t']) for w in world if w.get('type') == kind]
+    return [(done[k] if k < len(done) else float(ev.get('t', 0.0)), ev) for k, ev in enumerate(planned)]
+
+
 def score_hypotheses(hypotheses, scenario, world, events=None):
     """Сверка гипотез агента со скрытой правдой сценария.
 
@@ -253,17 +279,20 @@ def score_hypotheses(hypotheses, scenario, world, events=None):
       'wrong'        — неверна
       'unverifiable' — проверить нечем
 
-    Виды:
+    Виды (вид берётся из ключа гипотезы; текст — только для старых записей без распознаваемого ключа):
       - sample: верна, если в момент выдвижения в радиусе 0.35 м лежал несобранный образец
         (образцы собираются по ходу прогона — время сбора есть в events записи);
-      - soil: верна, если в названной точке (и окрестности 0.2 м) в тот момент действительно был дорогой
-        грунт (множитель >= 1.4 с учётом soil_change);
+      - soil: верна, если в круге радиуса 0.2 м вокруг названной точки в тот момент действительно был дорогой
+        грунт (множитель >= 1.4; действует последняя из смен грунта, применённых к тому моменту);
         дополнительно — относительная ошибка названного множителя;
       - hazard: верна, если названное место пересекается с настоящей зоной, существовавшей к тому моменту
-        (с учётом new_hazard);
+        (каждая новая зона — со своего времени появления);
       - sensor: верна, если в тот момент действительно шёл сбой датчика.
+
+    Доли верных считаются только среди гипотез, которые удалось сверить; 'verified_share' — какую долю
+    журнала сверка охватила.
     """
-    from .scenario import Scenario, soil_mult
+    from .scenario import Scenario
     if hasattr(hypotheses, 'hypotheses'):
         hyp_list = hypotheses.hypotheses
     else:
@@ -280,13 +309,19 @@ def score_hypotheses(hypotheses, scenario, world, events=None):
         s = h.get('statement', '')
         if k.startswith('law:'):
             return 'law'
-        if k.startswith('sample:') or k == 'sample' or 'образец лежит' in s or ('образец' in s and not k.startswith('law:')):
+        for name in ('sample', 'soil', 'hazard'):
+            if k == name or k.startswith(name + ':'):
+                return name
+        if k.startswith('sensor'):
+            return 'sensor'
+        # Старые записи без распознаваемого ключа: вид угадывается по тексту.
+        if 'образец' in s:
             return 'sample'
-        if k.startswith('soil:') or k == 'soil' or 'грунт' in s:
+        if 'грунт' in s:
             return 'soil'
-        if k.startswith('hazard:') or k == 'hazard' or 'опасн' in s:
+        if 'опасн' in s:
             return 'hazard'
-        if k.startswith('sensor') or 'датчик' in s:
+        if 'датчик' in s:
             return 'sensor'
         return 'unknown'
 
@@ -308,6 +343,8 @@ def score_hypotheses(hypotheses, scenario, world, events=None):
             collected_samples.append((t_col, s_idx, (e.get('x'), e.get('y'))))
 
     faults = fault_intervals(world)
+    soil_changes = _applied_events(scenario, world, 'soil_change')
+    new_hazards = _applied_events(scenario, world, 'new_hazard')
 
     for h in hyp_list:
         kind = get_kind(h)
@@ -340,21 +377,14 @@ def score_hypotheses(hypotheses, scenario, world, events=None):
                 verdict = 'unverifiable'
             else:
                 active_soils = list(scenario.soils)
-                sc_events = getattr(scenario, 'events', []) or []
-                soil_evs = [ev for ev in sc_events if ev.get('type') == 'soil_change']
-                if soil_evs:
-                    change_t = next((float(w['t']) for w in world if w.get('type') == 'soil_change'), None)
-                    if change_t is None:
-                        change_t = float(soil_evs[0].get('t', 0.0))
-                    if change_t <= t_open:
-                        active_soils = list(soil_evs[0].get('soils', []))
+                for ev_t, ev in soil_changes:              # каждая смена задаёт грунты целиком; действует последняя
+                    if ev_t <= t_open:
+                        active_soils = list(ev.get('soils', []))
 
                 hx, hy = pt
-                test_pts = [(hx, hy)]
-                for r_step in (0.05, 0.10, 0.15, 0.20):
-                    for a in np.linspace(0, 2 * math.pi, 8, endpoint=False):
-                        test_pts.append((hx + r_step * math.cos(a), hy + r_step * math.sin(a)))
-                true_mult = max(soil_mult(active_soils, px, py) for px, py in test_pts)
+                # Самый дорогой грунт, который задевает круг радиуса SOIL_NEAR_M вокруг названной точки.
+                true_mult = max([1.0] + [float(z['mult'] if isinstance(z, dict) else z.mult) for z in active_soils
+                                         if _zone_distance(z, hx, hy) <= SOIL_NEAR_M + 1e-9])
                 verdict = 'correct' if true_mult >= 1.4 else 'wrong'
 
                 named_mult = (h.get('data') or {}).get('mult')
@@ -380,33 +410,10 @@ def score_hypotheses(hypotheses, scenario, world, events=None):
                     hr = float(hr)
 
                 active_hazards = list(scenario.hazards)
-                sc_events = getattr(scenario, 'events', []) or []
-                for ev in sc_events:
-                    if ev.get('type') == 'new_hazard':
-                        ev_t = float(ev.get('t', 0.0))
-                        w_t = next((float(w['t']) for w in world if w.get('type') == 'new_hazard'), ev_t)
-                        if w_t <= t_open:
-                            active_hazards.append(ev['zone'])
+                active_hazards += [ev['zone'] for ev_t, ev in new_hazards if ev_t <= t_open]
 
                 hx, hy = pt
-                intersects = False
-                for z in active_hazards:
-                    zx = z.x if hasattr(z, 'x') else z['x']
-                    zy = z.y if hasattr(z, 'y') else z['y']
-                    shape = getattr(z, 'shape', None) or (z.get('shape') if isinstance(z, dict) else 'circle')
-                    if shape == 'circle':
-                        zr = z.r if hasattr(z, 'r') else z.get('r', 0.0)
-                        if math.dist((hx, hy), (zx, zy)) <= hr + zr:
-                            intersects = True
-                            break
-                    else:
-                        zw = z.w if hasattr(z, 'w') else z.get('w', 0.0)
-                        zh = z.h if hasattr(z, 'h') else z.get('h', 0.0)
-                        dx = max(0.0, abs(hx - zx) - zw / 2)
-                        dy = max(0.0, abs(hy - zy) - zh / 2)
-                        if math.hypot(dx, dy) <= hr:
-                            intersects = True
-                            break
+                intersects = any(_zone_distance(z, hx, hy) <= hr for z in active_hazards)
                 verdict = 'correct' if intersects else 'wrong'
 
         elif kind == 'sensor':
@@ -435,6 +442,10 @@ def score_hypotheses(hypotheses, scenario, world, events=None):
     confirmed = [h for h in hyp_list if h.get('status') == 'confirmed']
     refuted = [h for h in hyp_list if h.get('status') == 'refuted']
 
+    # Доли считаются среди гипотез, которые удалось сверить: «проверить нечем» — это не «неверна».
+    def verified(items):
+        return sum(1 for h in items if h.get('truth_verdict') in ('correct', 'wrong'))
+
     confirmed_correct = sum(1 for h in confirmed if h.get('truth_verdict') == 'correct')
     refuted_correct = sum(1 for h in refuted if h.get('truth_verdict') == 'correct')
     all_soil_errors = [h['rel_error'] for h in hyp_list if 'rel_error' in h]
@@ -456,6 +467,7 @@ def score_hypotheses(hypotheses, scenario, world, events=None):
             'correct': sum(1 for h in kh if h.get('truth_verdict') == 'correct'),
             'wrong': sum(1 for h in kh if h.get('truth_verdict') == 'wrong'),
             'unverifiable': sum(1 for h in kh if h.get('truth_verdict') == 'unverifiable'),
+            'verified': verified(kh),
             'confirmed': len(conf),
             'confirmed_correct': sum(1 for h in conf if h.get('truth_verdict') == 'correct'),
             'refuted': len(ref),
@@ -473,9 +485,10 @@ def score_hypotheses(hypotheses, scenario, world, events=None):
         'correct': correct,
         'wrong': wrong,
         'unverifiable': unverifiable,
-        'correct_share': round(correct / total, 4) if total > 0 else None,
-        'confirmed_correct': round(confirmed_correct / len(confirmed), 4) if confirmed else None,
-        'refuted_correct': round(refuted_correct / len(refuted), 4) if refuted else None,
+        'verified_share': round((correct + wrong) / total, 4) if total > 0 else None,
+        'correct_share': round(correct / (correct + wrong), 4) if correct + wrong > 0 else None,
+        'confirmed_correct': round(confirmed_correct / verified(confirmed), 4) if verified(confirmed) else None,
+        'refuted_correct': round(refuted_correct / verified(refuted), 4) if verified(refuted) else None,
         'soil_error': round(float(np.mean(all_soil_errors)), 4) if all_soil_errors else None,
         'by_kind': by_kind,
         'confusion': confusion,

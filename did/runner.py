@@ -105,6 +105,7 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     metrics['hyp_confirmed_correct'] = sh['confirmed_correct']
     metrics['hyp_refuted_correct'] = sh['refuted_correct']
     metrics['hyp_soil_error'] = sh['soil_error']
+    metrics['hyp_verified_share'] = sh['verified_share']
     science = bot.inv.export() if getattr(bot, 'inv', None) else {}
     report = None
     if agent == 'study':                            # отчёт исследования и сверка со скрытой правдой сценария
