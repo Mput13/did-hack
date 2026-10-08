@@ -12,7 +12,7 @@ from .config import BASE, FAULT_KINDS, LEVELS
 
 SOIL_MULTS = {'easy': [3.0], 'medium': [2.0, 3.0, 4.0], 'hard': [2.0, 2.5, 3.0, 4.0]}
 ALL_EVENTS = ('soil_change', 'new_hazard', 'sensor_fault')
-ROUTE_VERSION = 'route-v2'     # версия построения смены грунта «на пути»; пишется в сводку опыта
+ROUTE_VERSION = 'route-v3'     # версия построения смены грунта «на пути»; пишется в сводку опыта
 
 
 @dataclass
@@ -172,11 +172,14 @@ def _route_soil(zid, arena, rng, samples, base, soils):
     на нём, сторона смещения, радиус — из rng; о маршруте агента генератор ничего не знает. Зона
     принимается, только если объезд есть и выгоден: тот, кто знает о зоне, проехал бы между концами
     коридора мимо неё, а база и все образцы остаются связаны в обход.
+
+    Коридоры считаются по графу graph, цену которого никто не меняет; объезд — по отдельному графу detour.
+    Иначе отклонённый кандидат оставлял бы свою цену следующим коридорам (так было в route-v2).
     """
     from scipy import ndimage
 
     from .nav import CostGraph
-    graph = CostGraph(arena)
+    graph, detour = CostGraph(arena), CostGraph(arena)
     X, Y = arena.cell_centers()
     base = tuple(base)
     pts = [tuple(s) for s in samples]
@@ -207,12 +210,14 @@ def _route_soil(zid, arena, rng, samples, base, soils):
                 or any(math.dist((x, y), p) < radius + 0.15 for p in pts)):
             continue
         zone = Zone(zid, 'circle', x, y, r=radius, mult=4.0)
+        if not any(zone.contains(px, py) for px, py in path):      # зона лежит на выбранном коридоре, а не рядом
+            continue
         inside = zone.mask(X, Y)
         labels, _ = ndimage.label(graph.ok & ~inside)
         if not labels[cells[0]] or any(labels[c] != labels[cells[0]] for c in cells):
             continue
-        graph.set_cost(np.where(inside, np.maximum(old, zone.mult), old))
-        if not any(zone.contains(px, py) for px, py in graph.plan(a, b)[0]):
+        detour.set_cost(np.where(inside, np.maximum(old, zone.mult), old))
+        if not any(zone.contains(px, py) for px, py in detour.plan(a, b)[0]):
             return zone
     raise RuntimeError('не удалось поставить зону грунта на коридор с объездом')
 

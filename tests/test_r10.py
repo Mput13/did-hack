@@ -66,6 +66,35 @@ def test_route_zone_lies_on_a_corridor_and_can_be_bypassed(arena, seed):
     assert any(not any(zone.contains(x, y) for x, y in graph.plan(a, b)[0]) for a, b in crossed)   # объезд выгоден
 
 
+@pytest.mark.parametrize('seed', [26, 2, 5, 1001])
+def test_route_zone_lies_on_the_chosen_corridor(arena, seed, monkeypatch):
+    # Отклонённый кандидат не должен влиять на следующие коридоры: исходный путь выбранного коридора
+    # считается по карте без зон-кандидатов и проходит через принятую зону (сценарий 26 это нарушал:
+    # коридор от базы строился по графу с чужой зоной ×4, и принятая зона лежала мимо него).
+    calls = []
+    plan = CostGraph.plan
+
+    def spy(self, a, b, *args, **kwargs):
+        calls.append((self, tuple(a), tuple(b), float(self.mult.max())))
+        return plan(self, a, b, *args, **kwargs)
+    monkeypatch.setattr(CostGraph, 'plan', spy)
+    sc = generate('hard', seed, arena, events=['soil_change'], soil_change_mode='route')
+    monkeypatch.undo()
+    _, zone = _route_zone(sc)
+    detour, a, b, _ = calls[-1]                           # последним считается объезд принятой зоны
+    assert any(zone.contains(x, y) for x, y in CostGraph(arena).plan(a, b)[0])
+    originals = [c for c in calls if c[0] is not detour]
+    assert originals and all(c[3] == 1.0 for c in originals)        # исходные коридоры — по неизменённому графу
+    assert (a, b) in {(c[1], c[2]) for c in originals}
+    X, Y = arena.cell_centers()
+    cost = np.ones(X.shape)
+    for z in sc.events[0]['soils']:
+        cost = np.where(z.mask(X, Y), np.maximum(cost, z.mult), cost)
+    graph = CostGraph(arena)
+    graph.set_cost(cost)
+    assert not any(zone.contains(x, y) for x, y in graph.plan(a, b)[0])     # объезд именно этого коридора выгоден
+
+
 def test_route_change_uses_its_own_random_stream(arena):
     # Сторона, место и момент не зависят от того, сколько чисел взяла прежняя ветка генератора.
     a = generate('hard', 5, arena, events=['soil_change'], soil_change_mode='route')
@@ -300,3 +329,4 @@ def test_old_style_summary_is_untouched_by_new_claim_kinds():
                       for x, y in zip(pick('a', cell['condition']), pick('b', cell['condition']))])
         boot = ref.choice(d, size=(4000, 12), replace=True).mean(axis=1)
         assert cell['pair']['ci'] == [round(float(np.percentile(boot, 2.5)), 3), round(float(np.percentile(boot, 97.5)), 3)]
+
