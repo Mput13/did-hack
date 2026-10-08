@@ -20,7 +20,7 @@ import loss_breakdown as lb     # noqa: E402
 
 def test_new_behaviour_is_off_by_default():
     cfg = AgentConfig()
-    assert not cfg.fault_wait and not cfg.straight_paths and cfg.soil_spread_m == 0.0
+    assert not cfg.fault_wait and not cfg.straight_paths
     for name in ('adaptive', 'scientist', 'fixed', 'adaptive_fs', 'scientist_fs'):
         assert not PRESETS[name].fault_wait and not PRESETS[name].straight_paths
     for name in ('adaptive_v2', 'scientist_v2'):

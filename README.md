@@ -80,6 +80,7 @@ pixi run lab                                  # только интерфейс:
 |---|---|
 | `pixi run exp E1` · `pixi run exp all` | пересчитать серию опытов или все |
 | `pixi run run --level hard --seed 3 --agent adaptive` | один прогон в быстром симуляторе |
+| `pixi run python tools/loss_breakdown.py runs/E1/adaptive --level hard` | разбор потерь: куда уходят очки между потолком сценария и счётом агента (`research/findings/P1.md`) |
 | `pixi run run --level hard --seed 3 --agent scientist --rules science` | исследователь на «научных» правилах |
 | `pixi run gazebo-run --level hard --seed 1 [--gui] [--rules science --agent scientist]` | один прогон в Gazebo целиком |
 | `pixi run stand-gui level:=hard seed:=3` + `pixi run agent-ros --level hard --seed 3` | стенд и агент в двух терминалах |

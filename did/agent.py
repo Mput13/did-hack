@@ -22,7 +22,6 @@ from .nav import CostGraph, Follower, straighten
 from .planner import HeuristicPlanner, resolve_subgoals
 from .route import survey_route
 from .sensorguard import SensorGuard
-from .soilguess import suspect_grid
 
 
 @dataclass(frozen=True)
@@ -53,11 +52,10 @@ class AgentConfig:
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
     risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
     foresight_choice: str = 'planner'  # среди прошедших по риску выбирает: planner — правило планировщика, score — счёт
-    # --- правки P1 (research/findings/P1.md): по умолчанию выключены, вместе включены в пресетах *_v2
+    # --- правки P1 (research/findings/P1.md): по умолчанию выключены, обе включены в пресетах *_v2
     fault_wait: bool = False          # при признаках сбоя датчика стоять и ждать, а не ездить за ложными кандидатами
     fault_wait_lost: int = 3          # столько подъездов без сбора подряд — тоже признак сбоя датчика (0 — не считать)
     straight_paths: bool = False      # спрямлять путь по клеткам там, где прямая проходима и не дороже
-    soil_spread_m: float = 0.0        # считать дорогим и непроверенный пол в этом радиусе от измеренного дорогого
 
     def to_dict(self):
         return asdict(self)
@@ -284,10 +282,6 @@ class Agent:
             return
         ratio, predicted, conf = self.soil.observe(x0, y0, x1, y1, spent, dt)
         self._cost_dirty = True
-        if self.cfg.soil_spread_m > 0.0 and ratio >= 1.45 and predicted < 1.25:
-            # Неожиданно дорогой пол: маршрут пересчитывается сразу, пока робот не заехал вглубь зоны.
-            self._cost_t = -1e9
-            self._path_t = -1e9
         if self.cfg.detect_change:
             verdict = self.change.update(ratio, predicted, conf, ds)
             if verdict:
@@ -369,11 +363,6 @@ class Agent:
         danger = 1.0 + self.cfg.hazard_weight * self._risk if self.hazards else None
         self.graph.set_cost(mult, bias=danger)
         # Домой — по проверенному: там, где робот уже ездил, нет ни опасных зон, ни сюрпризов с грунтом.
-        if self.cfg.learn_soil and self.cfg.soil_spread_m > 0.0:
-            guess = suspect_grid(self.soil, self.cfg.soil_spread_m)
-            if guess is not None:
-                danger = guess if danger is None else danger * guess
-                self.graph.set_cost(mult, bias=danger)
         if self.cfg.learn_soil:
             unknown = 1.0 + self.cfg.unknown_risk * (1.0 - self.soil.confidence_grid())
             danger = unknown if danger is None else danger * unknown
