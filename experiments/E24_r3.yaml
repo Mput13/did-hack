@@ -9,7 +9,7 @@ hypothesis: >-
 method: >-
   Как в R3 (E16, условия wait15 и wait29), настоящей модели нет: имитатор отвечает как правило, но ответ «приходит»
   через 15 или 29 секунд времени прогона. Варианты: правило и имитатор без ожидания (потолок); «стоять и ждать» (как
-  сейчас); новый режим в двух видах — весь план правила (rule) и только обратимое (safe: без сбора и не дальше 0,5 м
+  сейчас); новый режим в двух видах — весь план правила (rule) и привязь (leash: без сбора и не дальше 0,5 м
   от места вопроса, из опасной зоны — без ожидания). Три условия: имитатор всегда отвечает как правило; в 4% и в 20%
   решений называет другую достижимую цель — видно, как часто ответ приходит поздно и сколько переходов на план модели.
   Те же 20 сценариев 1001–1020, на которых в E16 измерена цена ожидания (wait15, wait29): сверка с R3.
@@ -38,10 +38,10 @@ arms:
     llm: {kind: mock}
     config: {llm_wait_s: 15, llm_act_while_waiting: rule}
   - id: safe15
-    label: Только обратимое (без сбора, не дальше 0,5 м), 15 с на ответ
+    label: Привязь (без сбора, не дальше 0,5 м от места вопроса), 15 с на ответ
     agent: adaptive_llm
     llm: {kind: mock}
-    config: {llm_wait_s: 15, llm_act_while_waiting: safe}
+    config: {llm_wait_s: 15, llm_act_while_waiting: leash}
   - id: stand29
     label: Стоять и ждать, 29 с на ответ
     agent: adaptive_llm
@@ -53,20 +53,20 @@ arms:
     llm: {kind: mock}
     config: {llm_wait_s: 29, llm_act_while_waiting: rule}
   - id: safe29
-    label: Только обратимое (без сбора, не дальше 0,5 м), 29 с на ответ
+    label: Привязь (без сбора, не дальше 0,5 м от места вопроса), 29 с на ответ
     agent: adaptive_llm
     llm: {kind: mock}
-    config: {llm_wait_s: 29, llm_act_while_waiting: safe}
+    config: {llm_wait_s: 29, llm_act_while_waiting: leash}
   - id: act15_drop
     label: Ехать по плану правила, 15 с; ответ, пришедший после смены плана, отбрасывается
     agent: adaptive_llm
     llm: {kind: mock}
     config: {llm_wait_s: 15, llm_act_while_waiting: rule, llm_wait_superseded: drop}
   - id: safe15_drop
-    label: Только обратимое, 15 с; ответ, пришедший после смены плана, отбрасывается
+    label: Привязь, 15 с; ответ, пришедший после смены плана, отбрасывается
     agent: adaptive_llm
     llm: {kind: mock}
-    config: {llm_wait_s: 15, llm_act_while_waiting: safe, llm_wait_superseded: drop}
+    config: {llm_wait_s: 15, llm_act_while_waiting: leash, llm_wait_superseded: drop}
 levels: [medium, hard]
 seeds: 20
 seed_start: 1001

@@ -15,7 +15,18 @@
                  ушёл, отменить нельзя (поток занят, пока сервер не ответит), а поводы у едущего робота идут
                  чаще, чем отвечает модель, и при отмене по каждому поводу ответа не было бы вовсе;
   ответ устарел — модель спрашивают заново про нынешнее состояние: с планом правила она не согласилась;
-  возврат на базу — окончательное решение, как и раньше: ответ, пришедший позже, его не отменяет.
+  возврат на базу — окончательное решение, как и раньше: ответ, пришедший позже, его не отменяет;
+  ответа нет дольше llm_wait_deadline_s — вопрос снят, дальше решает правило (запасной режим). Запрос при
+                 этом не отменить: поток модели (в быстром симуляторе — время ответа) занят, пока ответ не
+                 придёт, и нового вопроса до тех пор нет. Пришедший после срока ответ просрочен и
+                 отбрасывается целиком. llm_wait_give_up сроков подряд — модель до конца прогона не
+                 спрашивают.
+
+Ответ сверяется в два приёма. Первая подцель — с тем, что робот делает сейчас: совпала — робот продолжает
+её, а остаток плана модели проверяется на нынешнем состоянии и встаёт в очередь за ней (исход tail, если
+очередь от этого изменилась). Проверку на нынешнем состоянии проходит каждый ответ, совпавший тоже: если
+то, что робот делает, уже не по заряду, без дороги или в опасной зоне, ответ не принимается, а решение
+принимается заново (правило сразу, модель — новым вопросом).
 
 Ответ, который не совпал с правилом, а план с тех пор уже сменился (правило решало заново по более свежим
 данным, чем видела модель), — настройка llm_wait_superseded: apply — перейти на план модели, если он выполним
@@ -23,9 +34,13 @@
 
 Что разрешено до ответа — настройка llm_act_while_waiting:
   rule — весь план правила;
-  safe — только обратимое: не собирать образцы и не отъезжать от места вопроса дальше llm_wait_leash_m, но
-         из опасной зоны выезжать без ожидания. Нужен миссиям, заданным словами: их понимает только модель,
-         и правило способно нарушить запрет раньше, чем она ответит.
+  leash — «привязь» (в первом круге режим назывался safe): пока есть вопрос без ответа, не собирать образцы
+         и не отъезжать от места вопроса дальше llm_wait_leash_m; из опасной зоны выезжать без ожидания.
+         Это всё, что режим обеспечивает. Он НЕ следит за запретными областями миссии, дорогим грунтом и
+         расходом заряда на движение; следующий вопрос переносит начало привязи; между вопросами, после
+         отказа модели и после истечения срока правило действует без ограничений. Годится для миссий об
+         ограничении числа собранных образцов («собери ровно два»); пространственные запреты («только левая
+         половина») не обеспечивает.
 
 Врезки в did/agent.py — вызовы decide, poll и hold; вся логика здесь.
 """
@@ -34,13 +49,14 @@ from collections import Counter
 
 from .planner import HeuristicPlanner, resolve_subgoals
 
-MODES = ('off', 'rule', 'safe')
+MODES = ('off', 'rule', 'leash')
 DANGER_RISK = 0.2        # с такой вероятности зоны под роботом он «в опасной зоне» и стоять не должен
-NEAR_TARGET_M = 0.45     # safe: ближе к кандидату до ответа не подъезжать (сбор — с 0,30 м)
+NEAR_TARGET_M = 0.45     # leash: ближе к кандидату до ответа не подъезжать (сбор — с 0,30 м)
 SAME_PLACE_M = 0.5       # цели ближе этого — одна и та же цель (как у «нового кандидата» в агенте)
-# Исходы ответа модели. Поздние — ответ пришёл, когда вопрос уже не стоял или цель пропала.
-OUTCOMES = ('agree', 'agree_late', 'same', 'switched', 'stale', 'returning', 'failed')
-LATE = ('agree_late', 'stale', 'returning')
+# Исходы ответа модели. Поздние — ответ пришёл, когда вопрос уже не стоял или цель пропала, либо не пришёл
+# в срок (timeout). tail — первая подцель совпала с тем, что робот делает, остаток плана модели встал в очередь.
+OUTCOMES = ('agree', 'agree_late', 'same', 'tail', 'switched', 'stale', 'returning', 'failed', 'timeout')
+LATE = ('agree_late', 'stale', 'returning', 'timeout')
 
 
 def answer_delay(cfg, plan):
@@ -94,6 +110,11 @@ class ActWhileWaiting:
         self.mode = agent.cfg.llm_act_while_waiting
         self.pending = None          # вопрос, на который ждём ответ: всегда не больше одного
         self.again = None            # повод, случившийся в ожидании: после ответа спросить заново
+        self.busy = None             # вопрос, снятый по сроку: его запрос ещё занимает модель, нового нет
+        self.timeouts_row = 0        # сколько сроков истекло подряд
+        self.gave_up = False         # модель до конца прогона не спрашивается
+        self._held_since = None      # leash: (время вопроса, с какого времени робот стоит по нему без перерыва)
+        self.longest_hold_s = 0.0    # самая долгая стоянка по одному вопросу за прогон
         self.stats = Counter()
         self.waited_s = 0.0
 
@@ -105,7 +126,14 @@ class ActWhileWaiting:
         if self.pending is None and not use_llm:
             return False                     # модель спрашивать рано (llm_min_interval_s): решает правило, как раньше
         rule = HeuristicPlanner().plan(state)
-        if self.pending is None:
+        blocked = self.busy is not None or self.gave_up
+        if self.pending is None and blocked:
+            # Запасной режим: ответа не было в срок. Пока прежний запрос не вернулся, новый не уходит.
+            if self.busy is not None:
+                self.again = trigger
+            self.stats['rule_while_busy'] += 1
+            note = 'Модель не ответила в срок, решает правило. '
+        elif self.pending is None:
             note = 'Пока модель думает, действую по правилу. '
         else:
             # Прежний вопрос не отменяется и новый не задаётся: запросы не копятся.
@@ -114,7 +142,7 @@ class ActWhileWaiting:
             self.stats['rule_while_pending'] += 1
             note = 'Модель ещё отвечает на прежний вопрос, новый повод решает правило. '
         a._apply_plan(obs, {**rule, 'reasoning': note + rule['reasoning']}, state, trigger)
-        if self.pending is None and not a._returning:      # возврат окончателен, спрашивать не о чем
+        if self.pending is None and not blocked and not a._returning:      # возврат окончателен, спрашивать не о чем
             self._ask(obs, state, trigger, rule)
             if a.rec:
                 self.pending['plan_i'] = len(a.rec.plans) - 1
@@ -141,6 +169,11 @@ class ActWhileWaiting:
     def poll(self, obs):
         """Раз в такт: пришёл ли ответ, и не пора ли спросить заново."""
         a = self.a
+        if self.busy is not None and self.busy['answer'].ready(obs.t):
+            self._expired(obs)
+        p = self.pending
+        if p is not None and not p['answer'].ready(obs.t) and obs.t - p['t'] >= a.cfg.llm_wait_deadline_s:
+            self._timeout(obs, p)            # срок не зависит от того, разобран ли повод: стоянка по нему кончается
         if a._trigger:
             return                           # повод ещё не разобран (пауза после сбора): сначала он
         p = self.pending
@@ -148,22 +181,53 @@ class ActWhileWaiting:
             if not p['answer'].ready(obs.t):
                 return
             self.pending = None
-            from .llm import CacheMiss       # здесь, а не в начале файла: агент без модели клиент модели не грузит
-            try:
-                plan = p['answer'].result()
-            except CacheMiss:
-                raise
-            except Exception as e:           # noqa: BLE001 — сбой в потоке модели не должен ронять такт робота
-                plan = {'reasoning': '', 'subgoals': [], 'source': 'fallback', 'exchanges': [],
-                        'error': f'{type(e).__name__}: {e}'}
-            self._receive(obs, p, plan)
-        if self.again is not None and self.pending is None:
+            self._receive(obs, p, self._result(p))
+        if self.again is not None and self.pending is None and self.busy is None:
             self._ask_again(obs)
+
+    @staticmethod
+    def _result(p):
+        from .llm import CacheMiss           # здесь, а не в начале файла: агент без модели клиент модели не грузит
+        try:
+            return p['answer'].result()
+        except CacheMiss:
+            raise
+        except Exception as e:               # noqa: BLE001 — сбой в потоке модели не должен ронять такт робота
+            return {'reasoning': '', 'subgoals': [], 'source': 'fallback', 'exchanges': [],
+                    'error': f'{type(e).__name__}: {e}'}
+
+    def _timeout(self, obs, p):
+        """Ответа нет дольше срока: вопрос снят, решает правило. Запрос остаётся занимать модель (busy)."""
+        a = self.a
+        waited = obs.t - p['t']
+        self.pending, self.busy = None, p
+        self.waited_s += waited
+        self.stats['timeout'] += 1
+        self.timeouts_row += 1
+        text = f'Модель не ответила за {waited:.0f} с (срок {a.cfg.llm_wait_deadline_s:g} с): дальше решает правило'
+        if self.timeouts_row >= a.cfg.llm_wait_give_up:
+            self.gave_up, self.again = True, None
+            text += f'; сроков подряд истекло {self.timeouts_row}, до конца прогона модель не спрашиваю'
+        elif self.again is None:
+            self.again = p['trigger']        # когда прежний запрос вернётся, спросить про нынешнее состояние
+        a.journal.add(obs.t, 'alarm', text + '.', tag='wait_timeout', asked_t=round(p['t'], 1), trigger=p['trigger'])
+
+    def _expired(self, obs):
+        """Запрос, снятый по сроку, вернулся: ответ просрочен и отбрасывается, модель снова свободна."""
+        a = self.a
+        p, self.busy = self.busy, None
+        plan = self._result(p)
+        self.stats['expired'] += 1
+        if a.rec:
+            for ex in plan.get('exchanges') or []:
+                a.rec.add_llm(p['t'], ex)
+        a.journal.add(obs.t, 'llm', f"Ответ модели пришёл через {obs.t - p['t']:.0f} с, после срока: просрочен и "
+                      'отброшен.', tag='wait_answer', outcome='expired', asked_t=round(p['t'], 1), trigger=p['trigger'])
 
     def _ask_again(self, obs):
         """В ожидании были новые поводы, их решило правило: теперь спросить модель про нынешнее состояние."""
         a = self.a
-        if a._returning:
+        if a._returning or self.gave_up:
             self.again = None
             return
         if obs.t - a._last_llm_t < a.cfg.llm_min_interval_s:
@@ -185,33 +249,50 @@ class ActWhileWaiting:
         subgoals = resolve_subgoals(plan['subgoals'], p['state'])
         first = subgoals[0] if subgoals else None
         why = ''
+        self.timeouts_row = 0                # ответ пришёл в срок
+        if p['superseded']:
+            self.stats['after_replan'] += 1  # правило с момента вопроса уже решало заново (при любом исходе)
+        doing = first is not None and self._doing(first)
         if plan['source'] == 'fallback' or first is None:
             outcome = 'failed'
             why = plan.get('error') or 'ни одна подцель ответа не исполнима'
         elif a._returning:
             outcome = 'agree' if first['type'] == 'return_base' else 'returning'
-        elif self._alike(first, p['base']):
-            outcome = 'agree_late' if p['superseded'] else 'agree'
-        elif self._doing(first):
-            outcome = 'same'
-        elif p['superseded'] and a.cfg.llm_wait_superseded == 'drop' and first['type'] != 'return_base':
+        elif not doing and p['superseded'] and self._alike(first, p['base']):
+            outcome = 'agree_late'
+        elif not doing and p['superseded'] and a.cfg.llm_wait_superseded == 'drop' and first['type'] != 'return_base':
             # Правило с тех пор решало заново по более свежим данным, чем видела модель. Возврат на базу — не
             # выбор среди целей, а запрет ехать дальше: он от свежести списка целей не зависит.
             outcome, why = 'stale', 'план с тех пор сменился по новым данным'
         else:
-            subgoals, why = self._still_valid(obs, subgoals)
-            outcome = 'switched' if subgoals else 'stale'
+            # Нынешнее состояние проверяется у каждого ответа: и у того, что совпал с действием робота.
+            subgoals, why = self._still_valid(obs, subgoals, doing=doing)
+            if not subgoals:
+                outcome = 'stale'
+            elif not doing:
+                outcome = 'switched'
+            elif not self._same_plan(subgoals[1:], a.queue[1:]):
+                outcome = 'tail'
+            else:
+                outcome = 'agree' if not p['superseded'] and self._alike(first, p['base']) else 'same'
         self.stats[outcome] += 1
-        if outcome == 'stale' and self.again is None:
+        if outcome == 'stale' and doing:
+            # Модель назвала то, что робот делает, но сейчас это уже не выполнимо: решение принимается заново
+            # (правило сразу, модель — новым вопросом), а не продолжается по ответу о прежнем состоянии.
+            a._request_plan('answer_stale')
+        elif outcome == 'stale' and self.again is None:
             # Модель с планом правила не согласилась, а её собственный план уже не годится: вопрос остаётся
-            # открытым, его надо задать заново про нынешнее состояние (в safe робот до ответа так и ограничен).
+            # открытым, его надо задать заново про нынешнее состояние (в leash робот до ответа так и ограничен).
             self.again = p['trigger']
         if outcome == 'switched':
             self._switch(obs, p, plan, subgoals, waited)
         else:
+            if outcome == 'tail':
+                self._queue_tail(obs, p, plan, subgoals[1:], waited)
             text = {'agree': 'модель подтвердила то, что робот делает, продолжаю',
                     'agree_late': 'модель подтвердила прежний план, но с тех пор он уже сменился',
                     'same': 'модель выбрала то, что робот уже делает, продолжаю',
+                    'tail': 'модель подтвердила то, что робот делает; остаток её плана поставлен в очередь',
                     'stale': f'ответ устарел и отброшен: {why}',
                     'returning': 'робот уже возвращается на базу, ответ отброшен',
                     'failed': f'пригодного ответа нет ({why}), остаётся план правила'}[outcome]
@@ -223,6 +304,21 @@ class ActWhileWaiting:
                 a.rec.plans[p['plan_i']].update(rule_first=p['rule_first'], rule_match=first == p['rule_first'],
                                                 latency_ms=sum(ex.get('latency_ms') or 0 for ex in exchanges))
 
+    def _same_plan(self, a_list, b_list):
+        return len(a_list) == len(b_list) and all(self._alike(x, y) for x, y in zip(a_list, b_list))
+
+    def _queue_tail(self, obs, p, plan, tail, waited):
+        """Первая подцель ответа — то, что робот делает: её продолжаю, за ней ставлю остаток плана модели."""
+        a = self.a
+        a.queue = [a.queue[0]] + [dict(sg) for sg in tail]
+        reasoning = (f'Ответ модели пришёл через {waited:.0f} с и подтвердил то, что делает робот; остаток её плана '
+                     f'ставлю в очередь. ' + plan['reasoning'])
+        a.journal.add(obs.t, 'decision', reasoning, source=plan['source'], trigger=p['trigger'],
+                      subgoals=[_label(sg) for sg in a.queue])
+        if a.rec:
+            a.rec.add_plan(obs.t, plan['source'], p['trigger'], reasoning, a.queue)
+            a.rec.plans[-1].update(asked_t=round(p['t'], 1), kept_first=True)
+
     @staticmethod
     def _alike(first, doing):
         """Та же ли это цель: кандидат уточняется по ходу, поэтому для него допуск шире."""
@@ -232,18 +328,25 @@ class ActWhileWaiting:
         """Делает ли робот уже то, что выбрала модель."""
         return bool(self.a.queue) and self._alike(first, self.a.queue[0])
 
-    def _still_valid(self, obs, subgoals):
-        """Подцели ответа, выполнимые сейчас. Первая не выполнима — ответ устарел: ([], причина)."""
+    def _still_valid(self, obs, subgoals, doing=False):
+        """Подцели ответа, выполнимые сейчас. Первая не выполнима — ответ устарел: ([], причина).
+
+        doing — первую подцель робот уже исполняет: для неё проверяются заряд, дорога и опасная зона, а
+        «кандидат на месте» и «точка не осмотрена» — нет: за этим следит сам исполнитель подцели, и робот,
+        подъезжающий к точке, как раз и делает её «осмотренной».
+        """
         a = self.a
         dist, pred = a.graph.field(obs.x, obs.y)
         cands = a.belief.candidates(min_mass=a.cfg.candidate_mass)
         out = []
-        for sg in subgoals:
+        for i, sg in enumerate(subgoals):
             if sg['type'] == 'return_base':
                 out.append(sg)
                 break
             x, y, why = sg['x'], sg['y'], None
-            if sg['type'] == 'investigate':
+            if doing and i == 0:
+                pass
+            elif sg['type'] == 'investigate':
                 near = [c for c in cands if math.hypot(c['x'] - x, c['y'] - y) <= SAME_PLACE_M]
                 if near:
                     best = max(near, key=lambda c: c['mass'])
@@ -293,9 +396,23 @@ class ActWhileWaiting:
     # --- что можно до ответа -----------------------------------------------------------------
 
     def hold(self, obs):
-        """safe: True — до ответа модели стоять. Из опасной зоны робот выезжает без ожидания."""
+        """leash: True — до ответа модели стоять. Из опасной зоны робот выезжает без ожидания.
+
+        Стоянка кончается не позже срока llm_wait_deadline_s: poll снимает вопрос, и pending пуст."""
+        held = self._hold(obs)
+        if not held:
+            self._held_since = None
+        else:
+            # Счёт — на один вопрос: срок ограничивает стоянку по каждому вопросу, а вопросы могут идти подряд.
+            asked = self.pending['t']
+            if self._held_since is None or self._held_since[0] != asked:
+                self._held_since = (asked, obs.t)
+            self.longest_hold_s = max(self.longest_hold_s, obs.t - self._held_since[1])
+        return held
+
+    def _hold(self, obs):
         a = self.a
-        if self.mode != 'safe' or self.pending is None or a._returning or not a.queue:
+        if self.mode != 'leash' or self.pending is None or a._returning or not a.queue:
             return False
         a._no_collect_until = max(a._no_collect_until, obs.t + 0.3)       # сбор необратим: до ответа не собираю
         if self.in_danger(obs):
@@ -318,9 +435,11 @@ class ActWhileWaiting:
     def summary(self):
         """Счётчики за прогон: вопросы, исходы ответов (OUTCOMES), ожидание в секундах."""
         s = {k: int(self.stats.get(k, 0)) for k in ('asked', 'asked_again', 'answered', 'rule_while_pending',
-                                                     *OUTCOMES)}
-        s['unanswered'] = int(self.pending is not None)
+                                                     'rule_while_busy', 'after_replan', 'expired', *OUTCOMES)}
+        s['unanswered'] = int(self.pending is not None) + int(self.busy is not None)
+        s['gave_up'] = int(self.gave_up)
         s['waited_s'] = round(self.waited_s, 1)
+        s['longest_hold_s'] = round(self.longest_hold_s, 1)
         return s
 
 

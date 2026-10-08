@@ -357,8 +357,8 @@ def main():
     ap.add_argument('--arm', default=None)
     ap.add_argument('--llm', default=None, choices=['mock', 'http', 'ollama', 'codex'])
     ap.add_argument('--rules', default=None, choices=['science'], help='те же правила, что у судьи в стенде')
-    ap.add_argument('--act-while-waiting', default=None, choices=['rule', 'safe'],
-                    help='пока модель думает: rule — ехать по плану правила, safe — только обратимое (did/waiting.py)')
+    ap.add_argument('--act-while-waiting', default=None, choices=['rule', 'leash'],
+                    help='пока модель думает: rule — ехать по плану правила, leash — без сбора и не дальше привязи от места вопроса (did/waiting.py)')
     args = ap.parse_args()
     run(args.level, args.seed, args.agent, args.exp, arm=args.arm, llm={'kind': args.llm} if args.llm else None,
         rules=args.rules,

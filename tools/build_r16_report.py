@@ -2,8 +2,10 @@
 
     ./px python tools/build_r16_report.py      # research/findings/R16-tables.md и снимок R16-results.json
 
-Берёт то, что посчитано: E24 (нетронутые сценарии), E24_r3 (20 сценариев R3), E24_pilot (отладка),
-R16_missions (миссии словами), R16_real (настоящая модель). Чего нет — пропускает и пишет об этом.
+Берёт то, что посчитано: E24 (нетронутые сценарии), E24_deadline (срок ожидания), E24_r3 (20 сценариев R3),
+E24_pilot (отладка), R16_missions (миссии словами), R16_cached (миссии на записанных ответах модели), R16_real
+(настоящая модель). Чего нет — пропускает и пишет об этом. Таблица «было / стало» сравнивает E24 с числами
+первого круга (research/findings/R16-results-round1.json, код до G2).
 Интервалы — 95%, бутстреп по сценариям (did.metrics.paired и summarize с отдельным генератором на ячейку).
 """
 import json
@@ -20,9 +22,13 @@ from did.runner import RUNS                                  # noqa: E402
 from did.waiting import LATE, OUTCOMES                       # noqa: E402
 
 OUT = ROOT / 'research' / 'findings'
-EXPERIMENTS = {'E24': 'нетронутые сценарии 7001–7040', 'E24_r3': 'те же 20 сценариев, что в E16 (1001–1020)',
-               'E24_pilot': 'отладочные сценарии 1–40',
-               'E24_pilot2': 'отладочные сценарии 1–40, ответ после смены плана отбрасывается'}
+OLD = 'первый круг, код до G2, не пересчитывалось'
+EXPERIMENTS = {'E24': 'нетронутые сценарии 7001–7040, пересчёт на нынешнем коде',
+               'E24_deadline': 'срок ожидания: модель молчит или отвечает через 60 с (hard, 7001–7020)',
+               'E24_r3': f'те же 20 сценариев, что в E16 (1001–1020); {OLD}',
+               'E24_pilot': f'отладочные сценарии 1–40; {OLD}',
+               'E24_pilot2': f'отладочные сценарии 1–40, ответ после смены плана отбрасывается; {OLD}'}
+TIMELY = ('agree', 'same', 'tail', 'switched')      # ответ пришёл, пока вопрос стоял: подтвердил или изменил план
 SHOW = [('score', 'Счёт', 1), ('hazard_hits', 'Штрафы за зоны', 2), ('returned', 'Возврат', 2),
         ('samples_share', 'Доля собранных', 2), ('idle_s', 'Простой, с', 0), ('time', 'Время, с', 0),
         ('llm_calls', 'Запросов', 1)]
@@ -31,7 +37,9 @@ DIFFS = [('score', 'Счёт', 1), ('hazard_hits', 'Штрафы за зоны',
 PAIRS = [('act15', 'stand15'), ('safe15', 'stand15'), ('act29', 'stand29'), ('safe29', 'stand29'),
          ('safe15_far', 'stand15'), ('safe15_still', 'stand15'), ('act15_drop', 'stand15'), ('safe15_drop', 'stand15'),
          ('act15_drop', 'nowait'), ('safe15_drop', 'nowait'), ('stand15', 'nowait'), ('act15', 'nowait'), ('safe15', 'nowait'), ('stand29', 'nowait'), ('act29', 'nowait'),
-         ('safe29', 'nowait'), ('act15', 'safe15'), ('nowait', 'rule')]
+         ('safe29', 'nowait'), ('act15', 'safe15'), ('nowait', 'rule'),
+         ('act60', 'stand60'), ('leash60', 'stand60'), ('act_never', 'stand60'), ('leash_never', 'stand60'),
+         ('act60', 'rule'), ('leash60', 'rule'), ('act_never', 'rule'), ('leash_never', 'rule')]
 RECOVERY = [('act15', 'stand15'), ('safe15', 'stand15'), ('act29', 'stand29'), ('safe29', 'stand29'),
             ('safe15_far', 'stand15'), ('safe15_still', 'stand15'), ('act15_drop', 'stand15'),
             ('safe15_drop', 'stand15')]
@@ -85,10 +93,13 @@ def waits(runs, arm, cond, level=None):
            and r['metrics'].get('llm_wait')]
     if not sel:
         return None
-    total = {k: sum(r['metrics']['llm_wait'][k] for r in sel)
-             for k in ('asked', 'asked_again', 'answered', 'rule_while_pending', 'unanswered', *OUTCOMES)}
+    total = {k: sum(r['metrics']['llm_wait'].get(k, 0) for r in sel)
+             for k in ('asked', 'asked_again', 'answered', 'rule_while_pending', 'rule_while_busy', 'after_replan',
+                       'expired', 'unanswered', 'gave_up', *OUTCOMES)}
     total['runs'] = len(sel)
     total['late'] = sum(total[k] for k in LATE)
+    total['timely'] = sum(total[k] for k in TIMELY)
+    total['longest_hold_s'] = max(r['metrics']['llm_wait'].get('longest_hold_s', 0.0) for r in sel)
     total['differs'] = total['switched'] + total['stale'] + total['same'] + total['returning']
     return total
 
@@ -155,18 +166,93 @@ def experiment_section(exp, note, s, snapshot):
             if w is None:
                 continue
             snap['answers'][f'{cond}/{arm}'] = w
-            n = max(1, w['answered'])
+            n = max(1, w['answered'] + w['timeout'])
             rows.append([f'`{arm}`', w['runs'], w['asked'], w['answered'], w['rule_while_pending'],
-                         w['agree'], w['agree_late'], w['same'], w['switched'], w['stale'], w['returning'], w['failed'],
-                         f"{num(100 * w['late'] / n, 0)}%",
-                         f"{w['stale'] + w['returning']} из {w['differs']}" if w['differs'] else '—'])
-        text += ['Ответы модели в новом режиме, оба уровня вместе (штук за все прогоны). «Поздних» — ответ пришёл, '
-                 'когда вопрос уже не стоял: план успел смениться, цель пропала или робот уже едет домой. Последний '
-                 'столбец — сколько ответов, не совпавших с правилом, отброшено:', '',
+                         w['agree'], w['same'], w['tail'], w['switched'], w['agree_late'], w['stale'], w['returning'],
+                         w['timeout'], w['failed'], f"{num(100 * w['timely'] / n, 0)}%", f"{num(100 * w['late'] / n, 0)}%",
+                         f"{num(100 * w['after_replan'] / max(1, w['answered']), 0)}%", w['expired'], w['gave_up'],
+                         num(w['longest_hold_s'], 1)])
+        text += ['Ответы модели в новом режиме, все уровни вместе (штук за все прогоны). «В срок» — ответ пришёл, '
+                 'пока вопрос стоял: подтвердил то, что робот делает, добавил остаток плана или сменил план. '
+                 '«Поздних» — вопрос уже не стоял: план успел смениться, цель пропала, робот уже едет домой или '
+                 'истёк срок ожидания. Доли — от вопросов с исходом (ответ или истёкший срок). «После смены плана» — '
+                 'доля ответов, к приходу которых правило уже решало заново, при любом исходе:', '',
                  table(['Вариант', 'Прогонов', 'Вопросов', 'Ответов', 'Поводов решило правило, пока ждали',
-                        'Подтвердила правило', 'То же, но план уже сменился', 'То, что робот уже делает',
-                        'Переход на план модели', 'Устарел, отброшен', 'Робот уже едет домой', 'Нет ответа',
-                        'Поздних', 'Отброшено из несовпавших'], rows), '']
+                        'Подтвердила', 'То, что робот уже делает', 'Остаток плана в очередь', 'Переход на план модели',
+                        'Подтвердила сменившийся план', 'Устарел, отброшен', 'Робот уже едет домой', 'Срок истёк',
+                        'Нет ответа', 'В срок', 'Поздних', 'После смены плана', 'Просроченных ответов',
+                        'Прогонов с отказом от модели', 'Самая долгая стоянка по привязи, с'], rows), '']
+    return text
+
+
+def was_now_section(snapshot):
+    """E24: числа первого круга (код до G2) рядом с пересчётом на нынешнем коде."""
+    path = OUT / 'R16-results-round1.json'
+    if not path.exists() or 'E24' not in snapshot:
+        return []
+    old, new = json.loads(path.read_text(encoding='utf-8'))['E24'], snapshot['E24']
+    text = ['## E24: было (первый круг, код до G2) и стало (нынешний код)', '',
+            f"Те же 40 сценариев 7001–7040 и те же условия; это пересчёт после изменения кода, а не новое измерение. "
+            f"Было посчитано {old['generated']}, стало — {new['generated']}. Условие — имитатор отвечает как правило.", '']
+
+    def cell(src, key, d, sign=False):
+        v = src.get(key)
+        if not v:
+            return '—'
+        f = signed if sign else num
+        return f"{f(v[0], d)} [{f(v[1], d)}; {f(v[2], d)}]"
+    arms = [('rule', 'правило без ожидания'), ('nowait', 'имитатор без ожидания'), ('stand15', 'стоять и ждать, 15 с'),
+            ('act15', 'ехать по правилу, 15 с'), ('safe15', 'привязь, 15 с'), ('stand29', 'стоять и ждать, 29 с'),
+            ('act29', 'ехать по правилу, 29 с'), ('safe29', 'привязь, 29 с')]
+    for level in ('hard', 'medium'):
+        rows = []
+        for arm, label in arms:
+            row = [label]
+            for m, d in (('score', 1), ('hazard_hits', 2), ('returned', 2), ('idle_s', 0)):
+                k = f'base/{level}/{arm}/{m}'
+                o, n = old['means'].get(k), new['means'].get(k)
+                row.append(cell(old['means'], k, d) + ' → ' + cell(new['means'], k, d) if m == 'score'
+                           else f"{num(o[0], d) if o else '—'} → {num(n[0], d) if n else '—'}")
+            rows.append(row)
+        text += [f'**{level}** — средние, «было → стало» (у счёта 95% интервал):', '',
+                 table(['Вариант', 'Счёт', 'Штрафы за зоны', 'Возврат', 'Простой, с'], rows), '']
+        rows = []
+        for a, b in (('act15', 'stand15'), ('safe15', 'stand15'), ('act29', 'stand29'), ('safe29', 'stand29'),
+                     ('stand15', 'nowait'), ('act15', 'nowait'), ('safe15', 'nowait'), ('act15', 'safe15')):
+            row = [f'`{a}` − `{b}`']
+            for m, d in (('score', 1), ('hazard_hits', 2), ('idle_s', 0)):
+                k = f'base/{level}/{a}-{b}/{m}'
+                row += [cell(old['diffs'], k, d, True), cell(new['diffs'], k, d, True)]
+            rows.append(row)
+        text += [f'**{level}** — парные разности, 95% интервал:', '',
+                 table(['Разность', 'Счёт, было', 'Счёт, стало', 'Штрафы, было', 'Штрафы, стало', 'Простой, было',
+                        'Простой, стало'], rows), '']
+    rows = []
+    for arm in ('act15', 'safe15', 'act29', 'safe29'):
+        for level in ('hard', 'medium'):
+            o, n = old['recovery'].get(f'base/{level}/{arm}'), new['recovery'].get(f'base/{level}/{arm}')
+
+            def share(r):
+                return (f"{num(100 * r['share'], 0)}% [{num(100 * r['share_ci'][0], 0)}; {num(100 * r['share_ci'][1], 0)}]"
+                        if r and 'share' in r else 'потеря не установлена')
+            rows.append([f'`{arm}`', level, f"{num(o['loss'], 1) if o else '—'} → {num(n['loss'], 1) if n else '—'}",
+                         share(o), share(n)])
+    text += ['Доля потери от ожидания, возвращённая вариантом:', '',
+             table(['Вариант', 'Уровень', 'Потеря от ожидания, было → стало', 'Возвращено, было', 'Возвращено, стало'],
+                   rows), '']
+    rows = []
+    for arm in ('act15', 'safe15', 'act29', 'safe29'):
+        o, n = old['answers'].get(f'base/{arm}'), new['answers'].get(f'base/{arm}')
+        if o and n:
+            rows.append([f'`{arm}`', f"{o['answered']} → {n['answered']}",
+                         f"{num(100 * o['late'] / max(1, o['answered']), 0)}% → "
+                         f"{num(100 * n['late'] / max(1, n['answered'] + n['timeout']), 0)}%",
+                         f"{o['switched']} → {n['switched']}", n['tail'], n['timeout']])
+    text += ['Ответы модели (оба уровня, 80 прогонов). В первом круге ответ, подтвердивший прежний план после его '
+             'смены, считался поздним, даже если робот снова делал то же самое; теперь он сверяется с тем, что '
+             'робот делает сейчас, поэтому доли «поздних» двух кругов сравнимы только приблизительно:', '',
+             table(['Вариант', 'Ответов', 'Поздних', 'Переходов на план модели', 'Остаток плана в очередь (стало)',
+                    'Срок истёк (стало)'], rows), '']
     return text
 
 
@@ -178,21 +264,43 @@ def missions_section(snapshot):
     snapshot['missions'] = {'created': s['created'], 'table': s['table']}
     text = ['## Миссии словами (имитатор, который понимает миссию; ответ через 15 с)', '',
             f"Сценарии: {len(s['scenarios'])} ({s['scenarios'][0]} … {s['scenarios'][-1]}), посчитано {s['created']}.", '']
-    for m_id, what in (('M1', 'Ровно два и вернулся'), ('M3', 'Заезжал в правую половину')):
+    heads = {'M1': ['Ровно два и вернулся', 'Собрал больше двух'], 'M2': ['Остаток заряда в среднем'],
+             'M3': ['Заезжал в правую половину', 'Там в среднем, с', 'Наибольший x, м'],
+             'M4': ['Прогонов со штрафом', 'Из них: после штрафа домой и без сбора', 'Собрано после штрафа, всего']}
+    for m_id in heads:
         rows = []
         for e in s['table']:
             if e['mission'] != m_id:
                 continue
-            extra = ([f"{e['exactly_two']} из {e['n']}", e['more_than_two']] if m_id == 'M1'
-                     else [f"{e['entered_right']} из {e['n']}", num(e['time_right_s_mean'], 1), num(e['max_x'], 2)])
+            extra = {'M1': lambda: [f"{e['exactly_two']} из {e['n']}", e['more_than_two']],
+                     'M2': lambda: [num(e['battery_mean'], 1)],
+                     'M3': lambda: [f"{e['entered_right']} из {e['n']}", num(e['time_right_s_mean'], 1), num(e['max_x'], 2)],
+                     'M4': lambda: [e['with_penalty'], f"{e['home_after_penalty']} из {e['with_penalty']}",
+                                    e['collected_after']]}[m_id]()
             rows.append([f"`{e['arm']}`", f"{e['success']} из {e['n']}", *extra, num(e['score_mean'], 1),
                          num(e['collected_mean'], 2), f"{e['returned']} из {e['n']}", num(e['idle_s_mean'], 0),
                          ', '.join(f'{k}: {v}' for k, v in sorted(e['outcomes'].items()))])
-        head = (['Вариант', 'Выполнено по критерию R13', what, 'Собрал больше двух'] if m_id == 'M1'
-                else ['Вариант', 'Выполнено по критерию R13', what, 'Там в среднем, с', 'Наибольший x, м'])
+        head = ['Вариант', 'Выполнено по критерию R13', *heads[m_id]]
         text += [f"**{m_id}** — «{s['missions'][m_id]}»", '',
                  table([*head, 'Счёт', 'Собрано', 'Вернулся', 'Простой, с', 'Исходы'], rows), '']
     return text
+
+
+def cached_section(snapshot):
+    path = RUNS / 'R16_cached' / 'summary.json'
+    if not path.exists():
+        return ['## Миссии на записанных ответах настоящей модели', '',
+                'Не посчитано (`./px python -m did.wait_eval cached`).', '']
+    s = json.loads(path.read_text(encoding='utf-8'))
+    snapshot['cached'] = {k: s[k] for k in ('created', 'requests', 'hits', 'misses', 'table')}
+    rows = [[e['mission'], f"`{e['arm']}`", e['n'], e['hits'] + e['misses'], e['hits'], e['misses'],
+             e['covered_before_first_miss'], e['fully_covered']] for e in s['table']]
+    return [f"## Миссии на записанных ответах {s['model']}: только кэш, сеть не трогалась", '',
+            f"Сценарии: {', '.join(s['scenarios'])}; посчитано {s['created']}. Всего запросов {s['requests']}: в кэше "
+            f"нашлось {s['hits']}, не покрыто {s['misses']}. На непокрытый запрос отвечает правило (как при отказе "
+            f"модели), поэтому эти прогоны — не измерение модели, а счёт покрытия.", '',
+            table(['Миссия', 'Вариант', 'Прогонов', 'Запросов', 'Из кэша', 'Не покрыто', 'Из кэша до первого промаха',
+                   'Прогонов целиком из кэша'], rows), '']
 
 
 def real_section(snapshot):
@@ -202,7 +310,7 @@ def real_section(snapshot):
     s = json.loads(path.read_text(encoding='utf-8'))
     runs = s['runs']
     arms = [a for a in ('stand', 'act', 'safe') if any(r['arm'] == a for r in runs)]
-    text = [f"## Настоящая модель {s['model']}: шесть сценариев R3, время ответа настоящее", '',
+    text = [f"## Настоящая модель {s['model']}: шесть сценариев R3, время ответа настоящее ({OLD})", '',
             'Настоящих обращений к сети по запускам: '
             + '; '.join(f"{'+'.join(c['arms'])} — {c['calls']}" for c in s['network_calls']) + '.', '']
     rows = []
@@ -255,7 +363,10 @@ def main():
             text += [f'## {exp}: {note}', '', f'Не посчитано (`./px python -m did.experiments {exp} --jobs 3`).', '']
             continue
         text += experiment_section(exp, note, s, snapshot)
+        if exp == 'E24':
+            text += was_now_section(snapshot)
     text += missions_section(snapshot)
+    text += cached_section(snapshot)
     text += real_section(snapshot)
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / 'R16-tables.md').write_text('\n'.join(text) + '\n', encoding='utf-8')

@@ -59,8 +59,10 @@ class AgentConfig:
     llm_wait_s: float = 0.0           # быстрый симулятор: сколько секунд робот стоит, «ожидая ответ модели»
     async_planner: bool = False       # Gazebo: модель думает в отдельном потоке, робот в это время стоит
     llm_act_while_waiting: str = 'off'   # R16, пока модель думает: off — стоять; rule — ехать по плану правила;
-                                         # safe — только обратимое: без сбора и не дальше llm_wait_leash_m (did/waiting.py)
-    llm_wait_leash_m: float = 0.5     # safe: как далеко от места вопроса можно отъехать до ответа модели
+                                         # leash — без сбора и не дальше llm_wait_leash_m от места вопроса (did/waiting.py)
+    llm_wait_leash_m: float = 0.5     # leash: как далеко от места вопроса можно отъехать до ответа модели
+    llm_wait_deadline_s: float = 45.0    # rule и leash: ответа нет дольше — вопрос снят, решает правило (did/waiting.py)
+    llm_wait_give_up: int = 2         # столько сроков истекло подряд — модель до конца прогона не спрашивается
     llm_wait_superseded: str = 'apply'   # ответ не совпал с правилом, а план с тех пор уже сменился: apply — перейти
                                          # на план модели, если он выполним сейчас; drop — отбросить (кроме возврата на базу)
     llm_wait_measured: bool = False   # быстрый симулятор: ждать столько, сколько модель отвечала на деле, а не llm_wait_s
@@ -814,7 +816,7 @@ class Agent:
             self._stuck = None
         if self.aw is not None and self.aw.hold(obs):
             self._waiting = True               # ожидание ответа модели: у него свой срок, сторожу простоя не подотчётно
-            self.mode = 'think'                # safe: до ответа модели дальше не еду и не собираю
+            self.mode = 'think'                # leash: до ответа модели дальше не еду и не собираю
             return self._command(io, 0.0, 0.0)
         if self.inv and self.inv.act(obs, io):
             self._waiting = True
