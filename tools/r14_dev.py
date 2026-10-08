@@ -63,7 +63,7 @@ def job(args):
 
     runner.make_agent = make_agent
     try:
-        known = arm == 'adaptive_known'
+        known = arm.startswith('adaptive_known')
         s = run_episode(level, seed, arm, save=False, rules=CONDS[cond], agent_rules=None if known else {})
     finally:
         runner.make_agent = orig
@@ -80,7 +80,7 @@ def main():
     ap.add_argument('--levels', default='medium,hard')
     ap.add_argument('--arms', default='adaptive,adaptive_cal')
     ap.add_argument('--conds', default=','.join(list(CONDS)[:7]))
-    ap.add_argument('--jobs', type=int, default=4)
+    ap.add_argument('--jobs', type=int, default=2)
     ap.add_argument('--detail', action='store_true')
     ap.add_argument('--set', default='', help='пробные параметры Calibrator: LEAVE=5,BACK=2')
     args = ap.parse_args()
@@ -102,7 +102,7 @@ def main():
                         f"счёт {mean('score'):6.1f} ложных {mean('false_collects'):.2f} заряд {mean('battery_used'):.1f} "
                         f"время {mean('time'):.0f} с, расчёт {mean('wall'):.1f} с")
                 cal = [r['cal'] for r in sel if r['cal']['range'] is not None]
-                if arm == 'adaptive_cal':
+                if arm.startswith('adaptive_cal'):
                     dr = [r['cal']['per_m'] for r in sel if r['cal']['per_m'] is not None]
                     line += f"\n      закон назван в {len(cal)}/{len(sel)}"
                     if cal:
@@ -115,9 +115,17 @@ def main():
                     if dr:
                         line += f"; расход {np.median(dr):.2f} [{min(dr):.2f}; {max(dr):.2f}]"
                 print(line)
+        arms = args.arms.split(',')
+        for lv in args.levels.split(','):          # парная разность счёта первых двух вариантов и её худшее значение
+            if len(arms) < 2:
+                break
+            by = {a: {r['seed']: r['score'] for r in rows if r['cond'] == c and r['arm'] == a and r['level'] == lv}
+                  for a in arms[:2]}
+            d = np.array([by[arms[1]][k] - by[arms[0]][k] for k in sorted(by[arms[0]])])
+            print(f'  {arms[1]} − {arms[0]}, {lv}: счёт {d.mean():+.2f}, худшая пара {d.min():+.1f}, лучшая {d.max():+.1f}')
         if args.detail:
             for r in rows:
-                if r['cond'] == c and r['arm'] == 'adaptive_cal':
+                if r['cond'] == c and r['arm'].startswith('adaptive_cal'):
                     print('     ', r['level'], r['seed'], r['samples_share'], r['false_collects'], r['cal'])
 
 

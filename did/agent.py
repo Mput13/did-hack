@@ -126,6 +126,8 @@ PRESETS = {
     # Версия 2 (research/findings/P1.md): пережидание сбоя датчика по измеренной цене простоя. Спрямление
     # пути в неё не входит: выигрыша у него не показано. Прежние пресеты не меняются.
     'adaptive_v2': AgentConfig(name='adaptive_v2', fault_wait=True),
+    # adaptive_v2 с самокалибровкой датчика и расхода (R14, второй круг).
+    'adaptive_cal_v2': AgentConfig(name='adaptive_cal_v2', fault_wait=True, calibrate=True),
     'scientist_v2': AgentConfig(name='scientist_v2', science=True, fault_wait=True),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
@@ -422,7 +424,7 @@ class Agent:
                 self.journal.add(t, 'alarm', f'Скачок расхода батареи: {spent:.1f} ед. на {ds * 100:.0f} см пути')
             return
         if self.cal:
-            self.cal.segment(ds, spent - self.rules.drain_idle_per_s * dt, t)
+            self.cal.segment(ds, spent - self.rules.drain_idle_per_s * dt, t, x1, y1)
         if not self.cfg.learn_soil:
             return
         ratio, predicted, conf = self.soil.observe(x0, y0, x1, y1, spent, dt)

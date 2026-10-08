@@ -10,18 +10,37 @@
   fit_law    — после сбора образец лежал в радиусе сбора от робота, а показания на подъезде
                записаны: по парам «расстояние — показание» напрямую подбираются R и p. Это
                независимая сверка вывода, сделанного по картам.
-  DrainMeter — расход на метр обычного пола по пройденным отрезкам.
+  DrainMeter — нижняя оценка расхода на метр по пройденным отрезкам и отдельно — вывод, обычный ли
+               это пол (пока весь путь мог идти по дорогому грунту, допущение не опровергается).
   Calibrator — всё это в агентском цикле, с записью гипотез и выводов в журнал.
+
+Истинных правил мира калибрующийся агент не получает: то, что он калибрует (CALIBRATED), на старте
+берётся из допущений команды — см. assumed_rules и did/runner.py.
 """
 import math
+from dataclasses import replace
 
 import numpy as np
 from scipy.optimize import least_squares
 from scipy.special import ndtr
 
 from .belief import SampleBelief
+from .config import Rules
 
+CALIBRATED = ('sensor_range_m', 'sensor_law', 'drain_per_m')   # что агент проверяет сам и потому заранее не узнаёт
 SHAPES = ((0.5, 'по корню'), (1.0, 'по прямой'), (2.0, 'по квадрату'))
+
+
+def assumed_rules(rules):
+    """Правила, с которыми стартует калибрующийся агент, когда отдельных допущений ему не задано.
+
+    Дальность датчика, форма закона и расход на метр — допущения команды (значения Rules() по
+    умолчанию), какими бы они ни были в мире. Остальное (лимит времени, заряд на старте, радиус сбора,
+    шум датчика, цена простоя) агент не калибрует и получает как все варианты. Возвращается новый
+    объект: общего с судьёй у агента нет.
+    """
+    default = Rules()
+    return replace(rules, **{k: getattr(default, k) for k in CALIBRATED})
 
 
 def shape_name(power):
@@ -82,13 +101,17 @@ class LawBank:
     def apply(self, kind, *args):
         """Наблюдение идёт во все карты; до обновления каждая «отвечает», насколько она его ждала.
 
-        update(x, y, z, sigma) — показание; collected(x, y, r) — сбор удался; missed(x, y, r) —
-        ложный сбор; clear_disc(x, y, r, factor) и relax(alpha) — правки карты без счёта.
+        update(x, y, z, sigma) — показание; unscored(x, y, z, sigma) — показание при сбое датчика:
+        карты его учитывают (как у обычного агента), но в сравнение законов оно не идёт;
+        collected(x, y, r) — сбор удался; missed(x, y, r) — ложный сбор; clear_disc(x, y, r, factor)
+        и relax(alpha) — правки карты без счёта.
         """
         self.ops.append((kind, *args))
         for i, m in enumerate(self.maps):
             if kind == 'update':
                 self.score[i] += m.update(*args)
+            elif kind == 'unscored':
+                m.update(*args)
             elif kind == 'collected':
                 self.score[i] += math.log(max(m.prob_within(*args), 1e-3))
                 m.collected(*args[:2])
@@ -125,12 +148,17 @@ class LawBank:
         return LawBank(self.arena, self.n_samples, self.laws[best], steps, half=1, ops=self.ops, assumed=self.assumed)
 
 
+def _disc(u, v, radius):
+    """Квадрат [−1, 1]² → круг радиуса radius, гладко и взаимно однозначно: смещение не длиннее radius."""
+    return radius * u * math.sqrt(1.0 - 0.5 * v * v), radius * v * math.sqrt(1.0 - 0.5 * u * u)
+
+
 def fit_law(sites, sigma, start=(2.0, 1.0), radius=0.30, bounds=((0.6, 6.0), (0.25, 4.0))):
     """Закон датчика по показаниям вокруг собранных образцов.
 
     sites — [{'x', 'y', 'pts'}]: где робот стоял при сборе и показания до него, массив (n, 3) из
     x, y, z. Сам образец лежал где-то в круге radius от точки сбора, поэтому вместе с дальностью R
-    и показателем p подбирается его положение. Часть показаний относится к другому, более близкому
+    и показателем p подбирается его положение — именно в круге (см. _disc), а не в квадрате. Часть показаний относится к другому, более близкому
     образцу — они завышены и гасятся устойчивой функцией потерь.
     Возвращает словарь с оценками и их погрешностями или None, если данных мало.
     """
@@ -141,15 +169,18 @@ def fit_law(sites, sigma, start=(2.0, 1.0), radius=0.30, bounds=((0.6, 6.0), (0.
     k = len(sites)
     z = np.concatenate([a[:, 2] for a in pts])
 
+    def offsets(q):
+        return [_disc(q[2 + 2 * i], q[3 + 2 * i], radius) for i in range(k)]
+
     def dist(q):
-        return np.concatenate([np.hypot(a[:, 0] - sites[i]['x'] - q[2 + 2 * i], a[:, 1] - sites[i]['y'] - q[3 + 2 * i])
-                               for i, a in enumerate(pts)])
+        return np.concatenate([np.hypot(a[:, 0] - sites[i]['x'] - ox, a[:, 1] - sites[i]['y'] - oy)
+                               for i, (a, (ox, oy)) in enumerate(zip(pts, offsets(q)))])
 
     def resid(q):
         return (z - _clipped_mean(response(dist(q), q[0], math.exp(q[1])), sigma)) / sigma
 
-    lo = [bounds[0][0], math.log(bounds[1][0])] + [-radius] * (2 * k)
-    hi = [bounds[0][1], math.log(bounds[1][1])] + [radius] * (2 * k)
+    lo = [bounds[0][0], math.log(bounds[1][0])] + [-1.0] * (2 * k)
+    hi = [bounds[0][1], math.log(bounds[1][1])] + [1.0] * (2 * k)
     best = None
     for power0 in dict.fromkeys((start[1], 0.5, 1.0, 2.0)):
         for rng0 in dict.fromkeys((start[0], 1.4, 2.8)):
@@ -170,38 +201,87 @@ def fit_law(sites, sigma, start=(2.0, 1.0), radius=0.30, bounds=((0.6, 6.0), (0.
     return {'range': rng, 'power': power, 'se_range': math.sqrt(max(cov[0, 0], 0.0)),
             'se_power': power * math.sqrt(max(cov[1, 1], 0.0)), 'n': int(heard.sum()),
             'd_min': float(d[heard].min()), 'd_max': float(d[heard].max()),
-            'rms': float(np.sqrt((r[inlier] ** 2).mean())) * sigma, 'sites': k}
+            'rms': float(np.sqrt((r[inlier] ** 2).mean())) * sigma, 'sites': k,
+            'offsets': [(float(ox), float(oy)) for ox, oy in offsets(q)]}
 
 
 class DrainMeter:
-    """Расход заряда на метр обычного пола по пройденным отрезкам.
+    """Расход заряда на метр по пройденным отрезкам: нижняя оценка и вывод об обычном поле — порознь.
 
-    Дорогой грунт расход только повышает, поэтому «обычный пол» — нижняя часть распределения:
-    берётся квантиль 30% по длине пути. Простой уже вычтен, скачки (опасная зона) сюда не попадают.
+    Дорогой грунт расход только повышает, поэтому самые дешёвые метры пути — оценка сверху для расхода
+    обычного пола: low — расход, дешевле которого пройдено не больше quantile пути и не больше support
+    метров (чтобы долгая езда по грунту не подняла оценку). Простой уже вычтен, скачки (опасная зона)
+    сюда не попадают.
+
+    Но «самые дешёвые из пройденных» — ещё не «обычный пол»: весь путь мог идти по грунту. Поэтому
+    вывод о допущении делается отдельно (verdict) и только когда обычный пол выделен:
+      low ниже допущения  — грунт расход не понижает, значит обычный пол не дороже low: допущение завышено;
+      low сходится с ним  — допущение подтверждено;
+      low выше допущения  — опровергнуто, только если по этой цене пройдено не меньше wide_path метров
+                            на участке размахом не меньше wide_span: пятно грунта таким большим не
+                            бывает (допущение агента о размере пятен, как у опасных зон).
+    До вывода low годится как осторожная оценка для запаса на дорогу домой, но не как расход пола.
     """
 
-    def __init__(self, nominal, min_path=1.2, quantile=0.3):
+    def __init__(self, nominal, min_path=1.2, quantile=0.3, support=1.5, tol=0.05, band=0.08,
+                 wide_path=4.0, wide_span=2.5):
         self.nominal = nominal
-        self.min_path = min_path
-        self.quantile = quantile
+        self.min_path, self.quantile, self.support = min_path, quantile, support
+        self.tol, self.band = tol, band
+        self.wide_path, self.wide_span = wide_path, wide_span
         self.rate = []          # заряд на метр на отрезке
         self.ds = []
+        self.xy = []            # где отрезок пройден (None — неизвестно)
         self.path = 0.0
-        self.value = None       # текущая оценка; None — данных пока мало
+        self.low = None         # нижняя оценка; None — данных пока мало
+        self.low_se = None      # её погрешность: разброс расхода на «полке» самых дешёвых отрезков
+        self.plateau_path = 0.0   # сколько метров пройдено по цене low (±band)
+        self.plateau_span = 0.0   # размах этих отрезков на арене, м (0 — положения неизвестны)
 
-    def add(self, ds, spent):
-        """Отрезок длиной ds и заряд на нём без простоя. Возвращает новую оценку или None."""
+    @property
+    def value(self):
+        return self.low
+
+    def add(self, ds, spent, x=None, y=None):
+        """Отрезок длиной ds с концом в (x, y) и заряд на нём без простоя. Возвращает нижнюю оценку или None."""
         if ds <= 0.0:
             return None
         self.rate.append(spent / ds)
         self.ds.append(ds)
+        self.xy.append(None if x is None else (x, y))
         self.path += ds
         if self.path < self.min_path:
             return None
-        order = np.argsort(self.rate)
-        cum = np.cumsum(np.asarray(self.ds)[order])
-        self.value = float(np.asarray(self.rate)[order][np.searchsorted(cum, self.quantile * cum[-1])])
-        return self.value
+        rate, ds_all = np.asarray(self.rate), np.asarray(self.ds)
+        order = np.argsort(rate, kind='stable')
+        cum = np.cumsum(ds_all[order])
+        self.low = float(rate[order][np.searchsorted(cum, min(self.quantile * cum[-1], self.support))])
+        near = np.abs(rate - self.low) <= self.band * abs(self.low)
+        w = ds_all[near]
+        self.plateau_path = float(w.sum())
+        mean = float((rate[near] * w).sum() / w.sum())
+        spread = math.sqrt(float((w * (rate[near] - mean) ** 2).sum() / w.sum()))
+        self.low_se = spread / math.sqrt(int(near.sum()))
+        pts = np.array([p for p, n in zip(self.xy, near) if n and p is not None], dtype=float).reshape(-1, 2)
+        self.plateau_span = float(np.hypot(*np.ptp(pts, axis=0))) if len(pts) > 1 else 0.0
+        return self.low
+
+    def verdict(self):
+        """Что можно сказать о допущении nominal: 'confirmed', 'refuted' или None — обычный пол не выделен."""
+        if self.low is None or self.plateau_path < self.min_path:
+            return None
+        if self.low < self.nominal * (1.0 - self.tol):
+            return 'refuted'
+        if self.low <= self.nominal * (1.0 + self.tol):
+            return 'confirmed'
+        if self.plateau_path >= self.wide_path and self.plateau_span >= self.wide_span:
+            return 'refuted'
+        return None
+
+    @property
+    def base(self):
+        """Расход на метр обычного пола, когда он выделен; иначе None."""
+        return self.low if self.verdict() else None
 
 
 class Calibrator:
@@ -236,8 +316,10 @@ class Calibrator:
         self._key = None
         self._zoom_t = 0.0
         self.meter = DrainMeter(r.drain_per_m)
-        self.per_m = r.drain_per_m
+        self.per_m = r.drain_per_m          # рабочая (осторожная) цена метра: по ней считаются дорога и запас
+        self.base = None                    # расход обычного пола, когда он выделен (см. DrainMeter.verdict)
         self._drain_told = False
+        self._drain_closed = False
 
     # --- карта образцов -----------------------------------------------------------------------
 
@@ -250,7 +332,13 @@ class Calibrator:
         if self._key is None:
             self._open(obs.t, 'допущение команды, по показаниям ещё не проверено')
             a.journal.open(obs.t, 'cal:drain', f'метр обычного пола стоит {self.per_m:.2f} ед. заряда (допущение команды)',
-                           f'измерить расход на первых {self.meter.min_path:.1f} м пути и сравнить')
+                           'мерить расход по пройденным отрезкам; вывод — когда обычный пол выделен: самые дешёвые метры '
+                           'сходятся с допущением, дешевле его либо тянутся дальше любого пятна грунта')
+        if self._faulty():
+            # Сбой датчика — не другой закон: карты показание учитывают, но ни в сравнение гипотез,
+            # ни в сверку по парам оно не идёт.
+            self.bank.apply('unscored', obs.x, obs.y, z, sigma)
+            return
         self.log.append((obs.x, obs.y, z))
         self.bank.apply('update', obs.x, obs.y, z, sigma)
         if self.bank.n_signal >= self.MIN_SIGNAL:
@@ -258,6 +346,11 @@ class Calibrator:
             if obs.t - self._zoom_t >= self.ZOOM_EVERY and self.bank.n_signal >= self.ZOOM_SIGNAL \
                     and self.bank.posterior().max() >= 0.95:
                 self._zoom(obs.t)
+
+    def _faulty(self):
+        """Датчик сейчас неисправен по собственным признакам агента: шум вырос либо сторож пережидает сбой."""
+        a = self.a
+        return (a.cfg.sensor_health and a.health.degraded) or (a.guard is not None and a.guard.wait is not None)
 
     def _choose(self, t):
         """Какая гипотеза рабочая. Допущение — нулевая гипотеза: уходим от него только по явному перевесу."""
@@ -358,26 +451,42 @@ class Calibrator:
 
     # --- расход -------------------------------------------------------------------------------
 
-    def segment(self, ds, spent, t):
-        """Отрезок пути без простоя и скачков. Уточняет расход на метр обычного пола."""
+    def segment(self, ds, spent, t, x=None, y=None):
+        """Отрезок пути без простоя и скачков, с концом в (x, y). Уточняет цену метра.
+
+        Рабочая цена метра (per_m) следует нижней оценке сразу: считать дорогу домой дороже, чем она
+        окажется, безопасно. Гипотеза о расходе обычного пола закрывается отдельно — когда пол выделен.
+        """
         a = self.a
-        v = self.meter.add(ds, spent)
-        if v is None or v <= 0.0 or (self._drain_told and abs(v / self.per_m - 1.0) < 0.03):
+        m = self.meter
+        v = m.add(ds, spent, x, y)
+        if v is None or v <= 0.0:
             return
-        old, self.per_m = self.per_m, v
-        a.soil.drain *= old / v             # множители грунта считались от прежнего расхода
-        a.soil.per_m = v
-        a.soil.version += 1
-        a.soil._cache = None
-        a._cost_dirty = True
-        a._base_dist = None
-        nominal = a.rules.drain_per_m
-        a.journal.add(t, 'observe', f'Калибровка расхода: {v:.2f} ед. на метр обычного пола '
-                      f'(допущение {nominal:.2f}), по {self.meter.path:.1f} м пути', tag='calibration', what='drain',
-                      per_m=round(v, 3))
-        if not self._drain_told:
+        nominal = m.nominal
+        verdict = m.verdict()
+        if not self._drain_told or abs(v / self.per_m - 1.0) >= 0.03:
+            old, self.per_m = self.per_m, v
+            a.soil.drain *= old / v             # множители грунта считались от прежней цены метра
+            a.soil.per_m = v
+            a.soil.version += 1
+            a.soil._cache = None
+            a._cost_dirty = True
+            a._base_dist = None
             self._drain_told = True
-            ok = abs(v / nominal - 1.0) <= 0.05
-            a.journal.close(t, 'cal:drain', 'confirmed' if ok else 'refuted',
-                            f'на {self.meter.path:.1f} м пути измерено {v:.2f} ед. на метр'
-                            + ('' if ok else '; запас на дорогу домой считаю по измеренному расходу'))
+            known = 'обычный пол' if verdict else 'не дороже этого стоит обычный пол; весь путь мог идти по грунту'
+            a.journal.add(t, 'observe', f'Калибровка расхода: самые дешёвые метры пути стоят {v:.2f} ± {m.low_se:.2f} ед. '
+                          f'(допущение {nominal:.2f}), по {m.path:.1f} м пути — {known}; дорогу и запас на возврат '
+                          f'считаю по {v:.2f}', tag='calibration', what='drain', per_m=round(v, 3),
+                          se=round(m.low_se, 3), floor=bool(verdict))
+        if verdict and not self._drain_closed:
+            self._drain_closed = True
+            self.base = v
+            why = (f'на {m.plateau_path:.1f} м пути метр стоит {v:.2f} ± {m.low_se:.2f} ед.'
+                   + ('' if verdict == 'confirmed' else
+                      ', а грунт расход только повышает' if v < nominal else
+                      f' на участке размахом {m.plateau_span:.1f} м — пятно грунта таким не бывает'))
+            a.journal.close(t, 'cal:drain', verdict, why)
+            a.journal.add(t, 'observe', f'Калибровка расхода: обычный пол — {v:.2f} ед. на метр ({why})',
+                          tag='calibration', what='floor', per_m=round(v, 3), status=verdict)
+        elif verdict:
+            self.base = v

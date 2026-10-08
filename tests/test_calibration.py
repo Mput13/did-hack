@@ -185,7 +185,7 @@ def test_default_under_other_law_unchanged():
 
 def test_flag_is_off_by_default():
     assert all(not cfg.calibrate and not cfg.law_known for name, cfg in PRESETS.items()
-               if name not in ('adaptive_cal', 'adaptive_known'))
+               if name not in ('adaptive_cal', 'adaptive_cal_v2', 'adaptive_known'))
     assert PRESETS['adaptive_cal'].calibrate and not PRESETS['adaptive_cal'].law_known
 
 

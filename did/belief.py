@@ -88,8 +88,8 @@ class SampleBelief:
             return self.evidence(x, y, z, sigma)
         order = idx[np.argsort(-f[idx], kind='stable')]      # от ближних клеток к дальним
         p, f = self.p[order], f[order]
+        raw = sigma              # шум самого датчика: им меряется «рядом пусто» при сравнении законов
         sigma, s_none = self._blur(sigma, d[order])
-        density = 1.0            # множитель, превращающий total ниже в плотность показания
         if z <= 1e-6:            # показание упёрлось в ноль: вероятность, а не плотность
             like, like_none = ndtr(-f / sigma), 0.5
         elif z >= 1.0 - 1e-6:
@@ -99,7 +99,6 @@ class SampleBelief:
             like_none = math.exp(-0.5 * (z / s_none) ** 2)
             if self.power != 1.0:
                 like = like * (s_none / sigma)
-            density = 1.0 / (s_none * math.sqrt(2.0 * math.pi))
         cum = np.cumsum(np.log1p(-p))
         closer_empty = np.exp(np.concatenate(([0.0], cum[:-1])))   # ближе этой клетки образцов нет
         a = p * closer_empty * like                                # «ближайший образец — в этой клетке»
@@ -110,7 +109,17 @@ class SampleBelief:
         lr = np.clip(num / np.maximum(den, 1e-300), 1e-4, 1e4)
         odds = p * lr
         self.p[order] = np.clip(odds / (odds + 1.0 - p), 1e-7, 0.995)
-        return math.log(max(total * density, 1e-300))
+        # То же, что evidence: компонента «рядом пусто» считается с шумом самого датчика при любом законе,
+        # хотя карта по прямой обновляется с расширенным (так было до R14, и карта должна остаться прежней).
+        empty = math.exp(cum[-1])
+        if z <= 1e-6:
+            ev = total
+        elif z >= 1.0 - 1e-6:
+            ev = a.sum() + empty * float(ndtr(-1.0 / raw))
+        else:
+            k = 1.0 / math.sqrt(2.0 * math.pi)
+            ev = a.sum() * (k / s_none) + empty * (k / raw) * math.exp(-0.5 * (z / raw) ** 2)
+        return math.log(max(ev, 1e-300))
 
     def trial(self, x, y, z, sigma, p=None, normalize=True):
         """Пробное обновление: какой стала бы карта после показания z в точке (x, y).
@@ -239,14 +248,16 @@ class SampleBelief:
         """Логарифм вероятности показания z при текущей карте — с нормировкой, чтобы сравнивать законы.
 
         В отличие от loglik, годится для карт с разными дальностью и формой закона: у показаний
-        внутри шкалы это плотность, у упёршихся в 0 или 1 — вероятность (как в _apply).
+        внутри шкалы это плотность, у упёршихся в 0 или 1 — вероятность (как в _apply). Показание
+        «рядом пусто» — чистый шум датчика, от закона он не зависит, поэтому здесь он один для всех
+        гипотез (sigma); поправка на размер клетки относится только к клеткам с образцом.
         """
         d = np.hypot(self.cx - x, self.cy - y)
         f = self._resp(d)
         idx = np.nonzero(f > 0.0)[0]
         order = idx[np.argsort(-f[idx], kind='stable')]
         q, f = self.p[order], f[order]
-        s, s_none = self._blur(sigma, d[order] if len(order) else d[:1])
+        s, s_none = self._blur(sigma, d[order] if len(order) else d[:1])[0], sigma
         if z <= 1e-6:
             like, none = ndtr(-f / s), 0.5
         elif z >= 1.0 - 1e-6:
