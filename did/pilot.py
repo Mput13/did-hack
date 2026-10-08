@@ -33,13 +33,14 @@ import queue
 import signal
 import threading
 import time
+from collections import deque
 from dataclasses import asdict
 
 import numpy as np
 
 from .agent import PRESETS, Agent, make_config
 from .arena import load_arena
-from .config import BASE, LEVELS, SCIENCE, Rules
+from .config import BASE, LEVELS, SCIENCE, V_MAX, Rules
 from .fastsim import FastSim
 from .judge import Judge
 from .mapping import LIDAR_OFFSET, OccupancyMapper
@@ -61,6 +62,8 @@ ACK_DIR = LIVE_DIR / 'pilot_ack'
 
 TICK_S = 0.1
 STATE_S = 0.25                 # как часто обновляется состояние для интерфейса, с
+LAG_S = 0.35                   # такт пришёл с таким опозданием — управление запаздывает (машина перегружена)
+SLOW_V = 0.08                  # м/с: с такой скоростью едем, пока управление запаздывает
 MAX_POINTS = 20
 BASE_NEAR = 0.25               # м: ближе — робот «на базе»
 # Агенты, которым не нужна языковая модель: их можно запускать с пульта.
@@ -190,15 +193,24 @@ class Pilot:
         self._finish_at = None
         self._last_odom = None
         self._rerun_at = 0.0
+        self._gaps = deque(maxlen=300)      # (время по часам машины, сколько времени симуляции прошло между тактами)
+        self._slow_until = 0.0
+        self._guard = _Guard(self)
         self._log(0.0, 'info', 'Пульт запущен')
 
     # ======================================================================================
     # один такт
     # ======================================================================================
 
-    def tick(self, obs):
+    def tick(self, obs, gap=TICK_S):
+        """gap — сколько времени симуляции прошло с прошлого такта (в норме 0,1 с)."""
         w = self.world
         self.t = obs.t
+        wall = time.monotonic()
+        self._gaps.append((wall, gap))
+        if gap > LAG_S:
+            # Робот какое-то время ехал вслепую по последней команде: дальше — медленно, пока такты не выровняются.
+            self._slow_until = wall + 3.0
         self.battery = obs.battery
         if obs.sensor is not None:
             self.sensor = obs.sensor
@@ -206,7 +218,7 @@ class Pilot:
             self._on_event(ev)
 
         if self.mode == 'mission' and self.bot:
-            self.bot.tick(obs, w)                   # агент сам поправляет позу (трекер у нас общий)
+            self.bot.tick(obs, self._guard)         # агент сам поправляет позу (трекер у нас общий)
             x, y, th = self._to_map(obs.x, obs.y, obs.th)
         elif self.tracker:
             x, y, th = self.tracker.update(obs.x, obs.y, obs.th, obs.scan, obs.scan_pose, obs.scan_step)
@@ -259,6 +271,13 @@ class Pilot:
 
     def _to_map(self, x, y, th):
         return self.tracker.to_map(x, y, th) if self.tracker else (x, y, th)
+
+    def _lag(self):
+        """Запаздывание управления за последние 10 с: худший промежуток между тактами и замедлен ли робот."""
+        now = time.monotonic()
+        recent = [g for t, g in self._gaps if now - t <= 10.0]
+        return {'max': round(max(recent, default=TICK_S), 2), 'late': sum(g > LAG_S for g in recent),
+                'slow': now < self._slow_until}
 
     def _command(self, v, w):
         self._last_cmd = (v, w)
@@ -314,7 +333,8 @@ class Pilot:
                 self.follower.set_path(pts + [target])
                 leg['pts'] = pts + [target]
             last = len(todo) == 1
-            v, w, arrived = self.follower.step(x, y, th, tol=0.05 if last else 0.12)
+            v, w, arrived = self.follower.step(x, y, th, tol=0.05 if last else 0.12,
+                                               v_max=SLOW_V if time.monotonic() < self._slow_until else V_MAX)
             if not arrived:
                 break
             if last and abs(obs.v) > 0.03:
@@ -665,12 +685,30 @@ class Pilot:
             'battery': round(float(self.battery), 2), 'battery_start': self.rules.battery_start,
             'sensor': round(float(self.sensor), 3), 'distance': round(self.distance, 2),
             'time_limit': self.rules.time_limit_s, 'arrivals': self.arrivals[-10:],
-            'score': score, 'events': self.log[-30:],
+            'score': score, 'events': self.log[-30:], 'lag': self._lag(),
             'map': self._map_cache[1], 'scan': scan,
             'mission': self._mission_view() if self.mission else None,
             'agents': [{'id': k, 'label': v} for k, v in MISSION_AGENTS.items() if k in PRESETS],
             'truth': w.truth(),
         }
+
+
+class _Guard:
+    """RobotIO для агента в миссии: пока управление запаздывает, линейная скорость ограничена."""
+
+    def __init__(self, pilot):
+        self._p = pilot
+
+    def command(self, v, w):
+        if time.monotonic() < self._p._slow_until:
+            v = max(-SLOW_V, min(SLOW_V, v))
+        self._p.world.command(v, w)
+
+    def collect(self):
+        return self._p.world.collect()
+
+    def finish(self):
+        return self._p.world.finish()
 
 
 def _thin(pts, k):
@@ -1012,7 +1050,8 @@ def run_ros(level, seed, rules='base', wait_s=600.0):
     base = {'active': True, 'backend': 'gazebo', 'level': level, 'seed': seed, 'rules': rules, 'mode': 'wait',
             'linked': False, 'base': list(BASE)}
     world = pilot = None
-    last_tick = last_state = -1e9
+    last_tick = last_state = last_cmd = last_warn = -1e9
+    tick_wall, spent = time.monotonic(), [0.0, 0.0]     # когда был прошлый такт; сколько заняли такт и запись состояния
     t0 = time.monotonic()
     print(f'пульт: жду стенд (уровень {level}, сценарий {seed})', flush=True)
     try:
@@ -1035,7 +1074,7 @@ def run_ros(level, seed, rules='base', wait_s=600.0):
                 time.sleep(0.05)
                 continue
 
-            for f in sorted(CMD_DIR.glob('*.json')):
+            for f in (sorted(CMD_DIR.glob('*.json')) if wall - last_cmd >= 0.05 else ()):
                 try:
                     cmd = json.loads(f.read_text(encoding='utf-8'))
                     f.unlink()
@@ -1044,21 +1083,32 @@ def run_ros(level, seed, rules='base', wait_s=600.0):
                 res = pilot.command(cmd)
                 _write_json(ACK_DIR / f"{cmd.get('id', f.stem)}.json", {**res, 'id': cmd.get('id')})
                 last_state = -1e9
+            if wall - last_cmd >= 0.05:
+                last_cmd = wall
 
             now = io.sim_time
             if now < last_tick:                 # часы симуляции пошли заново: стенд перезапустили
                 last_tick = now - TICK_S
             if now - last_tick >= TICK_S:
-                last_tick = now
+                gap = min(now - last_tick, 60.0) if last_tick > -1e8 else TICK_S
+                if gap > LAG_S and wall - last_warn >= 1.0 and pilot.mode != 'settle':
+                    last_warn = wall
+                    print(f'пульт: управление запоздало на {gap:.2f} с времени симуляции (по часам машины с прошлого '
+                          f'такта {wall - tick_wall:.2f} с; такт {spent[0] * 1e3:.0f} мс, состояние {spent[1] * 1e3:.0f} мс)',
+                          flush=True)
+                last_tick, tick_wall = now, wall
                 was = pilot.mode
-                pilot.tick(io.observe())
+                pilot.tick(io.observe(), gap)
+                spent[0] = time.monotonic() - wall
                 if was == 'settle' and pilot.mode != 'settle':
                     print('пульт: робот готов, можно ставить точки', flush=True)
             else:
                 time.sleep(0.002)
             if wall - last_state >= STATE_S:
                 last_state = wall
+                t1 = time.monotonic()
                 _write_json(STATE, pilot.state())
+                spent[1] = time.monotonic() - t1
     finally:
         try:
             for _ in range(3):

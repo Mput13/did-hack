@@ -1,6 +1,6 @@
 // Живой прогон в Gazebo: раз в секунду спрашиваем сервер и дорисовываем запись.
 
-import { h, fill, loading, errorBox, api, getArena, num, levelName, agentLabel, agentColor, getOptions } from './common.js';
+import { h, fill, icon, sleep, loading, errorBox, api, getArena, getTrace, runHref, num, levelName, agentLabel, agentColor, getOptions } from './common.js';
 import { mountPlayer, destroyPlayer } from './player.js';
 
 // Текст команд — в одном месте, чтобы его было легко поправить.
@@ -42,11 +42,13 @@ export async function render(root, ctx) {
     h('ol', { class: 'lb-steps' }, TWO_TERMINALS.map((c) => h('li', null, h('div', { text: c.text }), h('pre', { class: 'lb-code', text: c.cmd })))),
     h('p', { class: 'lb-muted', text: 'Нет времени ждать Gazebo? Тот же агент за долю секунды проходит сценарий в быстром симуляторе — на странице «Сценарии».' }));
   const stage = h('div', { class: 'lb-stage', hidden: true });
+  const saved = h('div', { class: 'lb-live__saved', hidden: true });
   fill(root,
     h('header', { class: 'lb-intro lb-intro--tight' },
       h('div', { class: 'lb-eyebrow', text: 'Живой прогон' }),
       h('h1', { class: 'lb-h1', text: 'Робот в Gazebo прямо сейчас' }),
-      h('div', { class: 'lb-live__bar', role: 'status' }, lamp, statusText, checked)),
+      h('div', { class: 'lb-live__bar', role: 'status' }, lamp, statusText, checked),
+      saved),
     idle, stage);
 
   let player = null;
@@ -55,6 +57,33 @@ export async function render(root, ctx) {
   let lastLen = 0;
   let timer = null;
   let wasActive = false;
+  let ended = false;          // прогон, который мы показывали, закончился
+  let lastTrace = null;
+
+  // Прогон закончился: убираем отметку «идёт прогон» и, когда судья допишет запись, показываем её целиком с итогом.
+  async function finish() {
+    const tr = lastTrace;
+    if (!tr) return;
+    if (player && player.controller && typeof player.controller.update === 'function') {
+      try { player.controller.update(tr, { follow: false }); } catch (e) { console.error(e); }
+    }
+    if (!tr.id) return;
+    const file = `${tr.id}.json.gz`;
+    let full = null;
+    for (let i = 0; i < 5 && !full; i++) {            // запись дописывается через секунду-другую после финиша
+      try { full = await getTrace(file); } catch { full = null; }
+      if (!ctx.alive() || !ended || lastTrace !== tr) return;
+      if (!full) await sleep(1500);
+    }
+    // В папке мог остаться старый прогон с тем же именем: берём запись, только если она не короче показанной.
+    const lenOf = (t) => (t && t.track && t.track.t ? t.track.t.length : 0);
+    if (!ctx.alive() || !ended || lastTrace !== tr || !full || lenOf(full) < lenOf(tr)) return;
+    if (player && player.controller && typeof player.controller.update === 'function') {
+      try { player.controller.update(full, { follow: false }); } catch (e) { console.error(e); }
+    }
+    saved.hidden = false;
+    fill(saved, h('a', { class: 'lb-btn', href: runHref(file) }, icon('play'), 'Открыть запись этого прогона'));
+  }
 
   const setState = (mode, text) => {
     lamp.dataset.mode = mode;
@@ -78,7 +107,10 @@ export async function render(root, ctx) {
       const agent = tr.agent && tr.agent.name ? agentLabel(tr.agent.name, options) : '';
       const t = len ? tr.track.t[len - 1] : 0;
       setState('on', `Идёт прогон: ${sc.level ? `${levelName(sc.level).toLowerCase()} уровень, сценарий ${sc.seed}` : 'сценарий не указан'}${agent ? ` · ${agent}` : ''} · ${num(t, 0)} с от старта`);
-      const fresh = !player || id !== currentId || len < lastLen;
+      const fresh = !player || id !== currentId || len < lastLen || ended;
+      ended = false;
+      saved.hidden = true;
+      lastTrace = tr;
       if (fresh && !mounting) {
         mounting = true;
         destroyPlayer(player);
@@ -94,7 +126,11 @@ export async function render(root, ctx) {
       lastLen = len;
       wasActive = true;
     } else if (wasActive) {
-      setState('idle', 'Прогон закончился — на экране его последняя запись. Жду следующий');
+      if (!ended) {
+        ended = true;
+        finish();
+      }
+      setState('idle', 'Прогон закончился — на экране его запись. Жду следующий');
     } else {
       setState('idle', 'Прогон не идёт');
     }

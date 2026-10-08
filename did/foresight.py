@@ -27,19 +27,24 @@ from dataclasses import dataclass, replace
 import numpy as np
 from scipy.special import ndtr
 
+from .planner import HeuristicPlanner
+
 CELL = 0.1            # м: сетка, на которой разложены миры
 RETRACE = 1.05        # обратная дорога по своему следу: во сколько раз она длиннее, чем путь туда
+DETECT = 5            # через сколько шагов пути (≈0,3 м) агент замечает дорогой грунт под колёсами
 
 
 @dataclass(frozen=True)
 class Settings:
     worlds: int = 48                  # сколько состояний среды в выборке
     risk_limit: float = 0.05          # допустимая вероятность не вернуться
+    choice: str = 'score'             # среди прошедших по риску: score — наибольшая ожидаемая ценность,
+    #                                   planner — выбирает правило планировщика («выгода на единицу заряда»)
     abort_margin: float = 1.3         # в пути от цели отказываемся, когда риск выше порога во столько раз
     # --- чего агент не знает о полу
-    soil_rate: float = 0.15           # зон дорогого грунта на метр непроверенного пола: исходное предположение
+    soil_rate: float = 0.20           # зон дорогого грунта на метр непроверенного пола: исходное предположение
     soil_weight_m: float = 8.0        # его вес в метрах пути: после стольких метров своим наблюдениям верим так же
-    soil_radius: tuple = (0.30, 0.55)
+    soil_radius: tuple = (0.35, 0.60)
     soil_mults: tuple = (2.0, 3.0, 4.0)   # множители по умолчанию, пока своих зон не найдено
     hazard_rate: float = 0.03         # ненайденных опасных зон на метр непроверенного пола
     hazard_weight_m: float = 12.0
@@ -47,12 +52,14 @@ class Settings:
     stale: float = 0.10               # вероятность, что карта устарела и проверенный пол уже не тот
     stale_exposure: float = 0.6       # насколько в таком мире проверенный пол похож на непроверенный
     # --- расход
-    per_m_factor: float = 1.0         # поправка к оценке агента «заряд на метр»
-    per_m_sd: float = 0.07            # её разброс (доля): повороты, объезды, неточность модели
+    per_m_factor: float = 0.97        # поправка к оценке агента «заряд на метр»: робот срезает углы пути по клеткам
+    turn_rate: float = 1.3            # рад на метр на переездах (исследователь знает цену поворота)
+    per_m_sd: float = 0.09            # её разброс (доля): повороты, объезды, неточность модели
     speed: float = 0.16               # м/с: средняя скорость, по ней считается расход за время в пути
     p_leak: float = 0.25              # доля въездов в опасную зону, после которых начинается утечка
     leak_s: tuple = (20.0, 30.0)      # сколько она длится
     dwell: float = 0.3                # ед. заряда на подъезд вплотную и сбор
+    turn_back_below: float = 2.0      # встретив неожиданность, агент повернёт назад, если иначе на базе осталось бы меньше
     # --- ценность
     explore_value: float = 0.3        # какая доля «неясной массы» вокруг точки разведки превращается в образцы
     future_per_unit: float = 0.5      # очков за единицу заряда, оставшегося на следующие цели (0 — не учитывать)
@@ -67,7 +74,7 @@ DEFAULTS = Settings()                 # отладочные серии подм
 class Leg:
     """Отрезок пути глазами агента: шаги, оценка множителя грунта, доля непроверенного пола."""
 
-    __slots__ = ('ds', 'unk', 'open', 'cell', 'risk', 'metres', 'length', 'unknown_m', 'est')
+    __slots__ = ('ds', 'dm', 'unk', 'open', 'cell', 'risk', 'metres', 'length', 'unknown_m', 'est')
 
     def __init__(self, ds, mult, unk, cell, risk=0.0, est=None):
         self.ds = np.asarray(ds, dtype=float)             # длина шага, м
@@ -76,7 +83,8 @@ class Leg:
         self.cell = np.asarray(cell, dtype=np.intp)       # клетка сетки миров под каждым шагом
         self.risk = float(risk)                           # вероятность задеть уже найденную опасную зону
         self.length = float(self.ds.sum())
-        self.metres = float(self.ds @ np.asarray(mult, dtype=float))   # метры обычного пола по оценке агента
+        self.dm = self.ds * np.asarray(mult, dtype=float)              # те же шаги в метрах обычного пола
+        self.metres = float(self.dm.sum())                             # весь отрезок по оценке агента
         self.unknown_m = float(self.ds @ self.unk)
         self.est = self.metres if est is None else float(est)          # цена пути, по которой агент выбирает маршрут
 
@@ -176,6 +184,14 @@ class Worlds:
         if self.stale.any():              # карта устарела: зоны могут лежать и на проверенном полу
             out[self.stale] += g[self.stale] @ (leg.ds * np.maximum(self.s.stale_exposure - leg.unk, 0.0))
         return out
+
+    def walk(self, leg):
+        """Отрезок по шагам: пройденные метры обычного пола (M, P), где встретится неожиданность (M, P)
+        и где из неё — опасная зона (M, P)."""
+        unk = np.where(self.stale[:, None], np.maximum(leg.unk, self.s.stale_exposure), leg.unk)
+        g = self.extra[:, leg.cell] * unk
+        d = self.danger[:, leg.cell] & (leg.open[None, :] | self.stale[:, None])
+        return np.cumsum(leg.dm + g * leg.ds, axis=1), (g > 0.3) | d, d
 
     def hits(self, leg):
         """Сколько раз на отрезке робот въедет в опасную зону в каждом мире: (M,)."""
@@ -312,6 +328,21 @@ class Foresight:
         spent += e
         hits += h
 
+        if opt.steps and len(opt.steps[0].leg.ds):
+            # Агент может передумать: встретив по дороге к первой цели неожиданность, с которой заряда
+            # на весь план не хватит, он разворачивается и едет домой от того места.
+            leg = opt.steps[0].leg
+            cum, sur, d = w.walk(leg)
+            rows = np.arange(w.n)
+            seen = np.minimum(sur.argmax(axis=1) + DETECT, len(leg.ds) - 1)     # заметил через несколько шагов
+            home = alts[-1][0]                                                   # дорога домой от старта
+            m2 = cum[rows, seen] * (1.0 + RETRACE) + w.metres(home)
+            h2 = np.maximum.accumulate(d, axis=1)[rows, seen] + w.hits(home)
+            e2 = m2 * per_m + idle * m2
+            b2 = start - e2 - h2 * hit_loss
+            turn = sur.any(axis=1) & (b < s.turn_back_below) & (b2 > b)
+            b, spent, hits, got = (np.where(turn, x, y) for x, y in ((b2, b), (e2, spent), (h2, hits), (0.0, got)))
+
         sd = s.per_m_sd * spent + 0.15                      # неточность самой оценки расхода
         p_back = ndtr(b / sd)                               # вероятность вернуться в этом мире
         left_b = np.maximum(b, 0.0)
@@ -408,6 +439,10 @@ class Advisor:
         per_m = a._per_m()
         leak, pending = 0.0, (0.0, 0.0)
         if a.inv:
+            # Исследователь считает повороты по всему прогону; на переездах их на метр меньше, чем в поиске.
+            path, model = a.inv._path, a.inv.model
+            turns = min(path[1] / path[0] if path[0] > 2.0 else 1.5, s.turn_rate)
+            per_m = model.per_meter(a.collected) + float(model.mean[2]) * turns
             leak = a.inv.reserve(obs.t)                          # подтверждённая утечка и невыясненный расход
             since = obs.t - a.inv._penalty_t
             unclear = a.inv.leak is None and a.inv._rest_ok_t < a.inv._penalty_t
@@ -501,20 +536,28 @@ class Advisor:
         targets += [(p, 'explore', min(1.0, p['unseen_share'] * left)) for p in state['explore_points']]
         options = self._options(obs, targets) if left > 0 else self._options(obs, [])
         rows = self.core.compare(options, **self._context(obs))
-        best = self.core.choose(rows)
-        opt = next(o for o in options if o.id == best['id'])
-        ok = {r['id'] for r in rows if r['ok']} | {sg.get('target') for sg in opt.subgoals}
+        by_id = {r['id']: r for r in rows}
         for tg in state['candidates'] + state['explore_points']:
-            tg['feasible'] = tg['id'] in ok
+            tg['feasible'] = tg['id'] in by_id and by_id[tg['id']]['ok']
         self._p = {tg['id']: p for tg, _, p in targets}
+        best = self.core.choose(rows)
+        subgoals, note = next(o for o in options if o.id == best['id']).subgoals, ''
+        if self.s.choice == 'planner' or a.cfg.planner == 'llm':
+            if a.cfg.planner == 'llm':
+                rec = self._record(obs, state['trigger'], rows, best, (time.perf_counter() - t0) * 1e3)
+                a.journal.add(obs.t, 'observe', self._text(rows, best) + ' Выбор среди прошедших по риску — за моделью.',
+                              foresight=rec)
+                return None
+            inner = HeuristicPlanner().plan(state)             # правило выбирает среди прошедших по риску
+            first = inner['subgoals'][0]
+            best = by_id[first.get('target', 'home')]
+            subgoals, note = inner['subgoals'], ' По правилу планировщика: ' + inner['reasoning']
+        for tg in state['candidates'] + state['explore_points']:
+            tg['feasible'] = tg['feasible'] or any(sg.get('target') == tg['id'] for sg in subgoals)
         rec = self._record(obs, state['trigger'], rows, best, (time.perf_counter() - t0) * 1e3)
-        text = self._text(rows, best)
-        if a.cfg.planner == 'llm':
-            a.journal.add(obs.t, 'observe', text + ' Выбор среди проходящих по риску — за моделью.', foresight=rec)
-            return None
         self.route = best['route']
-        return {'reasoning': text, 'hypotheses': [], 'subgoals': opt.subgoals, 'source': 'foresight',
-                'exchanges': [], 'error': None, 'data': {'foresight': rec}}
+        return {'reasoning': self._text(rows, best) + note, 'hypotheses': [], 'subgoals': subgoals,
+                'source': 'foresight', 'exchanges': [], 'error': None, 'data': {'foresight': rec}}
 
     def check(self, obs):
         """Раз в секунду: не пора ли домой, а на обратном пути — каким маршрутом ехать."""

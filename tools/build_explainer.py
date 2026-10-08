@@ -139,6 +139,16 @@ def llm_example():
     return {'error': 'подходящий обмен не найден'}
 
 
+def count_tests():
+    """Сколько автоматических проверок в проекте (по сбору pytest, без запуска)."""
+    import subprocess
+    out = subprocess.run([sys.executable, '-m', 'pytest', 'tests', '--collect-only', '-q'], cwd=ROOT,
+                         capture_output=True, text=True).stdout
+    m = [line for line in out.splitlines() if 'test' in line and 'collected' in line or ' tests' in line]
+    digits = ''.join(ch for ch in (m[-1].split()[0] if m else '') if ch.isdigit())
+    return int(digits) if digits else None
+
+
 def _json(path):
     return json.loads(Path(path).read_text(encoding='utf-8')) if Path(path).exists() else None
 
@@ -177,6 +187,7 @@ def main():
 
     data = {
         'built': time.strftime('%d.%m.%Y %H:%M'),
+        'tests': count_tests(),
         'arena': arena.to_dict(),
         'rules': Rules().to_dict(),
         'levels': LEVELS,

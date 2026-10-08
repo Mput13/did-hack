@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -787,6 +788,7 @@ def add_truth(report, scenario, rules, world):
         truth['error_pct'] = round(abs(est['value'] - truth['value']) / abs(truth['value']) * 100, 2)
         truth['covered'] = bool(est['ci95'][0] <= truth['value'] <= est['ci95'][1])
     report['truth'] = truth
+    report['markdown_truth'] = to_markdown(report, with_truth=True)
     return report
 
 
@@ -811,7 +813,23 @@ def study_metrics(report):
 # =================================================================================================
 
 def _n(v, digits=2):
-    return '—' if v is None else f'{v:.{digits}f}'.replace('.', ',')
+    if v is None:
+        return '—'
+    text = f'{v:.{digits}f}'
+    return (text.lstrip('-') if float(text) == 0 else text).replace('.', ',').replace('-', '−')
+
+
+def plural(n, one, few, many):
+    """Склонение: plural(3, 'замер', 'замера', 'замеров')."""
+    a, b = abs(n) % 100, abs(n) % 10
+    return many if 10 < a < 20 else one if b == 1 else few if 2 <= b <= 4 else many
+
+
+def ru(text):
+    """Числа в тексте по-русски: десятичная запятая, пробел перед знаком процента."""
+    text = re.sub(r'(?<=\d)\.(?=\d)', ',', str(text))
+    text = re.sub(r'(\d+) опыт\(ов\)', lambda m: f"{m[1]} {plural(int(m[1]), 'опыта', 'опытов', 'опытов')}", text)
+    return re.sub(r'(?<=\d)%', ' %', text)
 
 
 def digits_for(sigma):
@@ -825,8 +843,8 @@ ROLE_RU = {'test': 'исследуемое', 'control': 'контроль', 'cal
 KIND_RU = {'straight': 'пробег', 'pause': 'пауза', 'spin': 'разворот', 'listen': 'слушаю датчик'}
 
 
-def to_markdown(report):
-    """Отчёт в читаемом виде — для вставки в документ или на слайд."""
+def to_markdown(report, with_truth=False):
+    """Отчёт в читаемом виде — для вставки в документ или на слайд. with_truth — дописать сверку со сценарием."""
     spec = report.get('spec') or {}
     q = spec.get('quantity')
     title = spec.get('title') or (QUANTITIES[q][3] if q in QUANTITIES else 'Исследование')
@@ -853,10 +871,10 @@ def to_markdown(report):
     if e:
         parts = ', '.join(f'{name} {_n(e[key], 1)}' for key, name in
                           (('travel', 'дорога'), ('test', 'замеры'), ('control', 'контроль и проверки'), ('home', 'возврат'))
-                          if e.get(key))
+                          if abs(e.get(key) or 0.0) >= 0.05)
         out += [f"**Цена.** Потрачено {_n(e['spent'], 1)} ед. заряда из бюджета {_n(e['budget'], 0)}"
                 f"{' (' + parts + ')' if parts else ''}; время {_n(report.get('time_s'), 0)} с.", '']
-    truth = report.get('truth')
+    truth = report.get('truth') if with_truth else None
     if truth:
         line = f"**Сверка со сценарием (роботу недоступна).** {truth['text'][0].upper() + truth['text'][1:]}"
         if truth.get('error_pct') is not None:
@@ -890,7 +908,7 @@ def to_markdown(report):
         out.append('')
     if report.get('failures'):
         out += ['## Чего не удалось', ''] + [f'- {f}' for f in report['failures']] + ['']
-    return '\n'.join(out).rstrip() + '\n'
+    return ru('\n'.join(out).rstrip()) + '\n'
 
 
 # =================================================================================================
@@ -920,6 +938,7 @@ def main():
     ap.add_argument('--rules', default='science', choices=['science', 'base'], help='base — правила без поворотов и шума')
     ap.add_argument('--check', action='store_true', help='только проверить задание и показать план')
     ap.add_argument('--json', action='store_true', help='вывести отчёт как JSON, а не текстом')
+    ap.add_argument('--truth', action='store_true', help='дописать сверку оценки со скрытой правдой сценария')
     args = ap.parse_args()
     try:
         if args.preset:
@@ -944,7 +963,8 @@ def main():
         raise SystemExit('Задание не принято:\n- ' + '\n- '.join(e.problems)) from e
     summary = run_study(spec, level, seed, rules='science' if args.rules == 'science' else None)
     report = summary['study']
-    print(json.dumps(report, ensure_ascii=False, indent=1, default=str) if args.json else report['markdown'])
+    print(json.dumps(report, ensure_ascii=False, indent=1, default=str) if args.json else
+          report.get('markdown_truth', report['markdown']) if args.truth else report['markdown'])
     if summary.get('file'):
         print(f"Запись прогона: runs/{summary['file']}  (в интерфейсе: #/run?file={summary['file']})")
 

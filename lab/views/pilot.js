@@ -596,6 +596,7 @@ export async function render(root, ctx) {
   const statusText = h('div', { class: 'pl-status__text' });
   const statusSub = h('div', { class: 'pl-status__sub' });
   const noteBox = h('div', { class: 'pl-note', role: 'status', 'aria-live': 'polite' });
+  const lagBox = h('div', { class: 'pl-lag', hidden: true });
   const sourceChip = h('span', { class: 'lb-chip lb-chip--big pl-source' });
 
   const btn = (label, cls, onclick, title) => h('button', { class: `lb-btn pl-btn ${cls || ''}`, type: 'button', onclick, title }, label);
@@ -621,7 +622,7 @@ export async function render(root, ctx) {
   const colDrive = h('div', { class: 'pl-col' },
     h('section', { class: 'lb-card pl-card pl-status' },
       h('div', { class: 'pl-status__row' }, lamp, statusText),
-      statusSub, noteBox),
+      statusSub, noteBox, lagBox),
     h('section', { class: 'lb-card pl-card' },
       h('div', { class: 'pl-card__head' }, h('h2', { class: 'pl-h', text: 'Маршрут' }), routeInfo),
       h('div', { class: 'pl-route' }, routeDots, h('div', { class: 'pl-route__edit' }, undoBtn, clearBtn)),
@@ -784,6 +785,9 @@ export async function render(root, ctx) {
       noteBox.dataset.tone = note.tone;
       noteBox.textContent = note.text;
     }
+    const lag = active && s.lag && s.lag.late > 0 ? s.lag : null;
+    lagBox.hidden = !lag;
+    if (lag) lagBox.textContent = `Компьютер перегружен: команды роботу запаздывают до ${num(lag.max, 1)} с${lag.slow ? ' — еду медленнее' : ''}`;
     fill(sourceChip, active
       ? [h('span', { class: 'lb-dot', style: { background: s.backend === 'gazebo' ? COLOR.green : COLOR.path } }),
         s.backend === 'gazebo' ? 'Gazebo' : `Быстрый симулятор ×${s.speed || 1}`,

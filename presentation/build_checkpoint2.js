@@ -83,11 +83,12 @@ const E1 = {
   n: group("E1", "adaptive", "easy").n,
 };
 // E9: стратегии поиска
-const E9_ARMS = [["adaptive", "Карта вероятностей"], ["gradient", "Подъём по сигналу"], ["fixed", "Объезд по готовому маршруту"], ["spiral", "Спираль"]];
+const E9_ARMS = [["adaptive", "Карта вероятностей"], ["gradient", "Подъём по сигналу"], ["fixed", "Фиксированный план"], ["spiral", "Спираль"]];
 const E9 = E9_ARMS.map(([arm, label]) => ({ arm, label, share: r1(mean("E9", arm, "all", "samples_share")), n: group("E9", arm, "all").n }));
 // E10: исследователь
 const E10 = {
-  ret: ["fixed", "adaptive", "scientist"].map((a) => r1(mean("E10", a, "hard", "returned"))),
+  labels: ["Исследователь", "С адаптацией", "Фиксированный план"],
+  ret: ["scientist", "adaptive", "fixed"].map((a) => r1(mean("E10", a, "hard", "returned"))),
   correct: mean("E10", "scientist", "all", "inq_correct"),
   retPair: pair("E10", "returned", "scientist", "adaptive", "hard"),
   n: group("E10", "scientist", "hard").n,
@@ -119,7 +120,7 @@ function shotCaption(file) {
 }
 const DEFAULT_STEPS = [
   ["Старт", `база, заряд ${ru(R.battery_start, 0)}; стены известны, образцы — нет`],
-  ["Поиск", "по датчику близости уточняет карту вероятностей"],
+  ["Поиск", "слушает датчик, уточняет карту вероятностей"],
   ["Сбор", `подъезжает ближе ${ru(R.collect_radius_m * 100, 0)} см и забирает образец`],
   ["Проверка гипотез", "штраф, расход, шум: причина ищется опытом"],
   ["Возврат", "считает заряд на дорогу и едет на базу"],
@@ -348,9 +349,9 @@ pres.addSection({ title: SEC_A });
     const x = X0 + i * (sw + 0.2);
     hexBadge(s, i + 1, x, TOP + 0.02, 0.44, `step-${i + 1}-badge`, C.text2);
     text(s, head, { x: x + 0.62, y: TOP, w: sw - 0.62, h: 0.48, fontSize: 15, bold: true, valign: "middle", objectName: `step-${i + 1}-head` });
-    text(s, body, { x, y: TOP + 0.55, w: sw, h: 0.5, fontSize: 12, color: C.text2, objectName: `step-${i + 1}-body` });
+    text(s, body, { x, y: TOP + 0.55, w: sw, h: 0.5, fontSize: 13, color: C.text2, objectName: `step-${i + 1}-body` });
   });
-  const y0 = 3.0;
+  const y0 = 3.02;
   if (SHOTS.length) {
     // Снимки показа: до двух рядом, во всю ширину.
     const shots = SHOTS.slice(0, 2), w = (CW - (shots.length - 1) * 0.3) / shots.length, h = 3.25;
@@ -360,21 +361,25 @@ pres.addSection({ title: SEC_A });
       text(s, shotCaption(file), { x, y: y0 + h + 0.08, w, h: 0.4, fontSize: 13, color: C.text2, align: "center", objectName: `shot-${i + 1}-caption` });
     });
   } else {
-    const fw = 2.62, fh = fw * 4.79 / 5, gap = (CW - 4 * fw) / 3;
+    const fw = 2.55, fh = fw * 4.79 / 5, gap = (CW - 4 * fw) / 3;
     const quote = (q) => {
       if (!q) return "";
-      const t = q.text.split(". Проверка")[0].replace(/(\d)\.(\d)/g, "$1,$2").replace(/-(\d)/g, "−$1");
-      return t.length > 62 ? t.slice(0, 61).replace(/\s+\S*$/, "") + "…" : t;
+      let t = q.text.split(". Проверка")[0].replace(/(\d)\.(\d)/g, "$1,$2").replace(/-(\d)/g, "−$1");
+      if (t.length > 56) {                       // длинную запись режем по концу фразы или по запятой
+        const cutAt = Math.max(t.lastIndexOf(". ", 56), t.lastIndexOf(", ", 56));
+        t = cutAt > 20 ? t.slice(0, cutAt) : t.slice(0, 55).replace(/\s+\S*$/, "") + "…";
+      }
+      return t;
     };
     st.frames.forEach((f, i) => {
       const x = X0 + i * (fw + gap);
       image(s, ASSET(f.file), { x, y: y0, w: fw, h: fh }, `frame-${i + 1}`, `Кадр прогона: ${f.label}`);
-      text(s, `${ru(f.since_start, 0)}-я секунда · заряд ${ru(f.battery, 0)} · собрано ${f.collected} из ${f.total}`,
-        { x: x - 0.1, y: y0 + fh + 0.05, w: fw + 0.2, h: 0.28, fontSize: 12, bold: true, align: "center", objectName: `frame-${i + 1}-state` });
-      text(s, `Журнал: «${quote(f.quote)}»`, { x: x - 0.1, y: y0 + fh + 0.34, w: fw + 0.2, h: 0.55, fontSize: 11, color: C.text2, align: "center", objectName: `frame-${i + 1}-quote` });
+      text(s, `${ru(f.since_start, 0)} с · заряд ${ru(f.battery, 0)} · собрано ${f.collected} из ${f.total}`,
+        { x: x - 0.15, y: y0 + fh + 0.04, w: fw + 0.3, h: 0.28, fontSize: 13, bold: true, align: "center", valign: "middle", objectName: `frame-${i + 1}-state` });
+      text(s, `Журнал: «${quote(f.quote)}»`, { x: x - 0.15, y: y0 + fh + 0.34, w: fw + 0.3, h: 0.58, fontSize: 11, color: C.text2, align: "center", objectName: `frame-${i + 1}-quote` });
     });
     text(s, "Синее — где агент ждёт образец · жёлтые кольца — где образцы на самом деле · зелёные — собраны · красное — штраф и опасная зона в памяти агента",
-      { x: X0, y: 6.5, w: CW, h: 0.3, fontSize: 11, color: C.accent5, align: "center", valign: "middle", objectName: "frames-legend" });
+      { x: X0, y: 6.52, w: CW, h: 0.28, fontSize: 11, color: C.accent5, align: "center", valign: "middle", objectName: "frames-legend" });
   }
 }
 
@@ -388,21 +393,21 @@ pres.addSection({ title: SEC_A });
     "Каждый прогон записывается, серии считаются на одинаковых сценариях, а смотреть всё можно в веб-лаборатории.",
   ]);
   // стенд
-  const sx = X0, sw = 4.35, sy = TOP, sh = 3.2;
+  const sx = X0, sw = 4.0, sy = TOP, sh = 3.2;
   card(s, sx, sy, sw, sh, "stand-card");
   text(s, "Стенд", { x: sx + 0.25, y: sy + 0.12, w: 2, h: 0.3, fontSize: 14, bold: true, color: C.accent5, objectName: "stand-label" });
   const boxes = [
     ["Генератор сценариев", "уровень и номер → расстановка", sy + 0.5, 0.72],
-    ["Судья", "скрытая правда: заряд, датчик, штрафы, очки", sy + 1.34, 0.82],
-    ["Симулятор", `Gazebo — показ · быстрый — серии, ${ru(fast, 1)} с на прогон`, sy + 2.28, 0.78],
+    ["Судья", "заряд, датчик, штрафы, очки", sy + 1.34, 0.82],
+    ["Симулятор", "Gazebo — показ, быстрый — серии", sy + 2.28, 0.78],
   ];
   boxes.forEach(([head, sub, y, h], i) => {
     card(s, sx + 0.2, y, sw - 0.4, h, `stand-${i + 1}-box`, C.background1);
     text(s, head, { x: sx + 0.38, y: y + 0.07, w: sw - 0.76, h: 0.3, fontSize: 15, bold: true, objectName: `stand-${i + 1}-head` });
-    text(s, sub, { x: sx + 0.38, y: y + 0.38, w: sw - 0.76, h: h - 0.42, fontSize: 12, color: C.text2, objectName: `stand-${i + 1}-sub` });
+    text(s, sub, { x: sx + 0.38, y: y + 0.38, w: sw - 0.76, h: h - 0.42, fontSize: 13, color: C.text2, objectName: `stand-${i + 1}-sub` });
   });
   // агент
-  const ax = 7.55, aw = X0 + CW - ax, ay = TOP, ah = 3.2;
+  const ax = 7.75, aw = X0 + CW - ax, ay = TOP, ah = 3.2;
   card(s, ax, ay, aw, ah, "agent-card", C.text1);
   text(s, "Агент", { x: ax + 0.25, y: ay + 0.12, w: 2, h: 0.3, fontSize: 14, bold: true, color: C.accent1, objectName: "agent-label" });
   const inner = [
@@ -416,7 +421,7 @@ pres.addSection({ title: SEC_A });
     const x = ax + 0.2 + (i % 2) * (bw + 0.2), y = ay + 0.5 + Math.floor(i / 2) * (bh + 0.14);
     card(s, x, y, bw, bh, `agent-${i + 1}-box`, C.text2);
     text(s, head, { x: x + 0.18, y: y + 0.1, w: bw - 0.36, h: 0.32, fontSize: 15, bold: true, color: C.background1, objectName: `agent-${i + 1}-head` });
-    text(s, sub, { x: x + 0.18, y: y + 0.45, w: bw - 0.36, h: bh - 0.5, fontSize: 12, color: C.background2, objectName: `agent-${i + 1}-sub` });
+    text(s, sub, { x: x + 0.18, y: y + 0.45, w: bw - 0.36, h: bh - 0.5, fontSize: 13, color: C.background2, objectName: `agent-${i + 1}-sub` });
   });
   // каналы
   const lx1 = sx + sw + 0.1, lx2 = ax - 0.1, lw = lx2 - lx1;
@@ -433,14 +438,14 @@ pres.addSection({ title: SEC_A });
   const by = 5.45, bh2 = 1.2, bw2 = 3.55, bgap = (CW - 3 * bw2) / 2;
   const chain = [
     ["Запись прогона", "путь, заряд, решения и гипотезы агента"],
-    ["Серии опытов", `${EXP_IDS.length} серий на одинаковых сценариях, сравнение по разностям`],
+    ["Серии опытов", `${EXP_IDS.length} серий на одинаковых сценариях; ${ru(fast, 1)} с на прогон`],
     ["Веб-лаборатория и пульт", "графики, проигрыватель прогонов, управление показом"],
   ];
   chain.forEach(([head, sub], i) => {
     const x = X0 + i * (bw2 + bgap);
     card(s, x, by, bw2, bh2, `chain-${i + 1}-box`);
     text(s, head, { x: x + 0.22, y: by + 0.12, w: bw2 - 0.44, h: 0.32, fontSize: 15, bold: true, objectName: `chain-${i + 1}-head` });
-    text(s, sub, { x: x + 0.22, y: by + 0.48, w: bw2 - 0.44, h: 0.62, fontSize: 12, color: C.text2, objectName: `chain-${i + 1}-sub` });
+    text(s, sub, { x: x + 0.22, y: by + 0.48, w: bw2 - 0.44, h: 0.62, fontSize: 13, color: C.text2, objectName: `chain-${i + 1}-sub` });
     if (i < 2) arrow(s, x + bw2 + 0.1, by + bh2 / 2, x + bw2 + bgap - 0.1, `chain-${i + 1}-arrow`);
   });
   arrowDown(s, X0 + bw2 / 2, sy + sh + 0.06, by - 0.06, "record-arrow");
@@ -449,10 +454,10 @@ pres.addSection({ title: SEC_A });
 // ---------- 5. технологии ----------
 {
   const tech = [
-    ["ROS", "ROS 2 Jazzy", "каналы сообщений между программами робота: /scan, /odom, /cmd_vel, /did/*"],
-    ["GZ", "Gazebo Sim Harmonic", "физика, колёса и лидар; мир и робот взяты из официальных пакетов"],
+    ["ROS", "ROS 2 Jazzy", "каналы сообщений между программами: /scan, /odom, /cmd_vel, /did/*"],
+    ["GZ", "Gazebo Sim Harmonic", "физика, колёса и лидар; мир и робот из официальных пакетов"],
     ["TB3", "TurtleBot3 Burger", "робот: два колеса и лидар на 360°, камеры нет"],
-    ["pixi", "pixi и RoboStack", "всё окружение ставится одной командой, одинаково на Mac и Linux"],
+    ["pixi", "pixi и RoboStack", "окружение ставится одной командой, одинаково на Mac и Linux"],
     ["Py", "Python, NumPy, SciPy", "агент, судья, быстрый симулятор и статистика опытов"],
     ["ИИ", "Языковая модель", "выбирает подцели; ответ проверяется, при сбое решает запасное правило"],
     ["Web", "Веб-лаборатория", "графики опытов, проигрыватель прогонов и пульт в браузере"],
@@ -470,7 +475,7 @@ pres.addSection({ title: SEC_A });
     card(s, x, y, w, h, `tech-${i + 1}-card`);
     hexBadge(s, badge, x + 0.22, y + 0.22, 0.66, `tech-${i + 1}-badge`, i < 4 ? C.text2 : C.accent1, badge.length > 3 ? 12 : 14);
     text(s, name, { x: x + 0.22, y: y + 1.02, w: w - 0.44, h: 0.34, fontSize: 16, bold: true, objectName: `tech-${i + 1}-name` });
-    text(s, does, { x: x + 0.22, y: y + 1.4, w: w - 0.44, h: 0.85, fontSize: 13, color: C.text2, objectName: `tech-${i + 1}-does` });
+    text(s, does, { x: x + 0.22, y: y + 1.4, w: w - 0.44, h: 0.88, fontSize: 14, color: C.text2, objectName: `tech-${i + 1}-does` });
   });
 }
 
@@ -480,13 +485,13 @@ pres.addSection({ title: SEC_A });
   const med = `${ru(GZ.agent_median_cm[0])}–${ru(GZ.agent_median_cm[1])}`;
   const s = content(SEC_A, "Логика построения карты и движения", "Карта стен известна и перепроверяется лидаром; путь выбирается по цене клеток", [
     `Карта стен дана заранее сеткой с клеткой ${ru(nav.grid_m * 100, 0)} сантиметров, и робот строит такую же сам по лидару: карты совпадают на ${pct(map.agreement)} процентов.`,
-    `Положение считается по колёсам и поправляется по лидару: скан совмещается с картой, ошибка около двух сантиметров.`,
+    "Положение считается по колёсам, это одометрия, и поправляется по лидару: скан совмещается с картой, ошибка около двух сантиметров.",
     `Путь ищет алгоритм Дейкстры по цене клеток, ближе ${ru(nav.inflate_m * 100, 0)} сантиметров к стенам робот не едет.`,
     "Поверх лежат карта вероятностей образцов и карта стоимости грунта: они меняют цену клеток прямо во время прогона.",
   ]);
   const rows = [
     ["Карта", `готовая сетка арены с клеткой ${ru(nav.grid_m * 100, 0)} см и своя карта по лидару: совпадают на ${pct(map.agreement)}%`],
-    ["Положение", `счётчик пути колёс и поправка по лидару: скан совмещается с картой, ошибка ${med} см`],
+    ["Положение", `одометрия (счёт пути по колёсам) и поправка по лидару: скан совмещается с картой, ошибка ${med} см`],
     ["Путь", `алгоритм Дейкстры по цене клеток; ближе ${ru(nav.inflate_m * 100, 0)} см к стенам робот не едет`],
     ["Ведение", `руль на точку пути в ${ru(nav.lookahead_m * 100, 0)} см впереди; скорости колёсам — 10 раз в секунду`],
   ];
@@ -535,18 +540,19 @@ pres.addSection({ title: SEC_B });
   const lx = X0, lw = 7.05, lh = BOTTOM - TOP;
   card(s, lx, TOP, lw, lh, "done-card");
   hexBadge(s, done[0].length + done[1].length, lx + 0.25, TOP + 0.22, 0.5, "done-badge", C.accent3, 15);
-  text(s, "Реализовано и проверено", { x: lx + 1.0, y: TOP + 0.22, w: 5, h: 0.5, fontSize: 18, bold: true, valign: "middle", objectName: "done-head" });
-  done.forEach((items, i) => bullets(s, items, { x: lx + 0.25 + i * 3.35, y: TOP + 0.95, w: 3.2, h: 2.95, fontSize: 13, objectName: `done-list-${i + 1}` }));
-  [[TESTS ? String(TESTS) : "есть", "автоматических проверок проходят"], [int(TOTAL_RUNS), `прогонов в ${EXP_IDS.length} сериях опытов`]].forEach(([v, label], i) => {
-    const x = lx + 0.25 + i * 3.35;
-    text(s, v, { x, y: TOP + 3.95, w: 1.45, h: 0.75, fontSize: 30, bold: true, valign: "middle", objectName: `done-stat-${i + 1}-value` });
-    text(s, label, { x: x + 1.5, y: TOP + 3.95, w: 1.7, h: 0.75, fontSize: 13, color: C.text2, valign: "middle", objectName: `done-stat-${i + 1}-label` });
-  });
+  text(s, "Реализовано и проверено", { x: lx + 1.0, y: TOP + 0.22, w: 3.9, h: 0.5, fontSize: 18, bold: true, valign: "middle", objectName: "done-head" });
+  text(s, [
+    { text: TESTS ? String(TESTS) : "есть", options: { bold: true, color: C.text1 } },
+    { text: " проверок", options: { breakLine: true } },
+    { text: int(TOTAL_RUNS), options: { bold: true, color: C.text1 } },
+    { text: " прогонов" },
+  ], { x: lx + 5.0, y: TOP + 0.14, w: lw - 5.25, h: 0.66, fontSize: 14, color: C.text2, align: "right", valign: "middle", objectName: "done-stats" });
+  done.forEach((items, i) => bullets(s, items, { x: lx + 0.25 + i * 3.35, y: TOP + 0.95, w: 3.2, h: 3.85, fontSize: 14, paraSpaceAfter: 7, objectName: `done-list-${i + 1}` }));
   const rx = lx + lw + 0.25, rw = X0 + CW - rx, h1 = 2.6, h2 = lh - h1 - 0.25;
   card(s, rx, TOP, rw, h1, "wip-card");
   hexBadge(s, wip.length, rx + 0.25, TOP + 0.2, 0.5, "wip-badge", C.accent1, 15);
   text(s, "В работе", { x: rx + 1.0, y: TOP + 0.2, w: 3, h: 0.5, fontSize: 18, bold: true, valign: "middle", objectName: "wip-head" });
-  bullets(s, wip, { x: rx + 0.25, y: TOP + 0.85, w: rw - 0.5, h: h1 - 0.95, fontSize: 13, paraSpaceAfter: 4, objectName: "wip-list" });
+  bullets(s, wip, { x: rx + 0.25, y: TOP + 0.85, w: rw - 0.5, h: h1 - 0.95, fontSize: 14, paraSpaceAfter: 3, objectName: "wip-list" });
   const y2 = TOP + h1 + 0.25;
   card(s, rx, y2, rw, h2, "open-card", C.text2);
   hexBadge(s, open.length, rx + 0.25, y2 + 0.18, 0.5, "open-badge", C.accent5, 15);
@@ -568,7 +574,7 @@ pres.addSection({ title: SEC_B });
     { name: "С адаптацией", labels: LEVELS, values: E1.adaptive },
   ], {
     x: X0, y: TOP + 0.3, w: 7.3, h: 4.15, barDir: "col", barGrouping: "clustered", chartColors: [HEX.fixed, HEX.adaptive],
-    barGapWidthPct: 90, valAxisMinVal: 0, valAxisMaxVal: 100, valAxisMajorUnit: 25, valAxisLabelFormatCode: "0",
+    barGapWidthPct: 110, barOverlapPct: -8, valAxisMinVal: 0, valAxisMaxVal: 100, valAxisMajorUnit: 25, valAxisLabelFormatCode: "0",
     dataLabelPosition: "outEnd", dataLabelFormatCode: "0.0", ...labelText, ...axisText, ...quietFrame, ...legendText,
     objectName: "e1-chart", altText: "Доля собранных образцов по уровням: фиксированный план и агент с адаптацией",
   });
@@ -599,19 +605,22 @@ pres.addSection({ title: SEC_B });
   text(s, `Опыт E9: уровни easy и medium, по ${E9[0].n} прогонов на стратегию. Спираль и подъём по сигналу — простые правила из условия.`,
     { x: X0, y: 6.2, w: lw, h: 0.6, fontSize: 11, color: C.accent5, objectName: "e9-note" });
 
-  const rx = 6.95, cw2 = 3.45;
-  text(s, "Возврат на базу, трудный уровень, %", { x: rx, y: TOP, w: cw2 + 0.2, h: 0.3, fontSize: 14, bold: true, objectName: "e10-chart-title" });
-  s.addChart(pres.charts.BAR, [{ name: "Возврат на базу, %", labels: ["Фиксированный план", "С адаптацией", "Исследователь"], values: E10.ret }], {
-    x: rx, y: TOP + 0.3, w: cw2, h: 3.95, barDir: "col", chartColors: [HEX.fixed, HEX.adaptive, HEX.scientist],
-    barGapWidthPct: 70, valAxisMinVal: 0, valAxisMaxVal: 110, valAxisHidden: true,
-    dataLabelPosition: "outEnd", dataLabelFormatCode: "0.0", ...labelText, ...axisText, catAxisLabelFontSize: 11,
+  const rx = 6.95, rw = X0 + CW - rx;
+  text(s, "Возврат на базу на трудном уровне, %", { x: rx, y: TOP, w: rw, h: 0.3, fontSize: 14, bold: true, objectName: "e10-chart-title" });
+  s.addChart(pres.charts.BAR, [{ name: "Возврат на базу, %", labels: E10.labels, values: E10.ret }], {
+    x: rx, y: TOP + 0.3, w: rw, h: 2.45, barDir: "bar", chartColors: [HEX.scientist, HEX.adaptive, HEX.fixed],
+    barGapWidthPct: 70, catAxisOrientation: "maxMin", valAxisMinVal: 0, valAxisMaxVal: 110, valAxisHidden: true,
+    dataLabelPosition: "outEnd", dataLabelFormatCode: "0.0", ...labelText, ...axisText, catAxisLabelFontSize: 13,
     valGridLine: { style: "none" }, catGridLine: { style: "none" }, showLegend: false,
-    objectName: "e10-chart", altText: "Возврат на базу на трудном уровне: фиксированный план, адаптивный агент, исследователь",
+    objectName: "e10-chart", altText: "Возврат на базу на трудном уровне: исследователь, адаптивный агент, фиксированный план",
   });
-  const tx = rx + cw2 + 0.2, tw = X0 + CW - tx;
-  statTile(s, tx, TOP + 0.3, tw, 3.2, `${pct(E10.correct)}%`, "причин названо верно: исследователь держит несколько объяснений и проверяет их опытом", "e10-tile", 34);
+  const ty = TOP + 2.9, th = 1.3;
+  card(s, rx, ty, rw, th, "e10-tile-card");
+  text(s, `${pct(E10.correct)}%`, { x: rx + 0.25, y: ty, w: 1.55, h: th, fontSize: 36, bold: true, valign: "middle", objectName: "e10-tile-value" });
+  text(s, "причин названо верно: исследователь держит несколько объяснений и проверяет их опытом",
+    { x: rx + 1.85, y: ty, w: rw - 2.05, h: th, fontSize: 14, color: C.text2, valign: "middle", objectName: "e10-tile-label" });
   text(s, `Опыт E10: усложнённые правила — у одного симптома несколько причин; по ${E10.n} прогонов. Разница в возврате с адаптивным агентом пока в пределах погрешности.`,
-    { x: rx, y: 6.2, w: X0 + CW - rx, h: 0.6, fontSize: 11, color: C.accent5, objectName: "e10-note" });
+    { x: rx, y: 6.2, w: rw, h: 0.6, fontSize: 11, color: C.accent5, objectName: "e10-note" });
 }
 
 // ---------- 10. результаты: Gazebo ----------
@@ -619,9 +628,9 @@ pres.addSection({ title: SEC_B });
   const ser = GZ.series[SERIES_LEVEL];
   const med = `${ru(GZ.agent_median_cm[0])}–${ru(GZ.agent_median_cm[1])}`;
   const before = GZ.before_fix;
-  const s = content(SEC_B, "Реальные результаты: Gazebo", "С поправкой по лидару прогоны в Gazebo повторяют быстрый симулятор", [
+  const s = content(SEC_B, "Реальные результаты: Gazebo", "С поправкой по лидару прогоны в Gazebo повторяют быстрый симулятор с точностью до одного образца", [
     "Серии считаются в быстром симуляторе, поэтому мы проверили перенос в Gazebo с настоящей физикой.",
-    `Сначала положение по колёсам уходило${before ? ` — до ${ru(before.odom_max_cm / 100, 1)} метра` : ""}. Причину нашли: первые тридцать секунд после появления в мире робот покачивается, и манёвры в это время сбивают счёт пути.`,
+    `Сначала одометрия, то есть счёт пути по колёсам, уходила${before && before.odom_max_cm >= 100 ? " больше чем на метр" : " на десятки сантиметров"}. Причину нашли: первые тридцать секунд после появления в мире робот покачивается, и манёвры в это время сбивают одометрию.`,
     `Теперь агент ждёт и сверяет положение с лидаром: ошибка около двух сантиметров, максимум ${ru(GZ.agent_max_cm)}.`,
     `Лёгкий и средний уровни совпали с быстрым симулятором полностью, на трудном собрано ${gz("hard").gazebo.samples_collected} образцов против ${gz("hard").fastsim.samples_collected}.`,
   ]);
@@ -640,22 +649,22 @@ pres.addSection({ title: SEC_B });
   card(s, X0, 4.95, lw, BOTTOM - 4.95, "gz-cause-card", C.text2);
   text(s, [
     { text: "Причина найдена. ", options: { bold: true, color: C.accent1 } },
-    { text: `Около 30 с после появления в мире робот покачивается, и манёвры сбивали счёт пути${before ? ` — до ${ru(before.odom_max_cm / 100, 1)} м` : ""}. Теперь агент ждёт до ${ru(GZ.settle_until_s || 35, 0)}-й секунды.`, options: { color: C.background1 } },
-  ], { x: X0 + 0.22, y: 4.95, w: lw - 0.44, h: BOTTOM - 4.95, fontSize: 13, valign: "middle", objectName: "gz-cause-text" });
+    { text: `Около 30 с после появления в мире робот покачивается, и манёвры в это время сбивали одометрию${before && before.odom_max_cm >= 100 ? " — больше чем на метр" : ""}. Теперь агент ждёт до ${ru(GZ.settle_until_s || 35, 0)}-й секунды.`, options: { color: C.background1 } },
+  ], { x: X0 + 0.22, y: 4.95, w: lw - 0.44, h: BOTTOM - 4.95, fontSize: 14, valign: "middle", objectName: "gz-cause-text" });
 
   const cx = X0 + lw + 0.35, cw2 = 4.75;
   text(s, `Ошибка положения робота, см (уровень ${SERIES_LEVEL})`, { x: cx, y: TOP, w: cw2, h: 0.3, fontSize: 14, bold: true, objectName: "gz-chart-title" });
   s.addChart(pres.charts.LINE, [
-    { name: "Только счётчик пути колёс", labels: ser.t.map(String), values: ser.odom_cm },
+    { name: "Только одометрия", labels: ser.t.map(String), values: ser.odom_cm },
     { name: "С поправкой по лидару", labels: ser.t.map(String), values: ser.agent_cm },
   ], {
     x: cx, y: TOP + 0.3, w: cw2, h: 3.95, chartColors: [HEX.context, HEX.adaptive], lineSize: 2.5, lineDataSymbol: "none",
     valAxisMinVal: 0, valAxisLabelFormatCode: "0", catAxisLabelFrequency: 3, catAxisMajorTickMark: "none", catAxisMinorTickMark: "none",
     showCatAxisTitle: true, catAxisTitle: "время от начала движения, с", catAxisTitleColor: HEX.muted, catAxisTitleFontSize: 12, catAxisTitleFontFace: CHART_FONT,
     ...axisText, catAxisLabelFontSize: 12, ...quietFrame, ...legendText, legendFontSize: 13,
-    objectName: "gz-chart", altText: "Ошибка положения во времени: счётчик пути уходит на десятки сантиметров, с поправкой по лидару остаётся около двух",
+    objectName: "gz-chart", altText: "Ошибка положения во времени: одометрия уходит на десятки сантиметров, с поправкой по лидару остаётся около двух",
   });
-  text(s, `Серия E8, ${runsOf("E8")} прогонов: при таком уходе возврат на базу — ${pct(E8.lidar)}% с поправкой и ${pct(E8.odom)}% без неё.`,
+  text(s, `Серия E8, ${runsOf("E8")} прогонов: при таком уходе одометрии возврат на базу — ${pct(E8.lidar)}% с поправкой и ${pct(E8.odom)}% без неё.`,
     { x: cx, y: 6.2, w: cw2, h: 0.6, fontSize: 11, color: C.accent5, objectName: "gz-note" });
 
   const tx = cx + cw2 + 0.3, tw = X0 + CW - tx, th = 1.52, tg = (BOTTOM - TOP - 3 * th) / 2;
@@ -663,11 +672,11 @@ pres.addSection({ title: SEC_B });
     const y = TOP + i * (th + tg);
     card(s, tx, y, tw, th, `gz-tile-${i + 1}-card`);
     text(s, v, { x: tx + 0.18, y: y + 0.12, w: tw - 0.36, h: 0.55, fontSize: 24, bold: true, valign: "middle", objectName: `gz-tile-${i + 1}-value` });
-    text(s, label, { x: tx + 0.18, y: y + 0.7, w: tw - 0.36, h: th - 0.78, fontSize: 12, color: C.text2, objectName: `gz-tile-${i + 1}-label` });
+    text(s, label, { x: tx + 0.18, y: y + 0.7, w: tw - 0.36, h: th - 0.78, fontSize: 13, color: C.text2, objectName: `gz-tile-${i + 1}-label` });
   };
   tile(0, `${med} см`, "ошибка положения с поправкой, медиана");
   tile(1, `${ru(GZ.agent_max_cm)} см`, "наибольшая ошибка за три прогона");
-  tile(2, `${ru(GZ.odom_max_cm, 0)} см`, "уходил счётчик пути в тех же прогонах");
+  tile(2, `${ru(GZ.odom_max_cm, 0)} см`, "уходила одометрия в тех же прогонах");
 }
 
 // ---------- 11. как использовали ИИ ----------
@@ -685,28 +694,28 @@ pres.addSection({ title: SEC_C });
     ["Второе мнение", "По сложным вопросам запрашивали второе мнение у другой модели — GPT-6 Astra."],
     ["ИИ внутри робота", LLM ? `Языковая модель GPT-6 Luna выбирает подцели: ${pct(LLM.first_ok_share)}% годных планов с первого раза — ${first} из ${LLM.requests} запросов.` : "Языковая модель выбирает подцели верхнего уровня; ответы проверяются."],
   ];
-  const w = (CW - 2 * 0.25) / 3, h = 2.3;
+  const w = (CW - 2 * 0.25) / 3, h = 2.4;
   cards.forEach(([head, body], i) => {
     const x = X0 + i * (w + 0.25);
     card(s, x, TOP, w, h, `ai-${i + 1}-card`);
     hexBadge(s, i + 1, x + 0.22, TOP + 0.2, 0.46, `ai-${i + 1}-badge`, C.accent1);
     text(s, head, { x: x + 0.95, y: TOP + 0.2, w: w - 1.15, h: 0.46, fontSize: 16, bold: true, valign: "middle", objectName: `ai-${i + 1}-head` });
-    text(s, body, { x: x + 0.22, y: TOP + 0.82, w: w - 0.44, h: h - 0.92, fontSize: 13, color: C.text2, objectName: `ai-${i + 1}-body` });
+    text(s, body, { x: x + 0.22, y: TOP + 0.82, w: w - 0.44, h: h - 0.92, fontSize: 14, color: C.text2, objectName: `ai-${i + 1}-body` });
   });
-  const y2 = TOP + h + 0.25, h2 = 1.75;
+  const y2 = TOP + h + 0.22, h2 = 1.82;
   card(s, X0, y2, CW, h2, "found-card", C.text2);
   text(s, "Ошибки, которые нашёл стенд, а не глаз", { x: X0 + 0.3, y: y2 + 0.14, w: CW - 0.6, h: 0.36, fontSize: 16, bold: true, color: C.accent1, objectName: "found-head" });
   const found = [
     ["ложные следы в карте вероятностей после сбора образца", "агент бросал работу с полной батареей: цена маршрута была смешана с зарядом на дорогу"],
-    ["робот покачивается после появления в Gazebo — счёт пути уходил на метр", "сотня ложных сборов подряд при неверной поправке датчика"],
+    ["робот покачивается после появления в Gazebo — одометрия уходила на метр", "сотня ложных сборов подряд при неверной поправке датчика"],
   ];
-  found.forEach((items, i) => bullets(s, items, { x: X0 + 0.3 + i * (CW / 2 - 0.1), y: y2 + 0.58, w: CW / 2 - 0.5, h: h2 - 0.66, fontSize: 13, color: C.background1, paraSpaceAfter: 4, objectName: `found-list-${i + 1}` }));
+  found.forEach((items, i) => bullets(s, items, { x: X0 + 0.3 + i * (CW / 2 - 0.1), y: y2 + 0.58, w: CW / 2 - 0.5, h: h2 - 0.66, fontSize: 14, color: C.background1, paraSpaceAfter: 4, objectName: `found-list-${i + 1}` }));
   text(s, [
     { text: "Качество процесса: ", options: { bold: true } },
-    { text: `${TESTS || ""} автоматических проверок, воспроизводимые серии прогонов, история в git. `.trim() + " " },
+    { text: `${TESTS ? TESTS + " автоматических проверок" : "автоматические проверки"}, воспроизводимые серии прогонов, история в git. ` },
     { text: "Навыки ассистента: ", options: { bold: true } },
     { text: "построение графиков, сборка презентаций, запуск других моделей." },
-  ], { x: X0, y: y2 + h2 + 0.12, w: CW, h: BOTTOM - (y2 + h2 + 0.12), fontSize: 13, color: C.text2, valign: "middle", objectName: "process-line" });
+  ], { x: X0, y: y2 + h2 + 0.08, w: CW, h: BOTTOM - (y2 + h2 + 0.08), fontSize: 13, color: C.text2, valign: "middle", objectName: "process-line" });
 }
 
 // ---------- текст доклада ----------

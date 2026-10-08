@@ -2,43 +2,9 @@
 
 import {
   h, fill, icon, dot, loading, errorBox, emptyBox, getTrace, getArena, getOptions, getIndex, getExperiment,
-  href, runHref, compareHref, num, REASONS, levelName, armColors, agentColor, agentLabel, byScenario, PALETTE, condName,
+  href, runHref, compareHref, levelName, armColors, agentColor, agentLabel, byScenario, PALETTE, condName,
 } from './common.js';
 import { mountPair, destroyPlayer } from './player.js';
-
-const ROWS = [
-  { label: 'Счёт', get: (r) => r.score, show: (v) => num(v, 1), better: 'higher' },
-  { label: 'Образцы', get: (r) => r.samples_collected, show: (v, r) => `${v ?? '—'} из ${r.samples_total ?? '—'}`, better: 'higher' },
-  { label: 'Вернулся на базу', get: (r) => (r.returned ? 1 : 0), show: (v, r) => (v ? 'да' : `нет: ${REASONS[r.reason] || 'не дошёл'}`), better: 'higher' },
-  { label: 'Осталось заряда', get: (r) => r.battery_left, show: (v) => num(v, 1), better: 'higher' },
-  { label: 'Штрафы', get: (r) => r.penalties ?? 0, show: (v) => num(v, 0), better: 'lower' },
-  { label: 'Время, с', get: (r) => r.time ?? r.t, show: (v) => num(v, 0), better: 'lower' },
-];
-
-function summary(results, labels, colors, files) {
-  const better = (row, i) => {
-    const a = row.get(results[i]);
-    const b = row.get(results[1 - i]);
-    if (a == null || b == null || a === b) return false;
-    return row.better === 'higher' ? a > b : a < b;
-  };
-  return h('div', { class: 'lb-tablewrap' },
-    h('table', { class: 'lb-table lb-table--roomy lb-cmp' },
-      h('caption', { class: 'lb-table__caption', text: 'Итог каждого прогона. Галочкой отмечено лучшее из двух значений.' }),
-      h('thead', null, h('tr', null,
-        h('th', { scope: 'col', text: 'Вариант' }),
-        ROWS.map((r) => h('th', { scope: 'col', class: 'lb-table__num', text: r.label })),
-        h('th', { scope: 'col' }, h('span', { class: 'lb-sr', text: 'Действия' })))),
-      h('tbody', null, results.map((res, i) => h('tr', null,
-        h('th', { scope: 'row' }, h('span', { class: 'lb-cellarm' }, dot(colors[i]), labels[i])),
-        ROWS.map((row) => {
-          const win = better(row, i);
-          return h('td', { class: `lb-table__num${win ? ' lb-cmp__win' : ''}`, title: win ? 'лучше, чем у второго варианта' : null },
-            win ? h('span', { class: 'lb-cmp__mark' }, icon('check', 13), h('span', { class: 'lb-sr', text: 'лучше: ' })) : null,
-            row.show(row.get(res), res));
-        }),
-        h('td', { class: 'lb-table__actions' }, h('a', { class: 'lb-link', href: runHref(files[i]) }, icon('play', 14), 'Отдельно')))))));
-}
 
 export async function render(root, ctx) {
   const { a, b } = ctx.query;
@@ -117,9 +83,10 @@ export async function render(root, ctx) {
         h('div', { class: 'lb-eyebrow', text: 'Сравнение двух прогонов' }),
         h('h1', { class: 'lb-h1', text: sameScenario ? `${levelName(scs[0].level)} уровень, сценарий ${scs[0].seed}` : 'Два разных сценария' }),
         h('div', { class: 'lb-runhead__arm' },
-          h('span', { class: 'lb-chip lb-chip--big' }, dot(colors[0]), labels[0]),
+          // Итоги обоих прогонов — под аренами, в таблице проигрывателя; здесь только кто с кем сравнивается.
+          h('a', { class: 'lb-chip lb-chip--big lb-chip--link', href: runHref(files[0]), title: 'Открыть этот прогон отдельно' }, dot(colors[0]), labels[0], icon('right', 14)),
           h('span', { class: 'lb-muted', text: 'и' }),
-          h('span', { class: 'lb-chip lb-chip--big' }, dot(colors[1]), labels[1]),
+          h('a', { class: 'lb-chip lb-chip--big lb-chip--link', href: runHref(files[1]), title: 'Открыть этот прогон отдельно' }, dot(colors[1]), labels[1], icon('right', 14)),
           h('a', { class: 'lb-link', href: compareHref(b, a) }, 'Поменять местами'))),
       nav.length ? h('nav', { class: 'lb-runnav', 'aria-label': 'Соседние сценарии' }, nav) : null),
     sameScenario ? null : h('div', { class: 'lb-alert', data: { tone: 'warn' } },
@@ -127,7 +94,6 @@ export async function render(root, ctx) {
       h('div', { class: 'lb-alert__body' },
         h('div', { class: 'lb-alert__title', text: 'Прогоны сняты на разных сценариях' }),
         h('div', { class: 'lb-alert__text', text: `Слева — ${levelName(scs[0].level).toLowerCase()} уровень, сценарий ${scs[0].seed}; справа — ${levelName(scs[1].level).toLowerCase()} уровень, сценарий ${scs[1].seed}. Числа напрямую сравнивать нельзя.` }))),
-    summary(traces.map((t) => t.result || {}), labels, colors, files),
     stage);
 
   const player = await mountPair(stage, { traces, labels, colors, arena });

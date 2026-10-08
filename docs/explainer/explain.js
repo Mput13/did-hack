@@ -541,6 +541,7 @@
     const walls = E.E1.runs.map(r => r.wall_s).filter(Boolean).sort((a, b) => a - b);
     F.wall = num(walls[walls.length >> 1], 1);
     F.built = D.built;
+    F.tests = D.tests || '—';
     for (const lv of ['easy', 'medium', 'hard']) for (const arm of ['fixed', 'adaptive']) for (const mt of ['samples_share', 'returned', 'battery_used', 'score']) {
       const v = stat('E1', arm, 'base', lv, mt);
       F[`e1.${mt}.${lv}.${arm}`] = v ? ((mt === 'samples_share' || mt === 'returned') ? pct(v.mean) : num(v.mean, 1)) : '—';
@@ -844,8 +845,8 @@
     const TOPIC = { energy: 'расход заряда', sensor: 'датчик образцов', fault: 'проверка после штрафа' };
     const TRUTH = { soil: 'дорогой грунт', leak: 'утечка заряда', noise: 'шум датчика', stuck: 'залипший датчик', bias: 'заниженные показания', none: 'сбоя нет', ok: 'датчик исправен' };
     const VERD = { correct: ['supported', '✓ вывод совпал с правдой'], wrong: ['refuted', '✗ вывод не совпал с правдой'], insufficient: ['inconclusive', '≈ вывода нет'], unverifiable: ['inconclusive', '· проверить нечем'] };
-    const COL = [C.fixed, C.adaptive, C.third, '#8a5cd6', C.ink3];
-    const short = t => t.split(',')[0].split(':')[0];
+    const COL = [C.fixed, C.adaptive, C.third, '#8a5cd6', '#c9a227', C.ink3];
+    const short = t => t.split(',')[0].split(':')[0].replace(/^после штрафа /, '');
     const pick = el('div', 'btns'), box = el('div', 'iq');
     root.append(pick, box);
     function scale(q, test) {
@@ -859,7 +860,7 @@
       niceTicks(lo, hi, 4).forEach(v => { S('line', { x1: x(v), x2: x(v), y1: 22, y2: H - 20, stroke: C.line, 'stroke-width': 1 }, svg); S('text', { x: x(v), y: H - 6, 'text-anchor': 'middle', class: 'ax' }, svg, num(v, Math.abs(hi - lo) < 2 ? 2 : 1)); });
       ids.forEach((id, i) => {
         const a = q.alternatives.find(z => z.id === id), p = test.predictions[id], cy = 30 + rowH * (i + 0.5), col = COL[q.alternatives.indexOf(a) % COL.length];
-        S('text', { x: left - 10, y: cy + 4, 'text-anchor': 'end', class: 'ax cat' }, svg, short(a.statement).slice(0, 38));
+        S('text', { x: left - 10, y: cy + 4, 'text-anchor': 'end', class: 'ax cat' }, svg, short(a.statement).slice(0, 42));
         S('line', { x1: x(p.mean - p.sigma), x2: x(p.mean + p.sigma), y1: cy, y2: cy, stroke: col, 'stroke-width': 4, 'stroke-linecap': 'round', opacity: 0.45 }, svg);
         const dot = S('circle', { cx: x(p.mean), cy, r: 5, fill: col, stroke: '#fff', 'stroke-width': 2 }, svg);
         tip(dot, `Если верно «${short(a.statement)}», опыт покажет около ${num(p.mean, 2)} ± ${num(p.sigma, 2)} ${test.unit}`);
@@ -932,5 +933,8 @@
     const links = [...toc.querySelectorAll('a')];
     const mark = () => { let cur = secs[0]; for (const sec of secs) if (sec.getBoundingClientRect().top <= 160) cur = sec; links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + cur.id)); };
     window.addEventListener('scroll', mark, { passive: true }); mark();
+    // explain.html?at=<id> — сразу показать нужное место (для снимков экрана)
+    const at = new URLSearchParams(location.search).get('at');
+    if (at && $(at)) { const top = $(at).getBoundingClientRect().top + window.scrollY - 70; document.documentElement.dataset.at = Math.round(top); window.scrollTo({ top, behavior: 'instant' }); }
   })();
 })();

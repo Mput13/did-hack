@@ -171,6 +171,10 @@ body[data-wide] { --lb-max: 1800px; }
 .lb-chip { display: inline-flex; align-items: center; gap: 7px; padding: 3px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 14.5px; white-space: nowrap; }
 .lb-chip--big { font-size: 17px; font-weight: 600; padding: 5px 14px; }
 .lb-chip--plain { background: var(--bg); border-color: transparent; }
+.lb-chip--link { color: var(--ink); text-decoration: none; }
+.lb-chip--link:hover { border-color: var(--ink-3); background: var(--wash); }
+.lb-chip--link:focus-visible { outline: 3px solid rgba(42, 120, 214, 0.55); outline-offset: 2px; }
+.lb-chip--link .lb-icon { color: var(--ink-3); }
 .lb-cellarm { display: inline-flex; align-items: center; gap: 8px; }
 .lb-yn { display: inline-flex; align-items: center; gap: 5px; }
 .lb-yn--yes .lb-icon { color: var(--ok-ink); }
@@ -486,7 +490,8 @@ body[data-wide] { --lb-max: 1800px; }
 
 .lb-try { display: flex; flex-direction: column; gap: 12px; }
 .lb-try__row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px 12px; }
-.lb-try__row--two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; padding-top: 12px; border-top: 1px solid var(--line); }
+.lb-try__row--two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding-top: 12px; border-top: 1px solid var(--line); }
+.lb-try__row--two > .lb-btn { grid-column: 1 / -1; justify-self: start; }
 .lb-try .lb-select { width: 100%; }
 .lb-thumbs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
 .lb-thumb { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
@@ -498,6 +503,7 @@ body[data-wide] { --lb-max: 1800px; }
 
 .lb-live__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 4px; font-size: 16px; }
 .lb-live__state { font-weight: 600; }
+.lb-live__saved { margin-top: 6px; }
 .lb-lamp { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--ink-3); }
 .lb-lamp[data-mode="on"] { background: var(--green); animation: lb-pulse 1.4s ease-out infinite; }
 .lb-lamp[data-mode="off"] { background: var(--red); }

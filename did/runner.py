@@ -42,13 +42,19 @@ def make_agent(name, config=None):
     if name in BASELINES:
         cls, cfg = BASELINES[name]
         return cls, replace(cfg, **(config or {}))
+    if name == 'study':                    # исследование по заданию пользователя (did/study.py)
+        from .study_agent import STUDY_CONFIG, StudyAgent
+        return StudyAgent, replace(STUDY_CONFIG, **(config or {}))
     return Agent, make_config(name, **(config or {}))
 
 
 def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, scenario=None,
                 scenario_args=None, config=None, rules=None, llm=None, sim=None, save=True, quiet=True,
-                knowledge=None):
-    """Прогон целиком. Возвращает сводку: идентификаторы, метрики, путь к записи."""
+                knowledge=None, study=None):
+    """Прогон целиком. Возвращает сводку: идентификаторы, метрики, путь к записи.
+
+    study — задание исследования (словарь did.study.StudySpec) для агента 'study'.
+    """
     arena = load_arena()
     if rules == 'science':                 # набор правил с несколькими причинами расхода и сбоями
         rules = dict(SCIENCE)
@@ -63,6 +69,9 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     rec = Recorder()
     planner = make_planner(cfg, llm, seed)
     extra = {'knowledge': knowledge} if getattr(cfg, 'science', False) else {}
+    if agent == 'study':                            # проверка задания и план; из сценария берётся только контур области
+        from .study import prepare
+        extra['study'] = prepare(study, arena, rules, scenario)
     if extra and cfg.planner == 'llm':              # та же модель — автор и критик расследований
         extra['roles'] = planner.client
     bot = cls(arena, cfg, n_samples=len(scenario.samples), rules=rules, planner=planner, recorder=rec, **extra)
@@ -78,6 +87,12 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     score = judge.score()
     metrics = run_metrics(score, rules, bot.journal, judge.world_log, rec.plans, rec.llm)
     science = bot.inv.export() if getattr(bot, 'inv', None) else {}
+    report = None
+    if agent == 'study':                            # отчёт исследования и сверка со скрытой правдой сценария
+        from .study import add_truth, study_metrics
+        report = add_truth(bot.study_report(judge.reason), scenario, rules, judge.world_log)
+        metrics.update(study_metrics(report))
+        science = {'study': report, **bot.export()}
     if science:
         iq = metrics['inquiries'] = score_inquiries(science['inquiries'], scenario, judge.world_log)
         metrics.update(inq_total=iq['total'], inq_tests=iq['tests'], inq_energy=iq['energy'],
@@ -90,6 +105,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     run_id = f'{experiment}/{arm}/{scenario.name}'
     summary = {'id': run_id, 'experiment': experiment, 'arm': arm, 'agent': cfg.name, 'level': scenario.level,
                'seed': scenario.seed, 'backend': 'fastsim', 'metrics': metrics, 'wall_s': round(wall, 2)}
+    if report is not None:
+        summary['study'] = report
     if save:
         trace = rec.build(run_id=run_id, experiment=experiment, arm=arm, backend='fastsim',
                           agent={'name': cfg.name, 'config': cfg.to_dict()}, scenario=scenario.to_dict(),

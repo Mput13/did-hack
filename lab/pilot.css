@@ -93,7 +93,8 @@
 .pl-sourcecard__body { display: flex; flex-direction: column; gap: 10px; }
 
 .pl-card { flex: none; }
-.pl-plan[hidden], .pl-note[hidden] { display: none; }
+.pl-plan[hidden], .pl-note[hidden], .pl-lag[hidden] { display: none; }
+.pl-lag { margin-top: 4px; padding: 7px 12px; border-radius: 8px; font-size: 15px; font-weight: 550; background: var(--warn-bg); color: var(--warn-ink); }
 
 @media (max-width: 1279px) {
   .pl-grid { grid-template-columns: auto minmax(360px, 1fr); }
