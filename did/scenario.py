@@ -12,6 +12,11 @@ from .config import BASE, FAULT_KINDS, LEVELS
 
 SOIL_MULTS = {'easy': [3.0], 'medium': [2.0, 3.0, 4.0], 'hard': [2.0, 2.5, 3.0, 4.0]}
 ALL_EVENTS = ('soil_change', 'new_hazard', 'sensor_fault')
+ROUTE_VERSION = 'route-v3'     # версия построения смены грунта «на пути»; пишется в сводку опыта
+# При нескольких сменах грунта или новых зонах события разнесены не меньше чем на столько. Это шаг округления
+# времён и такт быстрого симулятора: меньшего достаточно, чтобы события не совпали, а больший разнос сдвигает
+# заметно больше сценариев (0,5 с — 17 из 40 в условии «3 смены и 3 зоны» опыта E15 против 3 при 0,1 с).
+MIN_EVENT_GAP_S = 0.1
 
 
 @dataclass
@@ -164,18 +169,107 @@ def _hazard_on_soil(zid, arena, rng, soils, samples, base, others):
     return None
 
 
+def _route_soil(zid, arena, rng, samples, base, soils):
+    """Новая зона ×4 поперёк коридора — кратчайшего пути между двумя точками расстановки.
+
+    Коридоры: от базы к каждому образцу и от каждого образца к ближайшему соседу. Какой коридор, место
+    на нём, сторона смещения, радиус — из rng; о маршруте агента генератор ничего не знает. Зона
+    принимается, только если объезд есть и выгоден: тот, кто знает о зоне, проехал бы между концами
+    коридора мимо неё, а база и все образцы остаются связаны в обход.
+
+    Коридоры считаются по графу graph, цену которого никто не меняет; объезд — по отдельному графу detour.
+    Иначе отклонённый кандидат оставлял бы свою цену следующим коридорам (так было в route-v2).
+    """
+    from scipy import ndimage
+
+    from .nav import CostGraph
+    graph, detour = CostGraph(arena), CostGraph(arena)
+    X, Y = arena.cell_centers()
+    base = tuple(base)
+    pts = [tuple(s) for s in samples]
+    corridors = [(base, p) for p in pts]
+    for i, p in enumerate(pts):
+        near = min((q for k, q in enumerate(pts) if k != i), key=lambda q: math.dist(p, q), default=None)
+        if near is not None and (near, p) not in corridors:
+            corridors.append((p, near))
+    paths = {}
+    cells = [(graph.iy[n], graph.ix[n]) for n in (graph.node(*p) for p in [base] + pts)]
+    old = np.ones(X.shape)
+    for z in soils:
+        old = np.where(z.mask(X, Y), np.maximum(old, z.mult), old)
+    for _ in range(400):
+        k = int(rng.integers(len(corridors)))
+        a, b = corridors[k]
+        if k not in paths:
+            paths[k] = graph.plan(a, b)[0]
+        path = paths[k]
+        i = int(round(rng.uniform(0.3, 0.7) * (len(path) - 1)))
+        (ax, ay), (bx, by) = path[max(i - 4, 0)], path[min(i + 4, len(path) - 1)]
+        along = math.hypot(bx - ax, by - ay) or 1.0
+        radius = round(float(rng.uniform(0.4, 0.6)), 2)
+        shift = float(rng.choice((-1.0, 1.0)) * rng.uniform(0.0, 0.5) * radius)     # в какую сторону от пути и насколько
+        x = round(path[i][0] - shift * (by - ay) / along, 2)
+        y = round(path[i][1] + shift * (bx - ax) / along, 2)
+        if (arena.clearance(x, y) < 0.10 or math.dist((x, y), base) < radius + 0.45
+                or any(math.dist((x, y), p) < radius + 0.15 for p in pts)):
+            continue
+        zone = Zone(zid, 'circle', x, y, r=radius, mult=4.0)
+        if not any(zone.contains(px, py) for px, py in path):      # зона лежит на выбранном коридоре, а не рядом
+            continue
+        inside = zone.mask(X, Y)
+        labels, _ = ndimage.label(graph.ok & ~inside)
+        if not labels[cells[0]] or any(labels[c] != labels[cells[0]] for c in cells):
+            continue
+        detour.set_cost(np.where(inside, np.maximum(old, zone.mult), old))
+        if not any(zone.contains(px, py) for px, py in detour.plan(a, b)[0]):
+            return zone
+    raise RuntimeError('не удалось поставить зону грунта на коридор с объездом')
+
+
+def _separate_events(timeline, t0, t1):
+    """Развести события по времени не меньше чем на MIN_EVENT_GAP_S (времена — с шагом 0,1 с, как при округлении).
+
+    События перебираются в порядке создания: первое остаётся на месте, каждое следующее при совпадении или
+    слишком тесном соседстве сдвигается в ближайший свободный момент окна. Смены грунта строятся одна из
+    другой, поэтому каждая следующая смена обязана остаться позже предыдущей. Случайные числа не тратятся.
+    """
+    gap = round(MIN_EVENT_GAP_S * 10)
+    lo, hi = math.ceil(t0 * 10 - 1e-9), math.floor(t1 * 10 + 1e-9)
+    taken, last_soil = [], None
+    for e in timeline:
+        want = round(e['t'] * 10)
+        after = last_soil if e['type'] == 'soil_change' and last_soil is not None else -10 ** 9
+        for shift in sorted(range(lo - want, hi - want + 1), key=lambda d: (abs(d), d < 0)):
+            k = want + shift
+            if k > after and all(abs(k - q) >= gap for q in taken):
+                break
+        else:
+            raise RuntimeError('не удалось развести события сценария по времени: слишком тесное окно')
+        e['t'] = round(k / 10, 1)
+        taken.append(k)
+        if e['type'] == 'soil_change':
+            last_soil = k
+
+
 def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, events=None,
              event_window=(20.0, 70.0), fault_kinds=None, hazard_on_soil=False, soil_mults=None,
-             n_soil_changes=1, n_new_hazards=1):
+             n_soil_changes=1, n_new_hazards=1, soil_change_mode='random'):
     """Сценарий уровня easy/medium/hard. Параметры n_* и events переопределяют таблицу уровней.
 
     event_window — в какие секунды прогона случаются события hard: окно подобрано под длительность
     прогона (1,5–3 минуты), чтобы изменения застали агента в работе.
 
+    soil_change_mode — где случается смена грунта: 'random' — прежние сценарии (одна зона меняет цену,
+    другая переезжает в случайное место); 'route' — прежние зоны остаются, а на пути между базой и
+    образцами появляется новая зона ×4 (_route_soil). Место и момент берутся из отдельного генератора
+    случайных чисел, расстановка и остальные события совпадают со сценарием 'random'.
+
     Три параметра строят «ловушки» для проверки расследований: fault_kinds — из каких сбоев выбирать
     (запись вида 'leak+sensor_bias' даёт два сбоя разом), hazard_on_soil — ставить опасные зоны на
     дорогой грунт, soil_mults — заменить множители грунта (например, едва заметные [1.5]).
     """
+    if soil_change_mode not in ('random', 'route'):
+        raise ValueError(f'soil_change_mode: {soil_change_mode!r}, ожидается random или route')
     spec = LEVELS[level]
     rng = np.random.default_rng([seed, sum(level.encode())])
     base = BASE
@@ -237,9 +331,21 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
             timeline.append({'t': round(float(rng_extra.uniform(t_low, t_high)), 1), 'type': 'soil_change',
                              'soils': changed})
 
-    extra_hazards = []
+    if soil_change_mode == 'route' and 'soil_change' in events and n_soil_changes >= 1:
+        # Прежняя ветка выше уже взяла свои числа из rng — остальные события те же; её смены заменяются.
+        timeline = [e for e in timeline if e['type'] != 'soil_change']
+        rng_route = np.random.default_rng([seed, sum(level.encode()), 10])
+        changed = list(soils)
+        for step in range(n_soil_changes):
+            changed = changed + [_route_soil(f'R{step + 1}', arena, rng_route, samples, base, changed)]
+            t_low = t0 + 0.4 * span * step / n_soil_changes
+            t_high = t0 + 0.4 * span * (step + 1) / n_soil_changes
+            timeline.append({'t': round(float(rng_route.uniform(t_low, t_high)), 1), 'type': 'soil_change',
+                             'soils': changed})
+
+    new_zone, extra_hazards = None, []
     if 'new_hazard' in events and n_new_hazards >= 1:
-        zone = _hazard_zone(f'X{len(hazards) + 1}', arena, rng, samples, base, hazards)
+        zone = new_zone = _hazard_zone(f'X{len(hazards) + 1}', arena, rng, samples, base, hazards)
         timeline.append({'t': round(float(rng.uniform(t0 + 0.2 * span, t0 + 0.7 * span)), 1), 'type': 'new_hazard',
                          'zone': zone})
         if n_new_hazards > 1:
@@ -256,7 +362,14 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
     if 'sensor_fault' in events:
         timeline.append({'t': round(float(rng.uniform(t0 + 0.4 * span, t1)), 1), 'type': 'sensor_fault',
                          'duration': round(float(rng.uniform(25, 40)), 1), 'sigma': 0.25})
+    if rng_extra is not None:
+        # Несколько смен или зон: интервалы событий независимы и после округления времена могли совпасть.
+        # Сценарии по умолчанию не трогаются — на них посчитаны прежние серии (tests/test_generator_stable.py).
+        _separate_events(timeline, t0, t1)
     timeline.sort(key=lambda e: e['t'])
+    if rng_extra is not None:
+        times = [e['t'] for e in timeline]
+        assert all(b - a >= MIN_EVENT_GAP_S - 1e-9 for a, b in zip(times, times[1:])), times
 
     if hazard_on_soil and soils:
         # Отдельный генератор: остальная расстановка совпадает со сценарием без ловушки.
@@ -270,7 +383,9 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
     # Виды сбоев назначаются отдельным генератором случайных чисел: расстановка прежних серий не меняется.
     rng2 = np.random.default_rng([seed, sum(level.encode()), 2])
     kinds = list(fault_kinds) if fault_kinds else list(FAULT_KINDS)
-    for z in hazards + ([e['zone'] for e in timeline if e['type'] == 'new_hazard'][:1] if 'new_hazard' in events and n_new_hazards >= 1 else []):
+    # Исходная новая зона берётся по сохранённой ссылке, а не «первой по времени»: дополнительная зона может
+    # появиться раньше неё. Дополнительным зонам сбой назначается ниже, из их собственного генератора, один раз.
+    for z in hazards + ([new_zone] if new_zone is not None else []):
         z.fault = str(rng2.choice(kinds))
         z.fault_s = round(float(rng2.uniform(20, 30)), 1)
     for e in timeline:

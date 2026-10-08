@@ -68,7 +68,7 @@ def test_unknown_strategy_is_rejected():
 def test_first_request_is_the_same_as_single():
     """Автор и первый голос спрашивают дословно то же, что single: при кэше это один и тот же ответ."""
     state = make_state()
-    single = build_messages({'mission': MISSION, **state})
+    single = build_messages({**state, 'mission': MISSION})       # как собирает запрос LLMPlanner
     for strategy in ('critic', 'vote'):
         script = Script(plan_json(C1), {'verdict': 'accept', 'issues': [], 'advice': ''}, plan_json(C1))
         planner(script, strategy).plan(state)
