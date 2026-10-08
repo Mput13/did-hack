@@ -568,6 +568,7 @@
     if (E.E6) for (const a of ['llm', 'llm_faulty']) { const rs = E.E6.runs.filter(r => r.arm === a); const calls = rs.reduce((n, r) => n + (r.llm_calls || 0), 0), bad = rs.reduce((n, r) => n + (r.llm_failed || 0), 0); const fb = rs.reduce((n, r) => n + ((r.plans && r.plans.fallback) || 0), 0), pl = rs.reduce((n, r) => n + Object.values(r.plans || {}).reduce((x, y) => x + y, 0), 0); F[`e6.${a}.calls`] = num(calls / (rs.length || 1), 0); F[`e6.${a}.bad`] = pct(calls ? bad / calls : 0); F[`e6.${a}.fb`] = pct(pl ? fb / pl : 0); F[`e6.${a}.n`] = rs.length; }
   })();
   document.querySelectorAll('[data-f]').forEach(n => { n.textContent = F[n.dataset.f] != null ? F[n.dataset.f] : '—'; });
+  document.querySelectorAll('img[data-shot]').forEach(n => { const src = (D.shots || {})[n.dataset.shot]; if (src) n.src = src; else n.closest('figure').style.display = 'none'; });
 
   /* ---------------------------------------------- рисунок 1: правда и взгляд робота */
 

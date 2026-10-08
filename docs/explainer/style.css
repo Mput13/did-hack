@@ -215,3 +215,12 @@ nav#toc span.part { display: block; font-size: 11px; font-weight: 700; letter-sp
 .tick-mind span { display: block; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
 table.plain td.group { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); background: #fafbfb; }
 .fig > canvas#fig-lidar, .fig > canvas#fig-bayes { max-width: 880px; }
+
+/* снимки окон */
+.shot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+@media (max-width: 860px) { .shot-grid { grid-template-columns: 1fr; } }
+figure.shot { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+figure.shot.wide { margin: 16px 0; }
+figure.shot img { width: 100%; height: auto; display: block; border-radius: 6px; border: 1px solid var(--line); }
+figure.shot figcaption { font-size: 14.5px; color: var(--ink-2); line-height: 1.45; margin-top: 10px; }
+figure.shot figcaption b { color: var(--ink); }

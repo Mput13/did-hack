@@ -183,6 +183,13 @@ def inquiry_accuracy(exp='E10', arm='scientist', level='hard'):
             'wrong': sum(r['wrong'] for r in rows.values())} if runs else None
 
 
+def shots():
+    """Снимки окон (docs/explainer/shots/*.jpg) — внутрь страницы, чтобы она оставалась одним файлом."""
+    import base64
+    return {p.stem: 'data:image/jpeg;base64,' + base64.b64encode(p.read_bytes()).decode('ascii')
+            for p in sorted((SRC / 'shots').glob('*.jpg'))}
+
+
 def code_size():
     """Сколько строк в проекте: по файлам и всего (Python и JavaScript), без чужого и сгенерированного."""
     def lines(path):
@@ -246,6 +253,7 @@ def main():
         'inq_accuracy': inquiry_accuracy(),
         'traps': trap_table(),
         'code': code_size(),
+        'shots': shots(),
         'kb': _json(RUNS / '_knowledge' / 'kb.json'),
         'llm_real': {p.name.removesuffix('.summary.json'): {k: v for k, v in _json(p).items() if k not in ('runs',)}
                      for p in sorted((RUNS / 'llm_real').glob('*.summary.json'))},
