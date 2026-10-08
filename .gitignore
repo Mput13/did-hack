@@ -8,11 +8,13 @@ __pycache__/
 lab/explain.html
 node_modules/
 # Результаты прогонов пересчитываются командой `pixi run exp all`. В репозитории лежит только то, что
-# быстро не пересчитать: сверка с Gazebo (E7), прогон двух роботов в Gazebo (M1gz) и проверка на настоящих языковых моделях.
+# быстро не пересчитать: сверка с Gazebo (E7), прогон двух роботов в Gazebo (M1gz), запасные записи показа из Gazebo (F1demo)
+# и проверка на настоящих языковых моделях.
 runs/*
 !runs/E7/
 !runs/llm_real/
 !runs/M1gz/
+!runs/F1demo/
 ws/build/
 ws/install/
 ws/log/

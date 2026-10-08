@@ -91,6 +91,22 @@ def test_mission_runs_from_base_with_fresh_judge(arena):
     assert res['ok'] and pilot.mission is None and pilot.mapper.scans == 0
 
 
+@pytest.mark.parametrize('agent', ['adaptive_v2', 'scientist_v2'])
+def test_mission_with_fault_waiting_agents(arena, agent):
+    """Агенты с пережиданием сбоя датчика запускаются с пульта; умолчание и прежние три агента — на своих местах."""
+    world, pilot = _pilot(arena, 'hard', 1)
+    _run(world, pilot, lambda: True)
+    ids = [a['id'] for a in pilot.state()['agents']]
+    assert ids[:3] == ['adaptive', 'scientist', 'fixed'] and agent in ids
+    assert pilot.command({'cmd': 'mission', 'agent': agent})['ok']
+    assert pilot.mode == 'mission' and 'пережидает сбой датчика' in pilot.mission['label']
+    assert pilot.bot.cfg.name == agent and pilot.bot.cfg.fault_wait
+    _run(world, pilot, lambda: pilot.mode == 'idle', limit=12000)
+    m = pilot.state()['mission']
+    assert m['state'] == 'finished' and m['result']['returned']
+    assert m['trace_file'] == f'pilot/{agent}/hard-1.json.gz'
+
+
 def test_hub_reports_clear_errors():
     hub = PilotHub()
     hub.gazebo_alive = lambda: False
