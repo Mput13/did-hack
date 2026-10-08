@@ -23,6 +23,8 @@ SPIN_RAD = 1.5         # опыт «развернуться на месте»
 BATTERY_NOISE = 0.03   # шум разности двух показаний батареи (уточняется на старте)
 FAULT_S = 25.0         # сколько, по умолчанию, длится сбой (уточняется памятью между прогонами)
 ONSET_S = 5.0          # сколько секунд после штрафа сравниваются две версии карты образцов
+PENALTY_SKIP_S = 0.6   # сколько секунд после штрафа ждать разовую потерю заряда: показание может отстать от события
+SOIL_MAX = 7.0         # самый дорогой грунт, какой агент допускает (то же ограничение, что у оценок для карты)
 BIAS = 0.2             # предполагаемое занижение показаний при сбое
 # Перевес версии «занижает» над версией «исправен» (логарифм отношения правдоподобий) за ONSET_S секунд:
 # чего ждать при каждом состоянии датчика. Измерено на отладочных сценариях 1–40 (tools/onset_calibration.py).
@@ -51,6 +53,7 @@ class Investigator:
         self.reserve_until = (0.0, -1e9)
         self.durations = []            # длительности закончившихся сбоев: [(вид, секунды)]
         self._win = None
+        self._tick = None              # последнее показание батареи и путь после него (см. _penalty_loss)
         self._susp = []                # подряд идущие окна, которых модель не ждала
         self._cusum = 0.0
         self._checkup_at = None        # когда провести проверку после штрафа
@@ -81,6 +84,7 @@ class Investigator:
         if self._trail_xy is None or math.hypot(obs.x - self._trail_xy[0], obs.y - self._trail_xy[1]) >= 0.06:
             self._trail_xy = (obs.x, obs.y)
             a._trail_point(obs.x, obs.y, obs.t)
+        self._penalty_loss(obs)
         if self._win is None or self.run is not None:
             self._open(obs)            # во время опыта окно не копится: у опыта свой замер
             return
@@ -92,6 +96,31 @@ class Investigator:
         if w['ds'] >= WINDOW_M or (dt >= STILL_S and w['ds'] < 0.03) or dt >= 2.0:
             self._window(w, dt, obs)
             self._open(obs)
+
+    def _penalty_loss(self, obs):
+        """Разовая потеря заряда при штрафе в опасной зоне — не расход на путь: её нужно убрать из окна.
+
+        Судья отнимает заряд одним скачком и сообщает о штрафе событием. Сразу после события скачок показания
+        батареи, которого не объяснить даже самым дорогим грунтом, считается этой потерей и вычитается из
+        начального заряда окна. Иначе он уйдёт в тревогу о расходе, в карту грунта и в подбор модели.
+        Размер потери агенту знать не нужно; если скачка нет (правила без потери заряда), ничего не меняется.
+        """
+        k = self._tick
+        if k is None:
+            self._tick = {'t': obs.t, 'x': obs.x, 'y': obs.y, 'th': obs.th, 'b': obs.battery, 'ds': 0.0, 'dth': 0.0}
+            return
+        k['ds'] += math.hypot(obs.x - k['x'], obs.y - k['y'])
+        k['dth'] += abs(_wrap(obs.th - k['th']))
+        k['x'], k['y'], k['th'] = obs.x, obs.y, obs.th
+        if obs.battery == k['b']:
+            return                     # показание батареи не обновилось: путь копится до следующего показания
+        dt, drop = obs.t - k['t'], k['b'] - obs.battery
+        if self._win is not None and obs.t <= self._penalty_t + PENALTY_SKIP_S:
+            n = self.a.collected
+            most = self.model.predict(k['ds'], k['dth'], dt, n, mult=SOIL_MAX)[0] + self._leak_rate(obs.t) * dt
+            if drop > most + 5 * BATTERY_NOISE:
+                self._win['b0'] -= drop - self.model.predict(k['ds'], k['dth'], dt, n)[0]
+        k.update(t=obs.t, b=obs.battery, ds=0.0, dth=0.0)
 
     def _open(self, obs):
         self._win = {'x0': obs.x, 'y0': obs.y, 'x': obs.x, 'y': obs.y, 'th': obs.th, 't0': obs.t, 'b0': obs.battery,
@@ -550,7 +579,7 @@ class Investigator:
 
     def on_penalty(self, obs):
         """Штраф в опасной зоне: идущий опыт прерывается, а после выезда из зоны стоит проверить, не начался ли сбой."""
-        self._penalty_t = obs.t
+        self._penalty_t = obs.t             # с этого момента observe ждёт разовую потерю заряда (_penalty_loss)
         self._checkup_at = obs.t + 4.5
         if self.run is not None:
             self.run = None
