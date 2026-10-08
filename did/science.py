@@ -166,8 +166,8 @@ class Inquiry:
         if best is None:
             useful = [x for x in over if blind or x['gain_bits'] >= self.min_gain]
             self.stop = 'no_tests' if not left else 'budget' if useful else 'no_gain'
-        self.steps.append({'options': [{'id': x.id, 'gain_bits': x.gain_bits, 'cost': round(x.cost, 3)}
-                                       for x in options],
+        self.steps.append({'options': [{'id': x.id, 'gain_bits': x.gain_bits, 'cost': round(x.cost, 3),
+                                        'kind': x.action.get('kind')} for x in options],
                            'over_budget': over, 'chosen': best.id if best else None,
                            'posterior': {k: round(v, 3) for k, v in self.posterior.items()}})
         return best

@@ -11,7 +11,8 @@
   закрытое расследование — есть вывод; не закрытое (прогон кончился раньше) считается отдельно;
   с опытом — на расследование ушёл хотя бы один манёвр (пауза, проезд, разворот); остальные — мгновенные:
     сверка у взятого образца, вывод по исключению, расследование датчика, делившее паузу с проверкой батареи;
-  с выбором — хотя бы на одном шаге допустимых опытов было два или больше;
+  с выбором — хотя бы на одном шаге было два или больше допустимых опыта с разными манёврами (два замера
+    одной и той же паузы выбором не считаются: пауза даёт оба сразу, какой бы из них ни был назван);
   правда есть — сверка нашла хотя бы одну настоящую причину; расследования расхода, в которых нет ни утечки,
     ни дорогого грунта, сверить нечем, они идут отдельной строкой и в доли верных не входят;
   верный вывод — причина названа и она настоящая (в том числе одна из двух настоящих).
@@ -29,6 +30,12 @@ from did.runner import RUNS
 
 RUN_METRICS = ('score', 'samples_share', 'returned', 'battery_used')
 RULES = ('gain', 'bits', 'cheapest', 'fixed', 'worst')
+KIND = {'rest': 'pause', 'listen_std': 'pause', 'listen_shift': 'pause', 'straight': 'straight', 'spin': 'spin'}
+
+
+def _kinds(step):
+    """Сколько разных манёвров среди допустимых опытов шага."""
+    return len({x.get('kind') or KIND.get(x['id'], x['id']) for x in step['options']})
 
 
 def load(exp):
@@ -51,7 +58,7 @@ def load(exp):
                 'time': (q['t_close'] - q['t_open']) if closed else None,
                 'verdict': q.get('verdict'), 'truth': q.get('truth'), 'stop': c['stop'] or 'instant',
                 'best': (q.get('conclusion') or {}).get('best'),
-                'choice': any(len(x['options']) >= 2 for x in c['steps']), 'steps': c['steps'],
+                'choice': any(_kinds(x) >= 2 for x in c['steps']), 'steps': c['steps'],
                 'first': steps[0]['chosen'] if steps else None,
                 'order': [x['id'] for x in sorted((x for x in q['tests'] if x.get('measured')),
                                                   key=lambda x: x['measured']['t'])],
@@ -94,7 +101,7 @@ STATS = {
     # id: (подпись, функция прогона → (числитель, знаменатель))
     'inq_per_run': ('закрытых расследований на прогон', per_run(lambda r: len(list(_sel(r))))),
     'exp_per_run': ('из них с опытом, на прогон', per_run(lambda r: len(list(_sel(r, exp=True))))),
-    'choice_per_run': ('из них с выбором (≥2 допустимых опыта), на прогон',
+    'choice_per_run': ('из них с выбором (≥2 допустимых манёвра), на прогон',
                        per_run(lambda r: len(list(_sel(r, choice=True))))),
     'energy_per_run': ('заряда на опыты за прогон, ед.', per_run(lambda r: sum(q['energy'] for q in _sel(r)))),
     'maneuvers': ('опытов на расследование с опытом', ratio(lambda q: q['maneuvers'], exp=True)),
@@ -106,6 +113,9 @@ STATS = {
     'correct': ('верных выводов, доля закрытых расследований с правдой', ratio(CORRECT, truth=True)),
     'wrong': ('ошибочных выводов, та же доля', ratio(lambda q: q['verdict'] == 'wrong', truth=True)),
     'insufficient': ('«данных недостаточно», та же доля', ratio(lambda q: q['verdict'] == 'insufficient', truth=True)),
+    'named_correct': ('верных среди названных причин (без «данных недостаточно»), расследования с правдой',
+                      lambda run: (sum(CORRECT(q) for q in _sel(run, truth=True) if q['verdict'] != 'insufficient'),
+                                   sum(1 for q in _sel(run, truth=True) if q['verdict'] != 'insufficient'))),
     'correct_exp': ('верных выводов, доля расследований с опытом и с правдой', ratio(CORRECT, truth=True, exp=True)),
     'insufficient_exp': ('«данных недостаточно», та же доля',
                          ratio(lambda q: q['verdict'] == 'insufficient', truth=True, exp=True)),
@@ -194,8 +204,8 @@ def structure(runs):
                     continue
                 steps += 1
                 n = len(s['options'])
-                n_opts[n] += 1
-                by_topic.setdefault(q['topic'], Counter())[n] += 1
+                n_opts[_kinds(s)] += 1
+                by_topic.setdefault(q['topic'], Counter())[_kinds(s)] += 1
                 sets['+'.join(x['id'] for x in s['options'])] += 1
                 if i == 0:
                     first[s['chosen']] += 1
@@ -203,8 +213,8 @@ def structure(runs):
                 for rule in RULES:
                     agree[rule] += _rule_pick(rule, s['options']) == ref
                 agree['random'] += 1.0 / n
-    return {'choice_steps': steps, 'options_per_step': dict(sorted(n_opts.items())),
-            'options_per_step_by_topic': {k: dict(sorted(v.items())) for k, v in by_topic.items()},
+    return {'choice_steps': steps, 'maneuvers_per_step': dict(sorted(n_opts.items())),
+            'maneuvers_per_step_by_topic': {k: dict(sorted(v.items())) for k, v in by_topic.items()},
             'option_sets': dict(sets.most_common()), 'first_choice': dict(first.most_common()),
             'same_as_gain': {k: round(v / steps, 4) if steps else None for k, v in agree.items()},
             'stops': dict(stops.most_common()), 'not_closed': no_closed,
@@ -290,10 +300,11 @@ def show(out, ref='random'):
             print(f'{k:<18}' + '  '.join(row))
         for a in arms:
             st = block['arms'][a]['structure']
-            print(f'[{a}] шагов выбора {st["choice_steps"]}, допустимых на шаг {st["options_per_step"]}, '
+            print(f'[{a}] шагов выбора {st["choice_steps"]}, разных манёвров на шаг {st["maneuvers_per_step"]}, '
                   f'первый опыт {st["first_choice"]}, остановки {st["stops"]}')
         st = block['arms']['gain']['structure']
         print('gain: наборы допустимых', st['option_sets'])
+        print('gain: манёвров на шаг по темам', st['maneuvers_per_step_by_topic'])
         print('gain: правило выбрало бы тот же опыт', st['same_as_gain'])
         print('gain: виды расследований', st['kinds'])
         print('gain: исходы', json.dumps(block['arms']['gain']['verdicts'], ensure_ascii=False))

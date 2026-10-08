@@ -1,4 +1,4 @@
-title: Чего стоит выбор опыта по ожидаемой пользе — отладка на сценариях 1–80
+title: Чего стоит выбор опыта по ожидаемой пользе — отладка на сценариях 1–40
 kind: science
 question: >-
   Помогает ли исследователю именно выбор опыта по ожидаемой пользе на единицу заряда, или любой допустимый
@@ -27,7 +27,7 @@ arms:
   - {id: worst, label: Наименее различающий, agent: scientist, config: {inquiry_choice: worst}}
   - {id: blind, label: Случайный без расчёта пользы, agent: scientist, config: {inquiry_choice: blind}}
 levels: [medium, hard]
-seeds: 80
+seeds: 40
 seed_start: 1
 conditions:
   - id: base
