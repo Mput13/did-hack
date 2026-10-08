@@ -845,7 +845,7 @@ def make_client(kind='mock', **opts):
     if kind == 'mock':
         from .llm_mock import MockResponder
         return LocalClient(MockResponder(seed=opts.get('seed', 0), faults=opts.get('faults'),
-                                         script=opts.get('script')))
+                                         script=opts.get('script'), temperament=opts.get('temperament')))
     if kind == 'codex':
         from .llm_codex import CodexCliClient
         return CodexCliClient(**opts)

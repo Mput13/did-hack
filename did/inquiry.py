@@ -54,6 +54,7 @@ class Investigator:
         self.durations = []            # длительности закончившихся сбоев: [(вид, секунды)]
         self._win = None
         self._held = []                # закрытые окна, которые ждут решения по своим отрезкам (did/penalty.py)
+        self._closed = False           # прогон закончен: странности только записываются, расследований больше нет
         # Разовая потеря заряда при штрафе — не расход на путь (did/penalty.py). Её размер берётся из правил,
         # в которые верит агент; расход на самом дорогом грунте — из модели расхода.
         self.penalty = PenaltyLedger(r.hazard_battery_hit, lambda ds, dth, dt, t: self.model.predict(
@@ -122,10 +123,21 @@ class Investigator:
                 self._window(w, obs)
 
     def finish(self, obs):
-        """Прогон закончен: всё, что ждало решения о потере заряда, досчитывается по тому, что известно."""
-        if self.penalty.pending or self._held:
-            self.penalty.flush(obs.t)
-            self._release(obs)
+        """Прогон закончен: всё, что ждало решения о потере заряда, досчитывается по тому, что известно.
+
+        obs — последнее наблюдение, обычным путём оно не разбиралось: его события штрафа и показание батареи
+        сначала идут в учёт штрафов. Новых расследований после конца нет (см. _window): ни опытов, ни обращений
+        к языковой модели. Повторные вызовы ничего не делают.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        for ev in obs.events:
+            if ev.get('type') == 'hazard_hit':
+                self.penalty.event(obs.t)
+        self.penalty.reading(obs, None, dth=abs(_wrap(obs.th - self._th)) if self._th is not None else 0.0)
+        self.penalty.flush(obs.t)
+        self._release(obs)
 
     def _open(self, obs):
         self._win = {'x0': obs.x, 'y0': obs.y, 'x': obs.x, 'y': obs.y, 'th': obs.th, 't0': obs.t, 'b0': obs.battery,
@@ -164,7 +176,13 @@ class Investigator:
             strong = sum(1 for q in self._susp[-2:] if (q['spent'] - q['mean']) > 0) >= 2 and z > 2.5
             if (strong and len(self._susp) >= 2) or z > 8.0 or self._cusum >= 5.0:
                 self._cusum = 0.0
-                self._open_energy(obs)
+                if self._closed:
+                    text = self._anomaly(self._susp)['text']
+                    self._susp = []
+                    a.journal.add(obs.t, 'inquiry', f'Странность: {text}. Замечено в конце прогона, проверить '
+                                  'не успел: расследование не открываю', tag='late_anomaly')
+                else:
+                    self._open_energy(obs)
                 return
         elif self._cusum == 0.0:
             self._susp.clear()
@@ -265,15 +283,23 @@ class Investigator:
                                     predictions=preds(turn=(turn, 0.3 * turn + 0.03), soil=(per_rad, 0.05),
                                                       leak=(per_rad + rate, 0.35 * rate + 0.04)),
                                     action={'kind': 'spin'}, sigma=BATTERY_NOISE / SPIN_RAD))
-        if moving:
+        self._start(Inquiry(self._qid(), obs.t, 'energy', self._anomaly(S), alts, tests,
+                            energy_budget=self._budget(obs)),
+                    obs, held=list(S), est={'rate': rate, 'ratio': ratio, 'turn': turn, 'known_normal': known_normal})
+
+    @staticmethod
+    def _anomaly(S):
+        """Странность словами и числами: сколько ушло на подозрительных окнах и сколько ждала модель."""
+        tot = lambda k: sum(s[k] for s in S)      # noqa: E731
+        ds, dt, last = tot('ds'), tot('dt'), S[-1]
+        if ds > 0.03:
             text = f'расход {tot("spent") / ds:.1f} ед/м при прогнозе {tot("mean") / ds:.1f}'
             anomaly = {'observed': round(tot('spent') / ds, 2), 'expected': round(tot('mean') / ds, 2), 'unit': 'ед/м'}
         else:
             text = f'на месте уходит {tot("spent") / dt:.2f} ед/с при прогнозе {tot("mean") / dt:.2f}'
             anomaly = {'observed': round(tot('spent') / dt, 3), 'expected': round(tot('mean') / dt, 3), 'unit': 'ед/с'}
         anomaly.update(text=text, x=round(last['x'], 2), y=round(last['y'], 2))
-        self._start(Inquiry(self._qid(), obs.t, 'energy', anomaly, alts, tests, energy_budget=self._budget(obs)),
-                    obs, held=list(S), est={'rate': rate, 'ratio': ratio, 'turn': turn, 'known_normal': known_normal})
+        return anomaly
 
     def _budget(self, obs):
         a = self.a

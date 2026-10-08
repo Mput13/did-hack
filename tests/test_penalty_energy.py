@@ -194,7 +194,9 @@ def test_end_of_run_settles_what_was_waiting():
                          battery=50.0, sensor=None, scan=None, events=[], done=True), IO())
     assert bot.inv._held == [] and not bot.inv.penalty.pending
     assert bot.inv.penalty.early == 1                          # решено до срока — и это отмечено
-    assert [q.anomaly['text'] for q in _energy(bot)] == ['расход 10.0 ед/м при прогнозе 2.6']
+    # Странность записана, но расследование после конца прогона не открывается (правка вдогонку, находка 4).
+    assert bot.inv.inquiries == []
+    assert ['расход 10.0 ед/м при прогнозе 2.6' in e['text'] for e in _late(bot)] == [True]
 
 
 def test_jump_that_does_not_fit_does_not_take_the_event():
@@ -272,6 +274,199 @@ def test_hard_1006_penalty_does_not_open_soil_inquiry():
     assert s['metrics']['hyp_soil_error'] < 1.0
 
 
+# --- правка вдогонку (V2): конец прогона и длинные накопленные показания --------------------------------------
+
+class _IO:
+    def command(self, v, w):
+        pass
+
+
+def _late(bot):
+    return [e for e in bot.journal.entries if (e.get('data') or {}).get('tag') == 'late_anomaly']
+
+
+def _end(bot, t, events=()):
+    """Последнее наблюдение прогона (done): робот там же, где был, батарея чуть ниже последнего показания."""
+    k = bot.inv.penalty._tick
+    bot.tick(Observation(t=t, x=k['x'], y=k['y'], th=bot.inv._th, v=0.0, w=0.0, battery=k['b'] - 0.04, sensor=None,
+                         scan=None, events=[{'type': e, 't': t, 'x': k['x'], 'y': k['y']} for e in events],
+                         done=True), _IO())
+
+
+def test_penalty_event_in_the_last_observation_is_counted():
+    """Находка 1: показание со штрафом уже пришло, событие приходит последним наблюдением прогона (done).
+    Досчёт обязан его увидеть. Прежде: hit=0 и расследование «расход 24,8 ед/м при прогнозе 2,6»."""
+    bot, _, _ = _drive(3.0, hit_step=43, lag=-1, steps=43)
+    assert bot.inv.penalty.stats == {'hit': 0, 'bad': 0, 'lost': 0} and bot.inv.penalty.pending
+    _end(bot, 4.3, events=['hazard_hit'])
+    assert bot.inv.penalty.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+    assert bot.inv.inquiries == [] and _late(bot) == [] and bot.inv._held == []
+    usual, _, _ = _drive(3.0, hit_step=43, lag=-1, steps=60)       # то же наблюдение обычным путём
+    assert usual.inv.penalty.stats == bot.inv.penalty.stats and usual.inv.inquiries == []
+
+
+def test_penalty_reading_in_the_last_observation_is_counted():
+    """Находка 1, обратный порядок: событие уже пришло, показание со штрафом — в последнем наблюдении."""
+    bot, _, _ = _drive(3.0, hit_step=42, lag=1, steps=43)
+    k = bot.inv.penalty._tick
+    bot.tick(Observation(t=4.3, x=k['x'], y=k['y'], th=bot.inv._th, v=0.0, w=0.0, battery=k['b'] - 3.04, sensor=None,
+                         scan=None, events=[], done=True), _IO())
+    assert bot.inv.penalty.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+    assert bot.inv.inquiries == [] and _late(bot) == []
+
+
+def _ledger(hit=3.0):
+    from did.penalty import PenaltyLedger
+    led = PenaltyLedger(hit, lambda ds, dth, dt, t: 7.0 * 2.6 * ds + 0.01 * dt)
+    at = lambda t, x, b: Observation(t=t, x=x, y=0.0, th=0.0, v=0.15, w=0.0, battery=b, sensor=None, scan=None)  # noqa: E731
+    return led, at
+
+
+def _long_reading(drop, events, late=()):
+    """Показание батареи не обновлялось 1,4 с (0,21 м пути), потом пришло одним числом; дальше — обычная езда.
+    events — события штрафа до показания, late — после него. Возвращает учёт и окно этого показания."""
+    led, at = _ledger()
+    win, b = {'b0': 60.0}, 60.0 - drop
+    led.reading(at(0.0, 0.0, 60.0), win)
+    for e in events:
+        led.event(e)
+    led.reading(at(1.4, 0.21, b), win)
+    for k in range(15, 33):
+        t = k / 10
+        for e in late:
+            if abs(e - t) < 1e-9:
+                led.event(t)
+        b -= 0.04
+        led.reading(at(t, 0.015 * k, b), None)
+    return led, win
+
+
+def test_two_penalties_in_a_long_reading_are_not_taken_for_one():
+    """Находка 2: за 1,4 с накоплены расход 0,56 и два штрафа. Падение 6,56 сходится и с одним штрафом
+    (остаток 3,56 меньше расхода на самом дорогом грунте), и с двумя. Решает число событий в пределах срока.
+    Прежде брался один штраф: hit=1, lost=1, а 3 единицы штрафа становились расходом."""
+    led, win = _long_reading(6.56, (0.9, 1.0))
+    assert win == {'b0': 54.0} and led.stats == {'hit': 2, 'bad': 0, 'lost': 0} and not led.pending
+
+
+@pytest.mark.parametrize('drop,events,late,took,bad', [
+    (6.56, (0.9,), (), 1, False),           # событие одно — штраф один, остальное расход (дорогой грунт)
+    (6.56, (0.9,), (1.9,), 2, False),       # второе событие пришло после показания, но в пределах срока
+    (6.56, (0.5, 0.9, 1.0), (), 0, True),   # событий больше, чем штрафов, с которыми сходится падение
+    (3.56, (), (), 0, False),               # падение сходится с одним штрафом, но событий нет: это расход
+    (3.56, (1.0,), (), 1, False),
+    (3.56, (), (1.8,), 1, False),           # событие после показания: прежде отрезок решался сразу как расход
+    (3.56, (0.9, 1.0), (), 0, True),
+], ids=['one_of_two', 'second_comes_later', 'three_events', 'no_event', 'one_event', 'event_later', 'too_many'])
+def test_long_reading_is_decided_by_the_number_of_events(drop, events, late, took, bad):
+    """Находка 2: падение сходится с разным числом штрафов — берётся столько, сколько событий пришло к сроку;
+    если это число с падением не сходится, отрезок испорчен и ничего не вычитается."""
+    led, win = _long_reading(drop, events, late)
+    assert win.get('b0') == 60.0 - 3.0 * took and bool(win.get('bad')) == bad
+    assert led.stats['hit'] == took and not led.pending and led._events == []
+
+
+def test_long_reading_does_not_take_the_event_of_the_next_penalty():
+    """Находка 2, оборотная сторона: длинное показание без штрафа (расход 3,3 на дорогом грунте), сразу за ним —
+    обычное показание со штрафом и его событие. Чьё событие, по числам не понять: длинный отрезок испорчен,
+    но чужое событие не забирает; штраф вычтен из своего окна."""
+    led, at = _ledger()
+    long, short = {'b0': 60.0}, {'b0': 56.7}
+    led.reading(at(0.0, 0.0, 60.0), long)
+    led.reading(at(1.4, 0.21, 56.7), long)
+    led.event(1.5)
+    led.reading(at(1.5, 0.225, 56.7 - 3.04), short)
+    b = 56.7 - 3.04
+    for k in range(16, 30):
+        b -= 0.04
+        led.reading(at(k / 10, 0.015 * k, b), None)
+    assert short == {'b0': 53.7} and long == {'b0': 60.0, 'bad': True}
+    assert led.stats == {'hit': 1, 'bad': 0, 'lost': 0} and not led.pending
+
+
+def test_long_reading_with_a_contested_event_is_spoiled():
+    """Длинное показание с одним штрафом и расходом дорогого грунта (сходится и с одним, и с двумя штрафами),
+    за ним показание со своим штрафом; оба события рядом с обоими. Сколько событий относится к длинному, не
+    понять: он испорчен и ничего не вычитает, следующий отрезок свой штраф получает."""
+    led, at = _ledger()
+    long, short = {'b0': 60.0}, {'b0': 53.44}
+    led.reading(at(0.0, 0.0, 60.0), long)
+    led.event(1.2)
+    led.reading(at(1.4, 0.21, 53.44), long)
+    led.event(1.5)
+    led.reading(at(1.5, 0.225, 53.44 - 3.04), short)
+    b = 53.44 - 3.04
+    for k in range(16, 30):
+        b -= 0.04
+        led.reading(at(k / 10, 0.015 * k, b), None)
+    assert short == {'b0': 50.44} and long == {'b0': 60.0, 'bad': True}
+    assert led.stats == {'hit': 1, 'bad': 1, 'lost': 0} and not led.pending and led._events == []
+
+
+def test_events_are_forgotten_by_time_when_battery_does_not_change():
+    """Находка 3: показание батареи не меняется, а события штрафа идут. Событие хранится не дольше KEEP_S,
+    что бы ни было с батареей. Прежде список рос без предела. Когда показание наконец приходит, потеря
+    забытых событий сидит в нём: отрезок испорчен, а не выдан за расход."""
+    from did.penalty import KEEP_S
+    led, at = _ledger()
+    win = {'b0': 60.0}
+    led.reading(at(0.0, 0.0, 60.0), win)
+    for i in range(1, 41):
+        led.event(0.8 * i)
+        led.reading(at(0.8 * i, 0.0, 60.0), win)
+        assert len(led._events) <= KEEP_S / 0.8 + 1
+    assert led.stats['lost'] >= 30
+    led.reading(at(32.1, 0.0, 60.0 - 0.3 - 3.0 * 40), win)
+    led.reading(at(32.8, 0.0, 60.0 - 0.3 - 3.0 * 40 - 0.01), None)
+    assert win.get('bad') and win['b0'] == 60.0 and not led.pending
+
+
+def test_events_without_readings_are_forgotten_too():
+    """Находка 3: показаний нет вовсе (агент для исследований в режиме поиска), события идут — память ограничена."""
+    led, _ = _ledger()
+    for i in range(100):
+        led.event(0.5 * i)
+    assert len(led._events) <= 8
+
+
+def test_end_of_run_clears_a_free_event():
+    """Находка 3: в конце прогона осталось одно свободное событие, нерешённых отрезков нет. Завершение
+    очищает всё безусловно. Прежде событие оставалось: досчёт смотрел только на отрезки."""
+    bot, _, _ = _drive(0.0, hit_step=10 ** 6, steps=30)
+    bot.inv.penalty.event(2.9)
+    assert not bot.inv.penalty.pending and len(bot.inv.penalty._events) == 1
+    _end(bot, 3.0)
+    assert bot.inv.penalty._events == [] and not bot.inv.penalty.pending and bot.inv._held == []
+    assert bot.inv.penalty.stats == {'hit': 0, 'bad': 0, 'lost': 1}
+
+
+def test_end_of_run_does_not_open_inquiry_or_ask_the_model(monkeypatch):
+    """Находка 4: досчёт в конце прогона освобождает окно со странностью. Она записывается в журнал, но
+    расследование не открывается и к языковой модели обращений нет (на стенде это 15–25 с ожидания после финиша)."""
+    import did.llm_roles
+    calls = []
+    monkeypatch.setattr(did.llm_roles, 'deliberate', lambda *a, **k: calls.append('deliberate') or 1 / 0)
+    monkeypatch.setattr(did.llm_roles, 'explain', lambda *a, **k: calls.append('explain') or 1 / 0)
+    bot, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={40: 1.0}, steps=44)
+    bot.inv.roles = object()
+    assert bot.inv.inquiries == [] and len(bot.inv._held) == 1
+    _end(bot, 4.4)
+    assert calls == [] and bot.inv.inquiries == [] and bot.inv.active is None and bot.inv.run is None
+    assert bot.inv._held == [] and not bot.inv.penalty.pending
+    notes = _late(bot)
+    assert len(notes) == 1 and 'расход 10.0 ед/м при прогнозе 2.6' in notes[0]['text']
+    assert 'в конце прогона' in notes[0]['text']
+    n = len(bot.journal.entries)
+    _end(bot, 4.5, events=['hazard_hit'])                      # стенд зовёт tick после конца ещё раз: ничего нового
+    assert len(bot.journal.entries) == n and calls == [] and bot.inv.penalty._events == []
+
+
+def test_the_same_jump_mid_run_still_opens_inquiry():
+    """Находка 4 не трогает обычную езду: та же странность посреди прогона расследуется, как раньше."""
+    bot, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={40: 1.0}, steps=60)
+    assert [q.anomaly['text'] for q in _energy(bot)] == ['расход 10.0 ед/м при прогнозе 2.6'] and _late(bot) == []
+
+
 # --- агент для исследований по заданию: своё окно расхода в дороге (did/study_agent.py, _floor) ----------------
 
 TURN = {'quantity': 'turn_cost', 'allowed': {'spin': {'angle_deg': 360, 'repeats': 2}, 'pause': {'seconds': 3}},
@@ -328,3 +523,19 @@ def test_study_agent_settles_at_the_end_of_run():
     bot.tick(Observation(t=6.0, x=BASE[0], y=BASE[1], th=0.0, v=0.0, w=0.0, battery=50.0, sensor=None, scan=None,
                          events=[], done=True), IO())
     assert not bot._hits.pending and bot._floor_held == [] and bot._hits.early == 1
+
+
+def test_study_agent_counts_the_last_observation_and_clears_events():
+    """Правка вдогонку, находки 1 и 3: показание со штрафом пришло за такт до конца, событие — последним
+    наблюдением; штраф вычтен, свободных событий после конца нет."""
+    bot = _study_drive(3.0, 59, 10 ** 6)
+    k = bot._hits._tick
+    bot.tick(Observation(t=6.0, x=k['x'], y=k['y'], th=0.0, v=0.0, w=0.0, battery=k['b'] - 0.04, sensor=None,
+                         scan=None, events=[{'type': 'hazard_hit', 't': 6.0, 'x': k['x'], 'y': k['y']}], done=True),
+             _IO())
+    assert bot._hits.stats == {'hit': 1, 'bad': 0, 'lost': 0} and bot._hits._events == []
+    bot = _study_drive(0.0, 10 ** 6, 10 ** 6)
+    bot._hits.event(5.9)
+    bot.tick(Observation(t=6.0, x=BASE[0], y=BASE[1], th=0.0, v=0.0, w=0.0, battery=50.0, sensor=None, scan=None,
+                         events=[], done=True), _IO())
+    assert bot._hits._events == []
