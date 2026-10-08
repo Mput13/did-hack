@@ -31,6 +31,7 @@ from .agent import Agent, AgentConfig
 from .energy import EnergyModel
 from .inquiry import BATTERY_NOISE, _wrap
 from .nav import path_length
+from .penalty import PenaltyLedger
 from .scenario import Zone
 from .science import OTHER, Alternative, Inquiry, TestOption
 from .study import (EDGE_M, MEASURE_V, QUANTITIES, RUN_CLEAR_M, SOIL_GUESS, SPIN_W, TRAVEL_FACTOR, TRAVEL_V, _grown,
@@ -111,6 +112,12 @@ class StudyAgent(LawMixin, Agent):
         self._spent = {'travel': 0.0, 'test': 0.0, 'control': 0.0, 'home': 0.0}
         self._bucket = ['travel', None]
         self._win = None
+        self._floor_held = []           # закрытые отрезки дороги, которые ждут решения о потере заряда при штрафе
+        # Разовая потеря заряда при штрафе — не цена пола (did/penalty.py): показание батареи и событие штрафа
+        # приходят врозь, в стенде батарея — раньше события.
+        self._hits = PenaltyLedger(r.hazard_battery_hit, lambda ds, dth, dt, t: self.model.predict(
+            ds, dth, dt, self.collected, mult=7.0)[0])
+        self._th_prev = None
         self._trail_xy = None
         self._travel = [0.0, 0.0]       # заряд и метры в дороге по обычному полу: настоящая цена метра пути
         self._spins = 0
@@ -164,6 +171,7 @@ class StudyAgent(LawMixin, Agent):
         super()._on_event(ev, obs)
         kind = ev.get('type')
         if kind == 'hazard_hit':
+            self._hits.event(obs.t)
             self._law_penalty(obs)
         if self.phase != 'study' or kind not in ('hazard_hit', 'collision'):
             return
@@ -181,7 +189,12 @@ class StudyAgent(LawMixin, Agent):
             self._trail_xy = (obs.x, obs.y)
             self._trail_point(obs.x, obs.y, obs.t)
         s = self._step
-        if (s and s.get('phase') not in (None, 'travel')) or self._leak or self._escape:
+        off = bool((s and s.get('phase') not in (None, 'travel')) or self._leak or self._escape)
+        self._hits.reading(obs, None if off else self._win,
+                           dth=abs(_wrap(obs.th - self._th_prev)) if self._th_prev is not None else 0.0)
+        self._th_prev = obs.th
+        self._floor_release()
+        if off:
             self._win = None                       # замер считается отдельно, утечка — не свойство пола
             return
         w = self._win
@@ -194,15 +207,27 @@ class StudyAgent(LawMixin, Agent):
         w['x'], w['y'], w['th'] = obs.x, obs.y, obs.th
         if w['ds'] < 0.3:
             return
-        spent = w['b0'] - obs.battery
-        ratio = float(np.clip(self.model.soil_ratio(w['ds'], w['dth'], obs.t - w['t0'], self.collected, spent), 0.2, 7.0))
-        if w['dth'] / w['ds'] <= 2.0:              # на крутых поворотах расход говорит о повороте, а не о поле
-            self.soil.add((w['x0'] + obs.x) / 2, (w['y0'] + obs.y) / 2, w['ds'], ratio)
-            self._cost_dirty = True
-        if ratio < 1.6:
-            self._travel[0] += spent
-            self._travel[1] += w['ds']
+        w.update(t1=obs.t, b1=obs.battery)
+        self._floor_held.append(w)
+        self._floor_release()
         self._win = None
+
+    def _floor_release(self):
+        """Разобрать закрытые отрезки дороги. Рядом со штрафом отрезок ждёт, пока потеря заряда и событие
+        штрафа не найдут друг друга; отрезок, где они не сошлись, в оценки не идёт."""
+        while self._floor_held and not self._hits.hold:
+            w = self._floor_held.pop(0)
+            if w.get('bad'):
+                continue
+            spent = w['b0'] - w['b1']
+            ratio = float(np.clip(self.model.soil_ratio(w['ds'], w['dth'], w['t1'] - w['t0'], self.collected, spent),
+                                  0.2, 7.0))
+            if w['dth'] / w['ds'] <= 2.0:          # на крутых поворотах расход говорит о повороте, а не о поле
+                self.soil.add((w['x0'] + w['x']) / 2, (w['y0'] + w['y']) / 2, w['ds'], ratio)
+                self._cost_dirty = True
+            if ratio < 1.6:
+                self._travel[0] += spent
+                self._travel[1] += w['ds']
 
     def _per_m(self):
         """Заряд на метр дороги: модель плюс то, что на деле уходит на повороты и простой."""

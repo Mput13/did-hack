@@ -195,3 +195,49 @@ def test_hard_1006_penalty_does_not_open_soil_inquiry():
              and q['anomaly'].get('unit') == 'ед/м' and q['anomaly']['observed'] > 5 * q['anomaly']['expected']]
     assert [(q['t_open'], q['anomaly']['text']) for q in jumps] == []
     assert s['metrics']['hyp_soil_error'] < 1.0
+
+
+# --- агент для исследований по заданию: своё окно расхода в дороге (did/study_agent.py, _floor) ----------------
+
+TURN = {'quantity': 'turn_cost', 'allowed': {'spin': {'angle_deg': 360, 'repeats': 2}, 'pause': {'seconds': 3}},
+        'stop': {'rel_error': 0.05}, 'budget': {'energy': 10, 'reserve': 1}}
+
+
+def _study_drive(hit, jump_step, event_step, steps=60):
+    """Агент для исследований едет прямо; на шаге jump_step показание батареи падает на hit, событие штрафа
+    приходит на шаге event_step."""
+    from did.study import prepare
+    from did.study_agent import STUDY_CONFIG, StudyAgent
+    arena, rules = load_arena(), Rules()
+    bot = StudyAgent(arena, STUDY_CONFIG, 3, rules=rules, study=prepare(TURN, arena, rules))
+    assert bot.phase == 'study'
+    th = next(a for a in (k * math.pi / 8 for k in range(16))
+              if all(arena.clearance(BASE[0] + d * math.cos(a), BASE[1] + d * math.sin(a)) >= 0.2
+                     for d in (0.3, 0.6, 0.9, 1.2, 1.5)))
+    battery, step, dt = 60.0, 0.015, 0.1
+    for k in range(steps):
+        x, y = BASE[0] + k * step * math.cos(th), BASE[1] + k * step * math.sin(th)
+        if k:
+            battery -= rules.drain_per_m * step + rules.drain_idle_per_s * dt
+        if k == jump_step:
+            battery -= hit
+        events = [{'type': 'hazard_hit', 't': k * dt, 'x': x, 'y': y}] if k == event_step else []
+        bot._perceive(Observation(t=k * dt, x=x, y=y, th=th, v=0.15, w=0.0, battery=battery, sensor=None, scan=None,
+                                  events=events))
+    return bot
+
+
+@pytest.mark.parametrize('jump_step', range(18, 24))
+def test_study_agent_floor_ignores_penalty_that_arrives_before_its_event(jump_step):
+    """Показание батареи со штрафом пришло на такт раньше события (порядок стенда), и как раз на этом такте
+    закрылось окно в 0,3 м: штраф не должен стать дорогим полом. Когда событие приходит вместе с показанием
+    или раньше него, окно и прежде сбрасывалось — робот пятится из зоны."""
+    bot = _study_drive(3.0, jump_step, jump_step + 1)
+    assert [z['mult'] for z in bot.soil.zones() if z['mult'] >= 1.4] == []
+    assert bot._travel[0] / max(bot._travel[1], 1e-9) < 3.0 if bot._travel[1] else True
+
+
+def test_study_agent_floor_keeps_a_jump_without_event():
+    """Без события штрафа скачок остаётся в окне: поправка действует только рядом с событием."""
+    bot = _study_drive(3.0, 20, 10 ** 6)
+    assert any(z['mult'] >= 1.4 for z in bot.soil.zones())
