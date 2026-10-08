@@ -22,8 +22,8 @@ sys.path.insert(0, str(ROOT))
 from did.metrics import paired      # noqa: E402
 
 
-def judge(cond, level, score, back):
-    """Проходит ли ячейка: (да/нет, какое требование)."""
+def judge(cond, level, score, back, miss=None):
+    """Проходит ли ячейка: (да/нет, какое требование). miss — разность ложных сборов; в критерий P2 не входит."""
     if cond == 'base' and level == 'hard':
         return (score['mean'] >= 3.0 and score['ci'][0] > 0.0 and back['mean'] >= -1e-9,
                 'счёт +3 и больше, интервал выше нуля, возврат не ниже')
@@ -48,7 +48,8 @@ def table(summary, new, old):
             score = paired(a, b, 'score', np.random.default_rng(0))
             back = paired(a, b, 'returned', np.random.default_rng(0))
             mean = lambda rs, m: float(np.mean([r['metrics'][m] for r in rs]))      # noqa: E731
-            ok, rule = judge(cond, level, score, back)
+            miss = paired(a, b, 'false_collects', np.random.default_rng(0))
+            ok, rule = judge(cond, level, score, back, miss)
             n = len(a)
             out.append(
                 f"| {labels[cond]} | {level} | {mean(b, 'score'):.2f} → {mean(a, 'score'):.2f} | "

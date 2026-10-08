@@ -24,7 +24,9 @@ from .journal import Journal
 from .localize import PoseTracker
 from .nav import (ESCAPE_ROOM, ESCAPE_STOP, ESCAPE_V, FRONT_STOP, CostGraph, Follower, corridor_room, escape_plan,
                   free_ahead, freest_turn, moved_since, straighten)
+from .pickup import Pickup
 from .planner import MISSION, HeuristicPlanner, resolve_subgoals
+from .replay import exact_replay
 from .route import survey_route
 from .sensorguard import SensorGuard
 from .waiting import ActWhileWaiting, answer_delay
@@ -96,6 +98,10 @@ class AgentConfig:
     collect_reach: float = 0.25       # сбор — когда образец с уверенностью collect_confidence лежит в этом радиусе, м
     own_drain: bool = False           # цену дороги поправлять по своим замерам: во сколько раз расход выше расчётного
     sensor_offset: bool = False       # замечать постоянный сдвиг показаний датчика образцов и поправлять их
+    # --- правка P3 (research/findings/P3.md, логика — did/pickup.py): по умолчанию выключена; включена в *_v4
+    pickup: bool = False              # собирать попутно: образец уже в радиусе сбора, а робот едет к другой цели или домой
+    exact_replay: bool = False        # проба: после сбора пересчитывать карту образцов с собранным образцом на ней,
+                                      # чтобы не терять соседний (did/replay.py); в *_v4 не входит
     # --- абляция R12 (research/findings/R12.md): как исследователь выбирает опыт; gain — прежнее поведение
     inquiry_choice: str = 'gain'      # gain | bits | random | cheapest | fixed | worst | blind (did.science.CHOICES)
     inquiry_seed: int = 0             # зерно случайного выбора; прогон подставляет номер сценария (did/runner.py)
@@ -103,6 +109,9 @@ class AgentConfig:
     def to_dict(self):
         return asdict(self)
 
+
+# Правка P3, включённая в пресеты *_v4 (research/findings/P3.md).
+V4 = {'pickup': True}
 
 # Правки P2, включённые в пресеты *_v3 (подбор — на отладочных сценариях 1–80, research/findings/P2.md).
 V3 = {'sensor_offset': True}
@@ -158,6 +167,9 @@ PRESETS = {
     # Версия 3 (research/findings/P2.md): версия 2 плюс правки P2. Значения — в V3 ниже.
     'adaptive_v3': AgentConfig(name='adaptive_v3', fault_wait=True, **V3),
     'scientist_v3': AgentConfig(name='scientist_v3', science=True, fault_wait=True, **V3),
+    # Версия 4 (research/findings/P3.md): версия 2 плюс попутный сбор. Правки P2 (версия 3) в неё не входят.
+    'adaptive_v4': AgentConfig(name='adaptive_v4', fault_wait=True, **V4),
+    'scientist_v4': AgentConfig(name='scientist_v4', science=True, fault_wait=True, **V4),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
                                avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
@@ -312,6 +324,9 @@ class Agent:
         self.cal = Calibrator(self) if config.calibrate else None  # проверка допущений о датчике и расходе
         self.guard = SensorGuard(self) if config.fault_wait else None   # пережидание сбоя датчика (did/sensorguard.py)
         self.frugal = Frugal(self) if Frugal.wanted(config) else None   # правки P2: бережный расход (did/frugal.py)
+        if config.exact_replay and self.cal is None:
+            self.belief.replay = exact_replay
+        self.pickup = Pickup(self) if config.pickup else None           # правка P3: попутный сбор (did/pickup.py)
         self._battery_threshold_triggered = False
         self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
         # R16: пока модель думает, робот действует по правилу, а ответ сверяет с тем, что уже делает.
@@ -1149,6 +1164,8 @@ class Agent:
 
     def _do_goto(self, sg, obs, io):
         t = obs.t
+        if self.pickup and self.pickup.here(obs, io):
+            return                                    # образец уже в радиусе сбора: собрать попутно
         self.mode = 'explore' if sg['type'] == 'explore' else 'travel'
         strong = [c for c in self._candidates(t) if c['mass'] >= self.cfg.candidate_mass]
         if self.cfg.search == 'route':
@@ -1169,6 +1186,8 @@ class Agent:
             self._end_subgoal(obs, io, 'subgoal_done')
 
     def _do_return(self, obs, io):
+        if self.pickup and self.pickup.here(obs, io, homeward=True):
+            return                                    # и по дороге домой тоже: не у базы и при запасе (did/pickup.py)
         self.mode = 'return'
         if self._drive_to(obs, io, self.base, tol=0.08) and abs(obs.v) < 0.03:
             ok, msg = io.finish()

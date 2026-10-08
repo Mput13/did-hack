@@ -14,7 +14,11 @@
 (журнал решений, планы, карта вероятностей, события судьи). Подъезд относится к одному образцу —
 ближайшему из ещё не собранных; «сбой датчика» ставится, только если сбой шёл во время подъезда;
 «заряда не хватало» — только если его и правда не хватало. Что этими правилами не объясняется,
-идёт в отдельную причину «неясно». Оракул недостижим: поиск образцов по датчику без направления
+идёт в отдельную причину «неясно». После P3 «знал» значит то же, что у агента: до решения о возврате место
+было в его списке кандидатов (список строит тот же SampleBelief.candidates по снимку карты из записи). Если
+уверенность у образца набралась только кольцом от далёких показаний или уже по дороге домой, причина — «место не
+было выделено». Снимки карты идут раз в 2 с и квантованы: кандидат, проживший меньше, разбору не виден. Справочно
+считается, сколько несобранных образцов робот проехал в радиусе сбора при уверенности, с которой он собирает. Оракул недостижим: поиск образцов по датчику без направления
 стоит пути. Поэтому «лишний путь» показан отдельной строкой справки.
 """
 import argparse
@@ -42,6 +46,7 @@ V_CRUISE = 0.2          # м/с: для расхода «за включённо
 # Причины в порядке вывода: (ключ, подпись).
 CAUSES = [
     ('sample_unknown', 'образец: агент о нём не узнал'),
+    ('sample_vague', 'образец: до возврата место не было выделено на карте'),
     ('sample_no_charge', 'образец: знал, но не поехал — заряда не хватало'),
     ('sample_lost', 'образец: поехал и бросил — кандидат не подтвердился'),
     ('sample_fault', 'образец: бросил при сбое датчика'),
@@ -215,6 +220,61 @@ def _belief_peaks(tr, points, radius=0.35, known=0.35):
     return out, when
 
 
+def _candidate_snaps(tr):
+    """Кандидаты агента на каждом снимке карты: [(t, [(x, y), ...])].
+
+    Отбор делает тот же код, что у агента: карта из снимка кладётся в SampleBelief и вызывается его
+    candidates с порогом агента candidate_mass — локальные максимумы, только допустимые клетки, не больше пяти
+    мест (так планировщик получает кандидатов в Agent._state). Точность ограничена записью: снимок раз в
+    belief_dt (2 с), вероятность хранится как round(255·√p) — кандидат, проживший меньше шага снимков, не виден,
+    а место с массой у самого порога может попасть не на ту сторону.
+    """
+    from did.belief import SampleBelief
+    b = tr.get('belief')
+    if not b:
+        return []
+    need = ((tr.get('agent') or {}).get('config') or {}).get('candidate_mass', 0.35)
+    sb = SampleBelief(load_arena(), 1, (tr.get('rules') or {}).get('sensor_range_m', 2.0))
+    assert (sb.h, sb.w) == (b['h'], b['w']) and abs(sb.res - b['res']) < 1e-9, 'снимок карты не с этой арены'
+    out = []
+    for snap in b['snaps']:
+        sb.p = ((decode_grid(snap['data'], b['h'], b['w']).astype(float) / 255.0) ** 2)[sb.iy, sb.ix]
+        out.append((snap['t'], [(c['x'], c['y']) for c in sb.candidates(min_mass=need)]))
+    return out
+
+
+def _spot_times(tr, point, near=0.5, snaps=None):
+    """Моменты, когда место образца было кандидатом агента: в списке кандидатов (_candidate_snaps) есть место
+    не дальше near от образца. Кольцо от далёкого показания, проходящее через место, и место, вытесненное из
+    списка пятью более сильными, под это не подходят."""
+    snaps = _candidate_snaps(tr) if snaps is None else snaps
+    return [t for t, cands in snaps if any(math.hypot(x - point[0], y - point[1]) <= near for x, y in cands)]
+
+
+def _passed_in_reach(tr, rules, point):
+    """Моменты (по снимкам карты), когда робот стоял в радиусе сбора от образца, а карта давала у робота
+    уверенность, с которой агент собирает: сбор здесь удался бы."""
+    b = tr.get('belief')
+    if not b:
+        return []
+    cfg = (tr.get('agent') or {}).get('config') or {}
+    reach, need = cfg.get('collect_reach', 0.25), cfg.get('collect_confidence', 0.85)
+    ys = b['y0'] + (np.arange(b['h']) + 0.5) * b['res']
+    xs = b['x0'] + (np.arange(b['w']) + 0.5) * b['res']
+    t = np.array(tr['track']['t'])
+    out = []
+    for snap in b['snaps']:
+        k = min(int(np.searchsorted(t, snap['t'])), len(t) - 1)
+        x, y = tr['track']['x'][k], tr['track']['y'][k]
+        if math.hypot(x - point[0], y - point[1]) > rules.collect_radius_m:
+            continue
+        p = (decode_grid(snap['data'], b['h'], b['w']).astype(float) / 255.0) ** 2
+        m = np.hypot(xs[None, :] - x, ys[:, None] - y) <= reach
+        if 1.0 - math.exp(float(np.log1p(-np.minimum(p[m], 0.995)).sum())) >= need:
+            out.append(snap['t'])
+    return out
+
+
 def _soils_at(scenario, t):
     soils = scenario.soils
     for ev in scenario.events:
@@ -244,7 +304,10 @@ def _ledger(tr, scenario, rules):
 
 
 def _attempts(tr, scenario):
-    """Подъезды к кандидатам: [(t начала, t конца, чем кончилось, x, y)] по планам агента."""
+    """Подъезды к кандидатам: [(t начала, t конца, чем кончилось, x, y, x и y в конце)] по планам агента.
+
+    Цель подъезда уточняется по ходу (робот едет к пику, а пик смещается); последняя цель берётся из
+    записанных путей."""
     plans = tr['plans']
     out = []
     for i, p in enumerate(plans):
@@ -255,7 +318,8 @@ def _attempts(tr, scenario):
         end = nxt['t'] if nxt else tr['result']['t']
         how = 'end' if nxt is None else 'return' if nxt['subgoals'] and nxt['subgoals'][0]['type'] == 'return_base' \
             and nxt['trigger'] in ('return', 'foresight') else nxt['trigger']
-        out.append((p['t'], end, how, sg['x'], sg['y']))
+        goals = [q['goal'] for q in tr.get('paths') or [] if p['t'] <= q['t'] < end]
+        out.append((p['t'], end, how, sg['x'], sg['y'], *(goals[-1] if goals else (sg['x'], sg['y']))))
     return out
 
 
@@ -264,15 +328,18 @@ def assign_attempts(attempts, samples, collected_t, radius=0.6):
 
     Подъезд относится к одному образцу — ближайшему к его цели среди тех, что к началу подъезда ещё не
     собраны, и только если тот не дальше radius. collected_t — {номер образца: когда собран}.
+    Если у начальной цели подъезда образца нет, а цель по ходу сместилась, — то же по последней цели.
     """
     out = defaultdict(list)
     for a in attempts:
         left = [i for i in range(len(samples)) if collected_t.get(i, math.inf) > a[0]]
         if not left:
             continue
-        i = min(left, key=lambda i: math.hypot(a[3] - samples[i][0], a[4] - samples[i][1]))
-        if math.hypot(a[3] - samples[i][0], a[4] - samples[i][1]) <= radius:
-            out[i].append(a)
+        for x, y in (a[3:5], a[5:7] or a[3:5]):
+            i = min(left, key=lambda i: math.hypot(x - samples[i][0], y - samples[i][1]))
+            if math.hypot(x - samples[i][0], y - samples[i][1]) <= radius:
+                out[i].append(a)
+                break
     return out
 
 
@@ -341,6 +408,9 @@ def analyze(tr):
         extra = oracle(scenario, rules, budget=res['battery'], targets=[samples[i] for i in missed])
         spare = {missed[j] for j in extra['order']}
     tx, ty = np.array(tr['track']['x']), np.array(tr['track']['y'])
+    back_t = next((p['t'] for p in tr['plans'] if p['subgoals'] and p['subgoals'][0]['type'] == 'return_base'),
+                  res['t'])
+    cand_snaps = None                       # кандидаты агента по снимкам карты: считаются, когда понадобятся
     for i, peak, known in zip(missed, peaks, known_at):
         sx, sy = samples[i]
         mine = owned.get(i, [])
@@ -350,15 +420,20 @@ def analyze(tr):
         elif i in spare:
             cause = 'sample_early'
         elif peak >= 0.35:
-            # Знал, но не поехал. «Заряда не хватало» — только если его и правда не хватало.
-            cause = 'sample_unclear' if _could_afford(tr, scenario, rules, samples[i], known) else 'sample_no_charge'
+            # Знал, но не поехал. «Знал» — место было кандидатом агента до решения о возврате, а не кольцом
+            # от далёких показаний. «Заряда не хватало» — только если его и правда не хватало.
+            cand_snaps = _candidate_snaps(tr) if cand_snaps is None else cand_snaps
+            spot = [t for t in _spot_times(tr, samples[i], snaps=cand_snaps) if t < back_t]
+            cause = 'sample_vague' if not spot else \
+                'sample_unclear' if _could_afford(tr, scenario, rules, samples[i], spot) else 'sample_no_charge'
         else:
             cause = 'sample_unknown'
-        if cause in ('sample_no_charge', 'sample_unknown', 'sample_cut') and i in spare:
+        if cause in ('sample_no_charge', 'sample_vague', 'sample_unknown', 'sample_cut') and i in spare:
             cause = 'sample_early'
         loss[cause] += rules.pts_sample
         detail['missed'][i] = {'cause': cause, 'belief_peak': round(peak, 2), 'nearest_m': round(near, 2),
-                               'attempts': len(mine), 'affordable': i in spare}
+                               'attempts': len(mine), 'affordable': i in spare,
+                               'in_reach': _passed_in_reach(tr, rules, samples[i])}
 
     # --- невозврат --------------------------------------------------------------------------
     if not res['returned']:
@@ -450,6 +525,7 @@ def summarize(rows):
     return {'n': n, 'score': mean(lambda r: r['score']), 'ceiling': mean(lambda r: r['ceiling']),
             'gap': mean(lambda r: r['gap']), 'causes': causes,
             'samples_share': mean(lambda r: r['collected'] / r['total']), 'returned': mean(lambda r: r['returned']),
+            'passed_in_reach': sum(1 for r in rows for m in r['detail']['missed'].values() if m.get('in_reach')),
             'distance': mean(lambda r: r['distance']), 'oracle_distance': mean(lambda r: r['oracle_distance']),
             'path_ratio_same_samples': round(float(np.median(ratios)), 2) if ratios else None,
             'battery_left_returned': round(float(np.mean([r['battery_left'] for r in rows if r['returned']] or [0])), 2),
@@ -467,6 +543,8 @@ def render(title, s):
     out += ['', f"Путь {s['distance']} м при пути оракула {s['oracle_distance']} м на все образцы; на те же образцы, "
             f"что собрал агент, он проехал в {s['path_ratio_same_samples']} раза больше оракула (медиана). "
             f"Остаток заряда у вернувшихся {s['battery_left_returned']} ед., время {s['time']} с.",
+            f"Несобранных образцов, которые робот проехал в радиусе сбора при уверенности, с которой он собирает: "
+            f"{s['passed_in_reach']} на {s['n']} прогонов.",
             'Заряд, ед.: ' + ', '.join(f'{LEDGER[k]} {v}' for k, v in s['ledger'].items()) + '.',
             'Путь по режимам, м: ' + ', '.join(f'{k} {v}' for k, v in s['distance_by_mode'].items()) + '.', '']
     return '\n'.join(out)
