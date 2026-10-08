@@ -33,7 +33,8 @@ def make_planner(cfg, llm=None, seed=0):
     prompt = opts.pop('prompt', None)
     if opts.get('kind', 'mock') == 'mock':
         opts.setdefault('seed', seed)
-    return LLMPlanner(make_client(**opts), system_prompt=load_system_prompt(prompt) if prompt else None)
+    return LLMPlanner(make_client(**opts), system_prompt=load_system_prompt(prompt) if prompt else None,
+                      mission=getattr(cfg, 'mission', None))
 
 
 def make_agent(name, config=None):

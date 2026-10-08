@@ -19,13 +19,15 @@ from .inquiry import Investigator
 from .journal import Journal
 from .localize import PoseTracker
 from .nav import CostGraph, Follower
-from .planner import HeuristicPlanner, resolve_subgoals
+from .planner import MISSION, HeuristicPlanner, resolve_subgoals
 from .route import survey_route
 
 
 @dataclass(frozen=True)
 class AgentConfig:
     name: str = 'adaptive'
+    mission: str = MISSION
+    mission_triggers: bool = False
     search: str = 'belief'            # belief — цели из карты вероятностей; route — фиксированный объезд
     explore: str = 'mass'             # точка разведки: mass — сколько вероятности вокруг; infogain — ожидаемая польза
     learn_soil: bool = True           # оценивать стоимость грунта по расходу батареи и объезжать дорогое
@@ -158,6 +160,7 @@ class Agent:
         self._no_collect_until = -1e9
         self.inv = Investigator(self, knowledge, roles) if config.science else None
         self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
+        self._battery_threshold_triggered = False
 
     # ======================================================================================
     # один такт цикла
@@ -177,6 +180,12 @@ class Agent:
             self._slow_t = obs.t
             self._soil_hypotheses(obs.t)
             self._check_return(obs)
+            if self.cfg.mission_triggers and not self._battery_threshold_triggered and not self._returning:
+                home = self._home_cost(obs.x, obs.y)
+                threshold = 30.0 + home * self.cfg.reserve_margin
+                if obs.battery <= threshold:
+                    self._battery_threshold_triggered = True
+                    self._request_plan('battery_threshold')
         if self._trigger and obs.t >= self._wait_until:
             self._deliberate(obs)
         self._act(obs, io)
@@ -234,6 +243,8 @@ class Agent:
         elif kind == 'collision':
             self.journal.add(obs.t, 'alarm', f'Штраф: столкновение в ({obs.x:.2f}; {obs.y:.2f})', tag='collision')
             self._escape = {'until': obs.t + 1.5, 'v': 0.10 if self._last_cmd[0] < 0 else -0.10}
+            if self.cfg.mission_triggers:
+                self._request_plan('collision')
 
     def _sync_hazards(self, t, new=False):
         """Пересчитать карту риска и сводку по зонам после нового штрафа или уточнения."""
@@ -469,6 +480,7 @@ class Agent:
                  for i, z in enumerate(self.soil.zones())] if self.cfg.learn_soil else []
         alarms = [e['text'] for e in self.journal.entries[-12:] if e['kind'] == 'alarm' and obs.t - e['t'] <= 30.0]
         return {
+            'mission': self.cfg.mission,
             'trigger': trigger,
             'time_s': round(obs.t, 1), 'time_limit_s': self.rules.time_limit_s,
             'battery': round(battery, 1), 'battery_start': self.rules.battery_start,

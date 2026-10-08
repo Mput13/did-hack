@@ -45,17 +45,19 @@ class HeuristicPlanner:
 class LLMPlanner:
     source = 'llm'
 
-    def __init__(self, client, fallback=None, system_prompt=None, max_repairs=1):
+    def __init__(self, client, fallback=None, system_prompt=None, max_repairs=1, mission=None):
         self.client = client
         self.fallback = fallback or HeuristicPlanner()
         self.system_prompt = system_prompt
         self.max_repairs = max_repairs
+        self.mission = mission
         self.calls = self.failures = 0
 
     def plan(self, state):
         from .llm import request_plan
         self.calls += 1
-        res = request_plan(self.client, {'mission': MISSION, **state}, system_prompt=self.system_prompt,
+        mission = self.mission or state.get('mission') or MISSION
+        res = request_plan(self.client, {**state, 'mission': mission}, system_prompt=self.system_prompt,
                            max_repairs=self.max_repairs)
         if res.plan is None:
             self.failures += 1
