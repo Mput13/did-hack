@@ -55,7 +55,7 @@ const cm = (m) => num(m * 100, 0);
 // карта
 // =================================================================================================
 
-function createMap(arena, onClick) {
+function createMap(arena, onClick, fps = 30) {
   const canvas = h('canvas', { class: 'pl-map__canvas', 'aria-label': 'Карта арены. Клик добавляет точку маршрута' });
   const el = h('div', { class: 'pl-map' }, canvas);
   const ctx = canvas.getContext('2d');
@@ -105,7 +105,7 @@ function createMap(arena, onClick) {
   let heatKey = '';
 
   let st = null;                 // последнее состояние с сервера
-  let opts = { rays: true, ref: true, truth: false, belief: true };
+  let opts = { rays: true, ref: true, truth: false, belief: true, slam: false };
   let grid = null;               // расшифрованная карта занятости
   let gridVersion = -1;
   const seenAt = new Float64Array(GW * GH);
@@ -440,7 +440,7 @@ function createMap(arena, onClick) {
   function frame(now) {
     if (dead) return;
     raf = requestAnimationFrame(frame);
-    if (now - lastDraw < 30) return;                    // не чаще ~30 кадров в секунду: рядом работает Gazebo
+    if (now - lastDraw < 1000 / fps - 3) return;        // не чаще ~30 кадров в секунду: рядом работает Gazebo
     lastDraw = now;
     if (st && st.active && st.pose && from) {
       const k = clamp((now - fromT) / span, 0, 1);
@@ -476,17 +476,19 @@ function createMap(arena, onClick) {
         fromT = now;
         lastStateT = now;
       }
-      const m = next && next.map;
-      if (m && m.data && m.version !== gridVersion) {
+      const m = next && (opts.slam && next.slam ? next.slam : next.map);
+      const version = m ? `${opts.slam && next.slam ? 's' : 'm'}${m.version}` : -1;
+      if (m && m.data && version !== gridVersion) {
         const g = decode(m.data);
-        if (m.version < gridVersion) seenAt.fill(0);                // карту сбросили
+        const restart = String(gridVersion)[0] !== version[0] || Number(version.slice(1)) < Number(String(gridVersion).slice(1));
+        if (restart) { seenAt.fill(0); grid = null; }               // карту сбросили или переключили
         const stamp = grid ? now : now - FRESH_MS;                  // при открытии страницы готовая карта не вспыхивает
         for (let i = 0; i < g.length; i++) {
           if (g[i] && !seenAt[i]) seenAt[i] = stamp;
           else if (!g[i]) seenAt[i] = 0;
         }
         grid = g;
-        gridVersion = m.version;
+        gridVersion = version;
         mapDirty = true;
       } else if (!m && grid) {
         grid = null;
@@ -591,7 +593,8 @@ export async function render(root, ctx) {
 
   // --- разметка --------------------------------------------------------------------------------
 
-  const map = createMap(arena, addPoint);
+  // #/pilot?fps=10 — реже перерисовывать карту (для записи видео на занятой машине).
+  const map = createMap(arena, addPoint, clamp(Number(ctx.query.fps) || 30, 2, 60));
   const lamp = h('span', { class: 'lb-lamp', 'aria-hidden': 'true' });
   const statusText = h('div', { class: 'pl-status__text' });
   const statusSub = h('div', { class: 'pl-status__sub' });
@@ -650,7 +653,20 @@ export async function render(root, ctx) {
     check('Лучи лидара', true, (v) => map.setOpts({ rays: v })),
     check('Эталонная карта', true, (v) => map.setOpts({ ref: v })),
     check('Что думает агент', true, (v) => map.setOpts({ belief: v })));
-  const stage = h('div', { class: 'pl-stage' }, map.el, h('div', { class: 'pl-under' }, legend, toggles));
+  // Переключатель карты появляется, когда рядом работает SLAM Toolbox (pixi run demo --slam).
+  let slamOn = false;
+  const slamSeg = h('div', { class: 'lb-seg pl-slam', role: 'group', 'aria-label': 'Чья карта на экране', hidden: true },
+    [[false, 'Наша карта по лидару'], [true, 'Карта SLAM Toolbox']].map(([v, label]) => h('button', {
+      class: 'lb-seg__btn', type: 'button', 'aria-pressed': String(v === slamOn), data: { slam: v ? '1' : '' },
+      onclick: () => {
+        slamOn = v;
+        map.setOpts({ slam: v });
+        slamSeg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(!!b.dataset.slam === slamOn)));
+        map.setState(st);
+        paint();
+      },
+    }, label)));
+  const stage = h('div', { class: 'pl-stage' }, map.el, h('div', { class: 'pl-under' }, legend, toggles, slamSeg));
 
   fill(root,
     h('header', { class: 'pl-head' },
@@ -826,12 +842,14 @@ export async function render(root, ctx) {
     fill(tiles.sensor.bar, meter(s.sensor, 'green'));
     tiles.dist.value.textContent = `${num(s.distance, 1)} м`;
     tiles.dist.sub.textContent = `прогон идёт ${num(s.t, 0)} с`;
-    const mp = s.map || {};
+    slamSeg.hidden = !s.slam;
+    const bySlam = slamOn && s.slam;
+    const mp = (bySlam ? s.slam : s.map) || {};
     tiles.cover.value.textContent = `${num((mp.coverage || 0) * 100, 0)} %`;
-    tiles.cover.sub.textContent = 'пола увидел лидар';
+    tiles.cover.sub.textContent = bySlam ? 'по карте SLAM Toolbox' : 'пола увидел лидар';
     fill(tiles.cover.bar, meter(mp.coverage || 0, 'blue'));
     tiles.agree.value.textContent = mp.coverage ? `${num((mp.agreement || 0) * 100, 1)} %` : '—';
-    tiles.agree.sub.textContent = 'клеток совпало';
+    tiles.agree.sub.textContent = bySlam ? 'клеток SLAM совпало' : 'клеток совпало';
     const f = s.fix || {};
     tiles.pose.value.textContent = f.source === 'lidar' ? 'колёса + лидар' : 'только колёса';
     tiles.pose.value.classList.add('pl-tile__value--text');

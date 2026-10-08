@@ -5,6 +5,7 @@
     pixi run demo --level hard --seed 1    # другой сценарий
     pixi run demo --fast                   # то же без Gazebo, на быстром симуляторе
     pixi run demo --open                   # ещё и открыть страницу в браузере
+    pixi run demo --slam                   # рядом с нашей картой — карта от SLAM Toolbox
 
 Что происходит: поднимается сервер лаборатории (если он ещё не запущен), стенд (мир, робот, судья),
 затем пульт (did/pilot.py). Пульт сам ждёт, пока робот осядет на колёса, — на странице виден
@@ -132,6 +133,8 @@ def main():
     ap.add_argument('--no-gui', action='store_true', help='не открывать окно Gazebo')
     ap.add_argument('--no-hints', action='store_true', help='не рисовать скрытую правду на полу Gazebo')
     ap.add_argument('--open', action='store_true', help='открыть страницу пульта в браузере')
+    ap.add_argument('--slam', action='store_true',
+                    help='запустить ещё и SLAM Toolbox: его карта появится на странице рядом с нашей')
     ap.add_argument('--launch-arg', action='append', default=[], metavar='ИМЯ:=ЗНАЧЕНИЕ',
                     help='дополнительный аргумент для stand.launch.py (можно несколько раз)')
     args = ap.parse_args()
@@ -140,7 +143,7 @@ def main():
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: halt.set())
 
-    server = stand = pilot = None
+    server = stand = pilot = slam = None
     fast_started = False
     code = 0
     try:
@@ -164,6 +167,11 @@ def main():
             stand = spawn(launch, 'demo-stand.log')
             pilot = spawn([sys.executable, '-m', 'did.pilot', '--ros', '--level', args.level, '--seed', str(args.seed),
                            '--rules', args.rules], 'demo-pilot.log', echo='пульт:')
+            if args.slam:
+                # Своя тема и свой кадр карты (env/slam_demo.yaml): /map и кадр map заняты эталонной картой судьи.
+                slam = spawn(['ros2', 'launch', 'slam_toolbox', 'online_async_launch.py', 'use_sim_time:=true',
+                              f'slam_params_file:={ROOT / "env" / "slam_demo.yaml"}'], 'demo-slam.log')
+                say('SLAM Toolbox запущен: карта появится на странице, переключатель под картой')
         say(f'страница пульта: {page}')
         say('Ctrl+C — остановить показ')
         if args.open:
@@ -188,6 +196,7 @@ def main():
         if fast_started:
             http(f'{url}/api/pilot/start', {'backend': 'off'})
         stop(pilot, 'пульт', grace=6.0)
+        stop(slam, 'SLAM Toolbox', grace=6.0)
         stop(stand, 'стенд Gazebo', grace=15.0)
         stop(server, 'сервер интерфейса', grace=4.0)
         say('показ остановлен')

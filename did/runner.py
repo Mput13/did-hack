@@ -96,7 +96,7 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     if science:
         iq = metrics['inquiries'] = score_inquiries(science['inquiries'], scenario, judge.world_log)
         metrics.update(inq_total=iq['total'], inq_tests=iq['tests'], inq_energy=iq['energy'],
-                       inq_correct=iq['correct'] / iq['identified'] if iq['identified'] else None,
+                       inq_correct=(iq['correct'] + iq['partial']) / iq['identified'] if iq['identified'] else None,
                        inq_wrong=iq['wrong'], inq_insufficient=iq['insufficient'],
                        faults_found=iq['faults_found'] / iq['faults'] if iq['faults'] else None)
     if rec.llm:                            # доля годных ответов модели и фактическое время её ответов

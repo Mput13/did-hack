@@ -2,12 +2,18 @@
 
 Образец сначала нужно найти — это делает штатный поиск агента (карта вероятностей, подъезд к месту),
 только вместо сбора робот останавливается: образец нужен как источник сигнала. Дальше идёт сравнение
-объяснений (did.science.Inquiry). Опыт — встать на заданном расстоянии от образца с двух сторон и
-послушать датчик: среднее двух точек почти не зависит от ошибки в положении образца. Какое
-расстояние проверять следующим, решает расчёт ожидаемой пользы на единицу заряда.
+объяснений (did.science.Inquiry).
 
-Контроль — опорная точка у самого образца: все объяснения ждут там одного и того же показания,
-поэтому она ничего не различает, зато повтор в конце показывает, не сбился ли датчик за время опытов.
+1. Центрирование. Робот слушает датчик в четырёх точках «креста» вокруг найденного места. Любой
+   закон, убывающий с расстоянием, симметричен относительно образца, поэтому перекос показаний
+   между противоположными точками показывает, куда и насколько сдвинуть оценку места. Форма закона
+   для этого не нужна. Среднее по кресту — заодно первый опыт: показание на малом расстоянии.
+2. Опыты. Встать на заданном расстоянии от образца с двух противоположных сторон и послушать:
+   среднее двух точек почти не зависит от остаточной ошибки места. Какое расстояние брать
+   следующим, решает ожидаемая польза на единицу заряда. Расстояния, на которых к точке, скорее
+   всего, ближе другой образец (датчик покажет его), не берутся.
+3. Контроль — опорная точка у самого образца: все объяснения ждут там одного и того же показания,
+   поэтому она ничего не различает, зато повтор в конце показывает, не сбился ли датчик.
 """
 import math
 
@@ -17,13 +23,14 @@ from .inquiry import FAULT_S
 from .science import OTHER, Alternative, Inquiry, TestOption
 from .study import DEFAULT_LAWS, LAWS, TRAVEL_V, Hypothesis
 
-LOC_PAIR_M = 0.03       # ошибка расстояния, когда слушаем с двух сторон (ошибка положения образца сокращается)
+LOC_PAIR_M = 0.03       # ошибка расстояния, когда слушаем с двух сторон (ошибка места образца сокращается)
 LOC_SINGLE_M = 0.08     # и когда точка одна
 MODEL_SLACK = 0.02      # на сколько закон может отличаться от идеальной формулы
-REF_MIN = 0.75          # слабее этого показание «у образца» — образец найден неточно
+REF_GOOD = 0.9          # показание у образца не ниже этого — место найдено точно
 DRIFT = 0.08            # на столько изменилось показание в опорной точке — датчик сбоит
-RISK_MAX = 0.15         # с такой вероятности «к точке ближе другой образец» опыт на этом расстоянии не ставится
-MIN_TESTS = 2           # меньше стольких расстояний вывод о законе не делается, если заряд позволяет
+RISK_MAX = 0.3          # с такой вероятности «к точке ближе другой образец» опыт на этом расстоянии не ставится
+MIN_TESTS = 2           # по одному расстоянию вывод о законе не делается, если заряд позволяет
+MAX_CROSSES = 3         # сколько раз можно уточнять место образца
 HOME_MARGIN = 1.15
 
 
@@ -43,10 +50,11 @@ class LawMixin:
 
     def _law_init(self):
         self._sample = None            # где образец: (x, y)
-        self._law = None               # идущий опыт: {'test', 'todo': [точки], 'got': [(расстояние, показание, ±)]}
+        self._law = None               # идущий опыт: {'test', 'todo': [точки], 'got': [(расстояние, показание, ±, x, y, запись)]}
         self._law_stop = 'no_tests'
-        self._ref = []                 # показания в опорной точке: [(t, показание, ±)]
+        self._ref = []                 # показания в опорной точке у образца: [(t, показание, ±)]
         self._stations = []            # все прослушанные точки: (расстояние, показание, ±)
+        self._crosses = 0              # сколько раз место образца уточнялось крестом
         self._quiet_until = -1e9       # после штрафа датчик может сбоить: показаниям пока не верю
         self._retries = 0
         self._hyps = self.spec.hypotheses or [Hypothesis(**h) for h in DEFAULT_LAWS]
@@ -77,15 +85,14 @@ class LawMixin:
                          f'{confidence:.0%}. Не собираю его: он нужен как источник сигнала для проверки датчика')
         self._open_law(obs)
 
-    def _law_fn(self, h):
-        return lambda d: _clipped(LAWS[h.law](d, h.range_m), self.rules.sensor_sigma)
-
     def _law_pred(self, d, n):
         """Что каждое объяснение предсказывает для среднего показания на расстоянии d (n — сколько точек)."""
         loc = LOC_PAIR_M if n >= 2 else LOC_SINGLE_M
+        sigma = self.rules.sensor_sigma
         out = {}
         for h in self._hyps:
-            f = self._law_fn(h)
+            def f(x, h=h):
+                return _clipped(LAWS[h.law](x, h.range_m), sigma)
             slope = abs(f(d + 0.05) - f(max(d - 0.05, 0.0))) / 0.1
             out[h.id] = (f(d), math.hypot(MODEL_SLACK, slope * loc))
         return out
@@ -95,34 +102,38 @@ class LawMixin:
         return self.rules.sensor_sigma / math.sqrt(k * n)
 
     def _open_law(self, obs):
-        spec = self.spec
+        spec, hyps = self.spec, self._hyps
         step = spec.allowed.straight.length_m / 2      # расстояния через полпробега: ближние точки самые надёжные
-        hyps = self._hyps
         alts = [Alternative(h.id, h.statement, h.prior) for h in hyps]
         alts.append(Alternative(OTHER, 'зависимость не из этого списка', 0.1 * sum(h.prior for h in hyps)))
         dist, _ = self.graph.field(obs.x, obs.y)
         tests = []
-        for k in range(1, 12):
+        for k in range(2, 12):                         # первое расстояние (k = 1) проверяет крест центрирования
             d = k * step
             if d > 2.6:
                 break
             pts, risk = self._ring(d, dist)
-            if not pts:
-                continue
-            tests.append(TestOption(f'd{k}', f'слушать датчик в {d:.2f} м от образца' + (' с двух сторон' if len(pts) == 2 else ''),
-                                    cost=1.0, duration_s=10.0, unit='показание', predictions=self._law_pred(d, len(pts)),
-                                    action={'kind': 'listen', 'd': d, 'stations': pts, 'risk': risk},
-                                    sigma=self._listen_sigma(len(pts))))
+            if pts:
+                tests.append(TestOption(f'd{k}', f'слушать датчик в {d:.2f} м от образца' + (' с двух сторон' if len(pts) == 2 else ''),
+                                        cost=1.0, duration_s=10.0, unit='показание', predictions=self._law_pred(d, len(pts)),
+                                        action={'kind': 'listen', 'd': d, 'stations': pts, 'risk': risk},
+                                        sigma=self._listen_sigma(len(pts))))
         self.inq = Inquiry('S1', obs.t, 'study',
                            {'text': 'задание: проверить, как показание датчика образцов зависит от расстояния',
                             'x': self._sample[0], 'y': self._sample[1], 'observed': 0.0, 'expected': 0.0, 'unit': 'показание'},
-                           alts, tests, accept=spec.stop.confidence, max_tests=max(1, (spec.stop.max_measurements - 2) // 2),
+                           alts, tests, accept=spec.stop.confidence, max_tests=max(2, (spec.stop.max_measurements - 6) // 2 + 1),
                            energy_budget=1e9, min_gain=0.03, source='study')
         text = '; '.join(f'«{a.statement}» {a.prior:.0%}' for a in self.inq.alternatives)
         far = [t.action['d'] for t in tests if t.action['risk'] > RISK_MAX]
         self.journal.add(obs.t, 'decision', f'Сравниваю объяснения: {text}. Опыты — слушать датчик на разных расстояниях от образца'
                          + (f'. Дальше {min(far) - step:.2f} м не отъезжаю: там к точке, скорее всего, ближе другой образец, '
                             'и датчик покажет его' if far else ''))
+
+    def _free(self, p, dist):
+        a = self.arena
+        ix, iy = a.w2g(*p)
+        return (a.inside(ix, iy) and self.graph.ok[iy, ix] and self._risk[iy, ix] < 0.05
+                and math.isfinite(self.graph.cost_at(dist, *p)))
 
     def _other_risk(self, p, d):
         """Вероятность, что к точке p ближе, чем наш образец, лежит другой: тогда датчик покажет его."""
@@ -137,26 +148,79 @@ class LawMixin:
         Лучше пара с противоположных сторон; из пар — та, где другой образец наименее вероятен.
         """
         sx, sy = self._sample
-        a = self.arena
-
-        def free(p):
-            ix, iy = a.w2g(*p)
-            return (a.inside(ix, iy) and self.graph.ok[iy, ix] and self._risk[iy, ix] < 0.05
-                    and math.isfinite(self.graph.cost_at(dist, *p)))
-
         pairs, singles = [], []
         for k in range(16):
             u = (math.cos(k * math.pi / 8), math.sin(k * math.pi / 8))
             p, q = (sx + d * u[0], sy + d * u[1]), (sx - d * u[0], sy - d * u[1])
-            if not free(p):
+            if not self._free(p, dist):
                 continue
             cost, risk = self.graph.cost_at(dist, *p), self._other_risk(p, d)
             singles.append((round(risk, 1), cost, risk, [p]))
-            if free(q):
+            if self._free(q, dist):
                 both = max(risk, self._other_risk(q, d))
                 pairs.append((round(both, 1), cost + 1.25 * 2 * d, both, [p, q]))
         best = min(pairs or singles, default=None, key=lambda v: v[:2])
         return ([tuple(round(v, 3) for v in p) for p in best[3]], round(best[2], 3)) if best else ([], 1.0)
+
+    # --- центрирование ------------------------------------------------------------------------
+
+    def _start_cross(self, obs):
+        """Крест из четырёх точек вокруг оценки места образца. False — поставить его негде."""
+        rho = self.spec.allowed.straight.length_m / 2
+        sx, sy = self._sample
+        dist, _ = self.graph.field(obs.x, obs.y)
+
+        def ring(r, angles):
+            return [(round(sx + r * math.cos(a), 3), round(sy + r * math.sin(a), 3)) for a in angles]
+
+        pts = r = None
+        for r in (rho, 0.8 * rho):                     # сначала ровный крест: при каком повороте свободны все четыре точки
+            for k in range(4):
+                cand = ring(r, [k * math.pi / 8 + j * math.pi / 2 for j in range(4)])
+                if all(self._free(p, dist) for p in cand):
+                    pts = cand
+                    break
+            if pts:
+                break
+        if not pts:                                    # образец у стены: беру свободные точки кольца, лишь бы не на одной прямой
+            for r in (rho, 0.8 * rho):
+                free = [k for k in range(8) if self._free(ring(r, [k * math.pi / 4])[0], dist)]
+                if len(free) >= 3 and max(min((a - b) % 8, (b - a) % 8) for a in free for b in free) >= 2:
+                    pts = ring(r, [k * math.pi / 4 for k in free[:5]])
+                    break
+        if not pts:
+            return False
+        self._crosses += 1
+        test = TestOption(f'c{self._crosses}', f'{len(pts)} точки вокруг образца в {r:.2f} м от него', cost=len(pts) * r * self._per_m(),
+                          duration_s=30.0, unit='показание', predictions=self._law_pred(r, 2),
+                          action={'kind': 'listen', 'd': r, 'stations': pts, 'risk': 0.0}, sigma=self._listen_sigma(len(pts)))
+        test.gain_bits = round(self.inq.gain(test), 3)
+        self.inq.tests.insert(self._crosses - 1, test)
+        self._law = {'test': test, 'todo': list(pts), 'got': [], 'cross': True}
+        self.journal.add(obs.t, 'decision', f'Уточняю место образца: слушаю датчик в {len(pts)} точках вокруг него, в {r:.2f} м. '
+                         'Перекос показаний между точками покажет, куда сдвинуть оценку; среднее по ним — первый опыт '
+                         'для сравнения объяснений', inquiry=self.inq.id)
+        return True
+
+    def _center(self, run, obs):
+        """Сдвинуть оценку места образца по перекосу показаний в кресте. Возвращает (точки с новыми расстояниями, сдвиг)."""
+        got = run['got']
+        if len(got) < 3:
+            return got, 0.0
+        sx, sy = self._sample
+        A = np.array([[g[3] - sx, g[4] - sy, 1.0] for g in got])
+        (gx, gy, ring), *_ = np.linalg.lstsq(A, np.array([g[1] for g in got]), rcond=None)
+        rho = float(np.mean([g[0] for g in got]))
+        grad = math.hypot(gx, gy)
+        # Конус 1 − s·|p − c|: наклон плоскости по кресту равен s·δ/ρ, центр выше кольца на s·(ρ − δ). Отсюда δ без s.
+        gain = grad * rho / max(self._ref[-1][1] - ring, 0.02)
+        shift = rho * gain / (1.0 + gain)
+        if grad > 1e-9 and shift >= 0.02:
+            self._sample = (round(sx + shift * gx / grad, 3), round(sy + shift * gy / grad, 3))
+            self.journal.add(obs.t, 'observe', f'Показания в кресте перекошены: сдвигаю оценку места образца на {shift * 100:.0f} см, '
+                             f'в ({self._sample[0]:.2f}; {self._sample[1]:.2f})')
+            self._ref = []                             # опорную точку нужно прослушать заново, уже в новом месте
+        return [(math.dist((g[3], g[4]), self._sample), *g[1:]) for g in got], shift / rho
 
     # --- ход опытов ---------------------------------------------------------------------------
 
@@ -173,9 +237,7 @@ class LawMixin:
         run = self._law
         if run and run['todo']:
             step = self._listen_step(obs, run['todo'].pop(0), 'test', run['test'].id)
-            if step is not None:
-                return step
-            return self._next_law(obs)             # до точки не доехать: обхожусь остальными
+            return step if step is not None else self._next_law(obs)     # до точки не доехать — обхожусь остальными
         if run and run['got']:
             self._law_record(obs)
         elif run:                                  # ни одной точки этого опыта прослушать не удалось
@@ -183,6 +245,15 @@ class LawMixin:
             self._law = None
         if not self._ref:
             return self._listen_step(obs, self._sample, 'control', 'R') or self._conclude(obs, 'no_site')
+        if len(self._ref) == 1 and (not self._crosses or self._ref[0][1] < REF_GOOD) and self._crosses < MAX_CROSSES:
+            if self._start_cross(obs):
+                return self._next_law(obs)
+            self._crosses = MAX_CROSSES
+            self._warn('nocross', 'уточнить место образца не удалось: вокруг него нет трёх свободных точек для замеров')
+        if self._ref[0][1] < REF_GOOD:
+            self.failures.append(f'в найденном месте датчик показывает только {self._ref[0][1]:.2f}, а у самого образца должно '
+                                 'быть около единицы: место найдено неточно, отмерять расстояния не от чего')
+            return self._conclude(obs, 'not_found')
         test = self._choose_law(obs)
         if test is not None:
             self._law = {'test': test, 'todo': list(test.action['stations']), 'got': []}
@@ -255,8 +326,7 @@ class LawMixin:
     def _account_listen(self, rec, m, obs):
         zs = np.array(m['zs'], dtype=float)
         nominal = self.rules.sensor_sigma
-        d = math.dist((obs.x, obs.y), self._sample)
-        rec.update(unit='показание', d=round(d, 3))
+        rec.update(unit='показание')
         sd = float(zs.std(ddof=1)) if len(zs) > 1 else 0.0
         stuck = len(zs) >= 4 and float(np.ptp(zs)) < 1e-9 and 0.0 < zs[0] < 1.0
         fault = ('датчик залип: показания не меняются' if stuck else 'датчик шумит втрое сильнее обычного' if sd > 3.0 * nominal
@@ -277,21 +347,29 @@ class LawMixin:
         rec.update(value=z, sigma=se, chart=True)
         if rec['role'] == 'control':
             self._ref.append((obs.t, z, se))
+            rec['d'] = 0.0
             if len(self._ref) == 1:
                 self.journal.add(obs.t, 'observe', f'Опорная точка у образца: показание {z:.2f} ± {se:.2f}. Все объяснения ждут здесь '
-                                 'почти единицу, поэтому она нужна не для выбора, а для контроля датчика')
-                if z < REF_MIN:
-                    self.failures.append(f'у найденного образца датчик показывает только {z:.2f}: место образца определено неточно')
+                                 'почти единицу, поэтому она нужна не для выбора, а для контроля датчика и места')
             return
-        self._law['got'].append((d, z, se))
-        self._stations.append((d, z, se))
+        self._law['got'].append((math.dist((obs.x, obs.y), self._sample), z, se, obs.x, obs.y, rec))
 
     def _law_record(self, obs):
         run, self._law = self._law, None
-        test, got = run['test'], run['got']
+        test = run['test']
+        got, shift = self._center(run, obs) if run.get('cross') else (run['got'], 0.0)
+        for g in got:                                  # расстояния — от уточнённого места образца
+            g[5]['d'] = round(g[0], 3)
+        if shift > 0.5:
+            # Место было найдено грубо: расстояния этих точек ненадёжны, в сравнение объяснений они не идут.
+            for g in got:
+                g[5].update(used=False, note='только для уточнения места образца')
+            test.action['dead'] = True
+            return
+        self._stations += [g[:3] for g in got]
         if len(got) == 2 and abs(got[0][1] - got[1][1]) > 0.12 + 3.0 * math.hypot(got[0][2], got[1][2]):
             # Показания с двух сторон разошлись: одну точку «слышит» другой образец, он ближе. Верю меньшему.
-            d, z, se = min(got, key=lambda g: g[1])
+            d, z, se = min(got, key=lambda g: g[1])[:3]
             n = 1
             self._warn('other', 'на части расстояний одна из двух точек оказалась ближе к другому образцу: там взято '
                                 'меньшее из двух показаний')
@@ -304,13 +382,13 @@ class LawMixin:
         self.inq.record(test.id, z, se, obs.t)
         post = '; '.join(f"«{a.statement}» {self.inq.posterior[a.id]:.0%}" for a in self.inq.alternatives)
         self.journal.add(obs.t, 'observe', f'В {d:.2f} м от образца датчик показывает {z:.3f} ± {se:.3f}'
-                         + (' (среднее двух точек)' if n == 2 else '') + f'. Теперь: {post}', inquiry=self.inq.id)
+                         + (f' (среднее {n} точек)' if n > 1 else '') + f'. Теперь: {post}', inquiry=self.inq.id)
 
     # --- итог ---------------------------------------------------------------------------------
 
     def _law_estimate(self):
         """Дальность датчика в предположении линейного закона: подгонка 1 − d/R по прослушанным точкам."""
-        pts = [(d, z, math.hypot(se, 0.5 * LOC_PAIR_M)) for d, z, se in self._stations if z > 0.1 and d > 0.2]
+        pts = [(d, z, math.hypot(se, 0.5 * LOC_PAIR_M)) for d, z, se in getattr(self, '_stations', []) if z > 0.1 and d > 0.15]
         if len(pts) < 2:
             return None
         d, z, s = (np.array(v) for v in zip(*pts))
@@ -324,12 +402,20 @@ class LawMixin:
 
     def _law_close(self, obs, reason):
         q = self.inq
-        if q is None:
+        if q is None or not q.order:
             self.status = 'failed'
-            self.conclusion = ('Проверить датчик не удалось: образец, от которого можно отмерять расстояния, не найден '
-                               'в пределах бюджета.')
+            self.conclusion = ('Проверить датчик не удалось: место образца определить достаточно точно не получилось.'
+                               if q is not None and reason == 'not_found' else
+                               'Проверить датчик не удалось: образец, от которого можно отмерять расстояния, не найден '
+                               'в пределах бюджета и времени.')
+            self.inq = None
             return
         c = q.close(obs.t, 'закон датчика внесён в отчёт')
+        if reason == 'not_found':                      # место образца так и не найдено точно: расстояниям верить нельзя
+            c.update(status='insufficient', text='место образца определить достаточно точно не получилось, поэтому '
+                                                 'расстояния до него ненадёжны и вывод о законе сделать нельзя')
+            self.status, self.conclusion = 'failed', c['text'][0].upper() + c['text'][1:] + '.'
+            return
         if len(self._ref) == 2 and abs(self._ref[1][1] - self._ref[0][1]) > DRIFT:
             a, b = self._ref[0][1], self._ref[1][1]
             c.update(status='insufficient', text=f'показание в опорной точке у образца за время опытов изменилось с {a:.2f} до '

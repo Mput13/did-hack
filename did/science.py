@@ -33,8 +33,10 @@ class TestOption:
     predictions: dict           # id объяснения -> (среднее, разброс) того, что покажет измерение
     action: dict = field(default_factory=dict)     # как агенту провести опыт
     sigma: float = 0.0          # точность самого измерения
-    measured: dict = None       # {'value', 'sigma', 't'} после проведения
+    measured: dict = None       # {'value', 'sigma', 't'} после проведения (последний замер)
     gain_bits: float = 0.0
+    repeatable: bool = False    # опыт можно повторить: новый замер — новые данные
+    repeats: int = 0
 
 
 def entropy_bits(p):
@@ -54,7 +56,8 @@ class Inquiry:
         self.tests = list(tests)
         self.accept, self.max_tests, self.budget, self.min_gain = accept, max_tests, energy_budget, min_gain
         self.spent = 0.0
-        self.order = []               # какие опыты проведены, по порядку
+        self.order = []               # какие замеры сделаны, по порядку
+        self.maneuvers = 0            # сколько манёвров на них ушло (одна пауза может дать несколько замеров)
         self.conclusion = None
         self.action = ''
         self.critique = []
@@ -65,20 +68,27 @@ class Inquiry:
     # --- расчёт ------------------------------------------------------------------------------
 
     def _span(self, test):
-        """Диапазон значений, которые опыт вообще может показать (для объяснения без предсказаний)."""
-        lo = min(m - 4 * s for m, s in test.predictions.values())
-        hi = max(m + 4 * s for m, s in test.predictions.values())
+        """Диапазон значений, которые опыт вообще может показать, с учётом шума самого измерения."""
+        lo = min(m - 4 * math.hypot(s, test.sigma) for m, s in test.predictions.values())
+        hi = max(m + 4 * math.hypot(s, test.sigma) for m, s in test.predictions.values())
         pad = 0.5 * (hi - lo) + 1e-6
         return lo - pad, hi + pad
 
     def _likelihood(self, test, y, sigma_meas):
-        """Плотность измерения y при каждом объяснении."""
+        """Плотность измерения y при каждом объяснении.
+
+        У «причины не из списка» предсказания нет, поэтому ей отвечает широкое распределение с
+        тяжёлыми хвостами (Коши) по всему диапазону опыта. Оно нормировано на всей прямой: любое
+        значение для неё возможно, но ни одно не «ожидается» — совпадение с узким предсказанием
+        настоящего объяснения всегда весит больше, а промах мимо всех предсказаний достаётся ей.
+        """
         lo, hi = self._span(test)
+        centre, scale = 0.5 * (lo + hi), 0.25 * (hi - lo)
         out = {}
         for a in self.alternatives:
             pred = test.predictions.get(a.id)
             if pred is None:
-                out[a.id] = np.full(np.shape(y), 1.0 / (hi - lo))      # «не из списка»: возможно что угодно
+                out[a.id] = 1.0 / (math.pi * scale * (1.0 + ((np.asarray(y, dtype=float) - centre) / scale) ** 2))
             else:
                 s = math.hypot(pred[1], sigma_meas)
                 out[a.id] = np.exp(-0.5 * ((np.asarray(y) - pred[0]) / s) ** 2) / (s * math.sqrt(2 * math.pi))
@@ -87,7 +97,7 @@ class Inquiry:
     def gain(self, test):
         """Ожидаемое сокращение неопределённости от опыта, в битах (взаимная информация)."""
         lo, hi = self._span(test)
-        y = np.linspace(lo, hi, 400)
+        y = np.linspace(lo, hi, 1200)
         like = self._likelihood(test, y, test.sigma)
         joint = np.array([self.posterior[a.id] * like[a.id] for a in self.alternatives])   # объяснение × y
         py = joint.sum(axis=0)
@@ -110,11 +120,13 @@ class Inquiry:
 
     def choose(self):
         """Следующий опыт: наибольшая польза на единицу заряда. None — опыты больше не нужны или невозможны."""
-        if self.conclusion or self.settled or len(self.order) >= self.max_tests:
+        if self.conclusion or self.settled or self.maneuvers >= self.max_tests:
             return None
         best, score = None, 0.0
         for test in self.tests:
-            if test.measured is not None or self.spent + test.cost > self.budget:
+            if test.measured is not None and (not test.repeatable or test.repeats >= 2):
+                continue
+            if self.spent + test.cost > self.budget:
                 continue
             test.gain_bits = round(self.gain(test), 3)
             if test.gain_bits < self.min_gain:
@@ -124,8 +136,8 @@ class Inquiry:
                 best, score = test, value
         return best
 
-    def record(self, test_id, value, sigma, t):
-        """Результат опыта: пересчитать вероятности объяснений."""
+    def record(self, test_id, value, sigma, t, cost=None, maneuver=True):
+        """Результат опыта: пересчитать вероятности объяснений. cost — сколько заряда ушло на самом деле."""
         test = next(x for x in self.tests if x.id == test_id)
         like = self._likelihood(test, float(value), sigma)
         weights = {a.id: self.posterior[a.id] * float(like[a.id]) for a in self.alternatives}
@@ -133,21 +145,29 @@ class Inquiry:
         if total > 0:
             self.posterior = {k: v / total for k, v in weights.items()}
         test.measured = {'value': round(float(value), 4), 'sigma': round(float(sigma), 4), 't': round(float(t), 1)}
+        test.repeats += 1
+        if cost is not None:
+            test.cost = max(float(cost), 0.0)
         self.spent += test.cost
         self.order.append(test_id)
+        if maneuver:
+            self.maneuvers += 1
 
-    def close(self, t, action=''):
+    def close(self, t, action='', veto=None):
+        """Зафиксировать вывод. veto — причина, по которой вывод нельзя считать установленным, даже если
+        вероятность высока (например, объяснение принято только по исключению, без прямого опыта)."""
         best, p = self.best
         by_id = {a.id: a for a in self.alternatives}
         rivals = sorted(((v, k) for k, v in self.posterior.items() if k != best), reverse=True)
-        if self.settled:
+        if self.settled and not veto:
             status = 'identified'
-            text = f'{by_id[best].statement} — вероятность {p:.0%} после {len(self.order)} опыт(ов)'
+            text = (f'{by_id[best].statement} — вероятность {p:.0%}; замеров: {len(self.order)}' if self.order
+                    else f'{by_id[best].statement} — по исключению, без нового опыта')
         else:
             status = 'insufficient'
             rival = by_id[rivals[0][1]].statement if rivals else '—'
-            reason = ('ни одно объяснение из списка не подошло' if best == OTHER else
-                      'опытов, которые их различили бы, не осталось' if len(self.order) < self.max_tests
+            reason = (veto if veto else 'ни одно объяснение из списка не подошло' if best == OTHER else
+                      'опытов, которые их различили бы, не осталось' if self.maneuvers < self.max_tests
                       else 'лимит опытов исчерпан')
             text = (f'недостаточно данных: вероятнее всего «{by_id[best].statement}» ({p:.0%}), но не исключено '
                     f'«{rival}» ({rivals[0][0]:.0%}); {reason}') if rivals else 'недостаточно данных'

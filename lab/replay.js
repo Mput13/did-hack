@@ -8,6 +8,11 @@
 //
 // ES-модуль без сборки и без внешних библиотек. Вся вёрстка — внутри переданного контейнера,
 // классы с префиксом rp-. Стили — в replay.css (подключается сам, если оболочка его не подключила).
+//
+// Необязательные части записи (нет поля — нет блока):
+//   inquiries  расследования агента: панель «Расследования», дорожка на шкале времени, метки на арене;
+//   pose_fix   поправка положения по лидару: третий график по времени;
+//   energy_model, result.inquiries — сводки под панелью расследований и в итоге прогона.
 
 const NS = 'http://www.w3.org/2000/svg';
 const TAU = Math.PI * 2;
@@ -80,6 +85,24 @@ function plural(n, one, few, many) {
   return many;
 }
 
+/**
+ * Тексты, собранные в Python (журнал, планы, расследования): десятичная точка -> запятая, дефис перед числом -> минус,
+ * «53%» -> «53 %», «после 1 опыт(ов)» -> «после 1 опыта».
+ */
+function ru(text) {
+  if (text == null) return '';
+  return String(text)
+    .replace(/(\d)\.(\d)/g, '$1,$2')
+    .replace(/(^|[\s(;:=≈×«])-(\d)/g, '$1−$2')
+    .replace(/(\d+)\s*опыт\(ов\)/g, (_, n) => `${n} ${plural(+n, 'опыта', 'опытов', 'опытов')}`)
+    .replace(/(\d)%/g, '$1 %');
+}
+/** Конечное число или null. */
+const fin = (v) => (v == null || v === '' || !Number.isFinite(+v) ? null : +v);
+const cap = (text) => (text ? text[0].toUpperCase() + text.slice(1) : '');
+/** Сколько знаков после запятой нужно, чтобы на отрезке такой длины числа различались. */
+const digitsFor = (span) => (span >= 20 ? 0 : span >= 2 ? 1 : span >= 0.2 ? 2 : 3);
+
 let colorProbe = null;
 /** Любая запись цвета CSS -> [r, g, b]. */
 function rgbOf(color, fallback) {
@@ -107,10 +130,11 @@ const uid = (p) => `${p}${++uidCounter}`;
 const MODE_RU = {
   start: 'старт', explore: 'разведка', travel: 'в пути', approach: 'подход к образцу', collect: 'сбор',
   return: 'возврат', think: 'думает', escape: 'отъезд назад', done: 'финиш',
+  experiment: 'ставит опыт', probe: 'ставит опыт', wait: 'ждёт',
 };
 const KIND_RU = {
   observe: 'наблюдение', hypothesis: 'гипотеза', verdict: 'вердикт', decision: 'решение',
-  action: 'действие', alarm: 'тревога', llm: 'модель',
+  action: 'действие', alarm: 'тревога', llm: 'модель', inquiry: 'расследование',
 };
 const HYP_RU = { open: 'открыта', confirmed: 'подтверждена', refuted: 'опровергнута', outdated: 'устарела' };
 const SOURCE_RU = {
@@ -121,7 +145,8 @@ const TRIGGER_RU = {
   start: 'старт', candidate_found: 'появилось место для проверки', candidate_lost: 'место не подтвердилось',
   sample_collected: 'образец собран', sensor_degraded: 'датчик шумит', hazard: 'штраф в опасной зоне',
   return: 'пора возвращаться', model_mismatch: 'расход не сошёлся с прогнозом', subgoal_done: 'подцель выполнена',
-  false_collect: 'сбор не удался', queue_empty: 'подцели закончились',
+  false_collect: 'сбор не удался', queue_empty: 'подцели закончились', inquiry_closed: 'расследование закончено',
+  inquiry_opened: 'началось расследование', fault: 'сбой', collision: 'столкновение',
 };
 const SUBGOAL_RU = {
   explore: 'разведать участок', investigate: 'проверить место', goto: 'ехать в точку',
@@ -130,21 +155,50 @@ const SUBGOAL_RU = {
 const WORLD_RU = {
   soil_change: 'Грунт изменился', new_hazard: 'Появилась новая опасная зона',
   sensor_fault: 'Датчик начал шуметь', sensor_recovered: 'Датчик снова в норме',
+  fault: 'Начался сбой', fault_end: 'Сбой закончился',
 };
 const WORLD_NOTICE = {
   soil_change: 'Грунт изменился — роботу об этом не сообщили',
   new_hazard: 'Появилась новая опасная зона — роботу об этом не сообщили',
   sensor_recovered: 'Датчик снова в норме',
+  fault_end: 'Сбой закончился',
 };
+// Виды сбоев (правила с несколькими причинами): что именно сломалось.
+const FAULT_RU = {
+  leak: 'батарея сама теряет заряд', sensor_noise: 'датчик образцов шумит',
+  sensor_stuck: 'датчик образцов залип', sensor_bias: 'датчик образцов занижает показания',
+};
+/** Подпись скрытого события среды с учётом вида сбоя. */
+function worldText(w) {
+  const kind = w.kind && FAULT_RU[w.kind];
+  if (w.type === 'fault') return kind ? `Сбой после штрафа: ${kind}` : WORLD_RU.fault;
+  if (w.type === 'sensor_fault' && kind && w.kind !== 'sensor_noise') return `Сбой: ${kind}`;
+  if (w.type === 'fault_end') return w.kind === 'leak' ? 'Утечка заряда прекратилась' : WORLD_RU.fault_end;
+  return WORLD_RU[w.type] || 'Скрытое изменение среды';
+}
+// Расследования: темы, исходы, настоящие причины (по ним судья сверяет вывод агента).
+const TOPIC_RU = { energy: 'Расход заряда', sensor: 'Датчик образцов', fault: 'Последствия штрафа' };
+const CAUSE_RU = {
+  leak: 'утечка заряда', soil: 'дорогой грунт', noise: 'шум датчика', stuck: 'залипание датчика',
+  bias: 'занижение показаний', none: 'сбоя не было', ok: 'датчик исправен', turn: 'расход на повороты',
+  load: 'вес образцов', other: 'причина не из списка',
+};
+const INQ_SOURCE_RU = { rule: 'объяснения и опыты — по правилам агента', llm: 'объяснения и опыты предложила языковая модель' };
+const LETTERS = 'АБВГДЕЖЗИК';
 const BACKEND_RU = { fastsim: 'быстрый симулятор', gazebo: 'Gazebo' };
 const BACKEND_TITLE = {
   fastsim: 'Прогон посчитан в быстром симуляторе',
   gazebo: 'Прогон шёл в симуляторе Gazebo: робот с физикой, лидаром и навигацией',
 };
 const LEVEL_RU = { easy: 'лёгкий уровень', medium: 'средний уровень', hard: 'трудный уровень' };
-const AGENT_RU = { fixed: 'фиксированный план', adaptive: 'адаптивный агент' };
+const AGENT_RU = {
+  fixed: 'фиксированный план', adaptive: 'адаптивный агент', adaptive_ig: 'адаптивный агент, разведка по ожидаемой пользе',
+  adaptive_llm: 'адаптивный агент с языковой моделью', scientist: 'агент-исследователь',
+  scientist_llm: 'агент-исследователь с языковой моделью', spiral: 'спираль', gradient: 'подъём по сигналу',
+};
 // Какая тревога агента отвечает на какое скрытое изменение среды (как в did/metrics.py).
 const DETECT_TAG = { soil_change: 'model_mismatch', new_hazard: 'hazard', sensor_fault: 'sensor_degraded' };
+const FAULT_TAG = { leak: 'leak', sensor_noise: 'sensor_degraded', sensor_stuck: 'sensor_degraded', sensor_bias: 'sensor_degraded' };
 const PENALTY_TYPES = { collision: 1, false_collect: 1, hazard_hit: 1 };
 
 const DEFAULT_LAYERS = {
@@ -186,6 +240,12 @@ const ICO = {
   mPenalty: '<svg viewBox="0 0 14 14"><circle class="rp-m-penalty" cx="7" cy="7" r="5.8"/><path d="M4.7 4.7l4.6 4.6M9.3 4.7 4.7 9.3" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>',
   mAlarm: '<svg viewBox="0 0 14 14"><path class="rp-m-alarm" d="M7 1.4 12.8 11.6H1.2z"/><path d="M7 5v3.2" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/><circle cx="7" cy="10" r=".85" fill="#fff"/></svg>',
   mPlan: '<svg viewBox="0 0 14 14"><rect class="rp-m-plan" x="6" y="2.5" width="2" height="9" rx="1"/></svg>',
+  mInquiry: '<svg viewBox="0 0 14 14"><circle class="rp-m-inquiry" cx="6" cy="6" r="4.3"/><path class="rp-m-inquiry-h" d="M9.2 9.2 12.6 12.6"/></svg>',
+  chevron: '<svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  check: '<svg viewBox="0 0 16 16"><path d="M3.2 8.6l3.1 3.1 6.5-7.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  cross: '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  question: '<svg viewBox="0 0 16 16"><path d="M5.6 6a2.4 2.4 0 1 1 3.6 2.1c-.8.5-1.2.9-1.2 1.9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="8" cy="12.6" r="1" fill="currentColor"/></svg>',
+  arrow: '<svg viewBox="0 0 16 16"><path d="M3 8h9.5M9 4.5 12.5 8 9 11.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   // образцы легенды
   sSample: '<svg viewBox="0 0 20 14"><path d="M10 1.5 15.5 7 10 12.5 4.5 7z" fill="#fff" stroke="var(--rp-green-ink)" stroke-width="2"/><path d="M10 4.8 12.2 7 10 9.2 7.8 7z" fill="var(--rp-green)"/></svg>',
   sSoil: '<svg viewBox="0 0 20 14"><rect x="2" y="2" width="16" height="10" rx="1.5" fill="none" stroke="var(--rp-soil-3)" stroke-width="2"/><path d="M4 12 12 2M9 12 17 2" stroke="var(--rp-soil-3)" stroke-width="1.1"/></svg>',
@@ -478,6 +538,91 @@ function parseSubgoal(text) {
   return o;
 }
 
+/** Расследования из записи в едином виде: чего нет — null или пустой список, тексты уже с запятыми. */
+function readInquiries(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const q of list) {
+    if (!q || typeof q !== 'object') continue;
+    const t0 = fin(q.t_open);
+    if (t0 == null) continue;
+    const an = q.anomaly && typeof q.anomaly === 'object' ? q.anomaly : {};
+    const alts = (Array.isArray(q.alternatives) ? q.alternatives : []).filter((a) => a && a.id != null).map((a, i) => ({
+      id: String(a.id), letter: LETTERS[i] || String(i + 1), statement: ru(a.statement || CAUSE_RU[a.id] || a.id),
+      prior: fin(a.prior), posterior: fin(a.posterior),
+    }));
+    const t1 = fin(q.t_close);
+    const tests = (Array.isArray(q.tests) ? q.tests : []).filter((x) => x && typeof x === 'object').map((x, i) => {
+      const ms = x.measured && typeof x.measured === 'object' && fin(x.measured.value) != null
+        ? { value: +x.measured.value, sigma: Math.abs(fin(x.measured.sigma) || 0), t: fin(x.measured.t) != null ? +x.measured.t : (t1 != null ? t1 : t0) }
+        : null;
+      const P = x.predictions && typeof x.predictions === 'object' ? x.predictions : {};
+      const preds = [];
+      for (const a of alts) {                          // строки шкалы идут в том же порядке, что и объяснения
+        const pr = P[a.id];
+        const mean = pr == null ? null : fin(Array.isArray(pr) ? pr[0] : pr.mean);
+        if (mean == null) continue;
+        preds.push({ alt: a, mean, sigma: Math.abs(fin(Array.isArray(pr) ? pr[1] : pr.sigma) || 0) });
+      }
+      const cost = fin(x.cost);
+      const gain = fin(x.gain_bits);
+      return {
+        id: x.id != null ? String(x.id) : `t${i}`, name: ru(x.name || x.id || 'опыт'), cost, gain, duration: fin(x.duration_s),
+        unit: x.unit ? ru(x.unit) : '', preds, measured: ms, order: i,
+        // польза на единицу заряда; у почти бесплатного опыта на ноль не делим
+        eff: gain == null ? null : gain / Math.max(cost == null ? 0 : cost, 0.05),
+        free: cost != null && cost < 0.005,
+      };
+    });
+    // сначала проведённые опыты по времени измерения, затем остальные — по убыванию пользы на единицу заряда
+    tests.sort((a, b) => (a.measured ? 0 : 1) - (b.measured ? 0 : 1)
+      || (a.measured && b.measured ? a.measured.t - b.measured.t : (b.eff || 0) - (a.eff || 0)) || a.order - b.order);
+    const measuredT = tests.filter((x) => x.measured).map((x) => x.measured.t);
+    const c = q.conclusion && typeof q.conclusion === 'object' ? q.conclusion : null;
+    const best = c && c.best != null ? alts.find((a) => a.id === String(c.best)) || null : null;
+    out.push({
+      id: q.id != null ? String(q.id) : `Q${out.length + 1}`, topic: q.topic ? String(q.topic) : '', t0, t1,
+      anomaly: {
+        text: ru(an.text || 'измерения не сошлись с ожиданием'), x: fin(an.x), y: fin(an.y),
+        observed: fin(an.observed), expected: fin(an.expected), unit: an.unit ? ru(an.unit) : '',
+      },
+      alts, tests, measuredT,
+      tLast: measuredT.length ? Math.max.apply(null, measuredT) : (t1 != null ? t1 : t0),
+      conclusion: c ? { status: String(c.status || ''), best, confidence: fin(c.confidence), text: ru(c.text || '') } : null,
+      action: ru(q.action || ''), source: q.source ? String(q.source) : '', note: ru(q.note || ''),
+      critique: (Array.isArray(q.critique) ? q.critique : []).map((x) => (typeof x === 'string' ? { issue: ru(x), resolved: null }
+        : x && typeof x === 'object' ? { issue: ru(x.issue || x.text || ''), resolved: x.resolved == null ? null : !!x.resolved } : null)).filter((x) => x && x.issue),
+      // сверка со скрытой правдой сценария (её ставит судья после прогона)
+      truth: Array.isArray(q.truth) ? q.truth.map(String) : null, verdict: q.verdict ? String(q.verdict) : '',
+    });
+  }
+  return out.sort((a, b) => a.t0 - b.t0);
+}
+
+/** Поправка положения по лидару: сдвиг в сантиметрах и поворот в градусах по времени. null — показывать нечего. */
+function readPoseFix(list) {
+  if (!Array.isArray(list) || list.length < 2) return null;
+  const T = [];
+  const S = [];
+  const A = [];
+  let max = 0;
+  let maxA = 0;
+  for (const f of list) {
+    const t = f && typeof f === 'object' ? fin(f.t) : null;
+    if (t == null) continue;
+    const shift = Math.hypot(fin(f.dx) || 0, fin(f.dy) || 0) * 100;
+    const ang = ((fin(f.dth) || 0) * 180) / Math.PI;
+    T.push(t);
+    S.push(shift);
+    A.push(ang);
+    if (shift > max) max = shift;
+    if (Math.abs(ang) > maxA) maxA = Math.abs(ang);
+  }
+  // В быстром симуляторе одометрия точная и поправка всё время нулевая — такой график ничего не говорит.
+  if (T.length < 2 || (max < 0.1 && maxA < 0.05)) return null;
+  return { T, S, A, max, maxA };
+}
+
 function buildModel(trace, prev) {
   const tr0 = trace || {};
   const tr = tr0.track || {};
@@ -528,16 +673,33 @@ function buildModel(trace, prev) {
   };
   const soilStates = [{ t: -Infinity, soils: sc.soils || [] }];
   const trueHazards = (sc.hazards || []).map((z) => ({ t: -Infinity, zone: z }));
-  const faults = [];
-  const recovered = worldLog ? worldLog.filter((w) => w.type === 'sensor_recovered').map((w) => +w.t) : [];
+  const faults = [];           // сбои датчика образцов: {t0, t1, kind}
+  const leaks = [];            // утечки заряда: {t0, t1}
+  const planned = {};          // длительность сбоя датчика по расписанию сценария, по видам
+  for (const ev of sc.events || []) if (ev.type === 'sensor_fault') planned[ev.kind || 'sensor_noise'] = +ev.duration || 0;
   for (const ev of (sc.events || []).slice().sort(byT)) {
     const ta = applied(ev);
     if (ev.type === 'soil_change') soilStates.push({ t: ta, soils: ev.soils || [] });
     else if (ev.type === 'new_hazard' && ev.zone) trueHazards.push({ t: ta, zone: ev.zone });
-    else if (ev.type === 'sensor_fault' && Number.isFinite(ta)) {
-      const rec = recovered.find((r) => r > ta);
-      faults.push({ t0: ta, t1: rec != null ? rec : ta + (+ev.duration || 0), sigma: ev.sigma });
+    else if (ev.type === 'sensor_fault' && !(worldLog && worldLog.length) && Number.isFinite(ta)) {
+      faults.push({ t0: ta, t1: ta + (+ev.duration || 0), kind: ev.kind || 'sensor_noise' });
     }
+  }
+  if (worldLog && worldLog.length) {          // как в did/metrics.py: когда какой сбой действовал
+    const open = {};
+    for (const w of worldLog) {
+      if (w.type === 'fault') {
+        const iv = { t0: +w.t, t1: fin(w.until) != null ? +w.until : dur, kind: w.kind || 'sensor_noise' };
+        (w.kind === 'leak' ? leaks : faults).push(iv);
+      } else if (w.type === 'sensor_fault') {
+        open[w.kind || 'sensor_noise'] = +w.t;
+      } else if (w.type === 'sensor_recovered') {
+        const k = w.kind && w.kind in open ? w.kind : (!w.kind ? Object.keys(open)[0] : null);
+        if (k != null) { faults.push({ t0: open[k], t1: +w.t, kind: k }); delete open[k]; }
+      }
+    }
+    for (const k of Object.keys(open)) faults.push({ t0: open[k], t1: planned[k] ? open[k] + planned[k] : dur, kind: k });
+    faults.sort((p, q) => p.t0 - q.t0);
   }
   const samples = (sc.samples || []).map((p) => ({ x: p[0], y: p[1], tc: Infinity, at: null }));
   const collectT = [];
@@ -573,17 +735,24 @@ function buildModel(trace, prev) {
     }
   }
 
+  // --- расследования и поправка положения (в записи их может не быть) ---
+  const inquiries = readInquiries(tr0.inquiries);
+  const poseFix = readPoseFix(tr0.pose_fix);
+
   // --- метки шкалы времени ---
   const alarms = journal.filter((j) => j.kind === 'alarm');
+  // Агент «заметил» изменение, если после него появилась тревога или запись расследования с нужной меткой.
+  const detectors = journal.filter((j) => (j.kind === 'alarm' || j.kind === 'inquiry') && j.data && j.data.tag);
   const worldSrc = worldLog && worldLog.length ? worldLog
-    : (sc.events || []).filter((e) => !worldLog || +e.t < dur - 1).map((e) => ({ t: e.t, type: e.type })).sort(byT);
+    : (sc.events || []).filter((e) => !worldLog || +e.t < dur - 1).map((e) => ({ t: e.t, type: e.type, kind: e.kind })).sort(byT);
   const laneWorld = [];
   const lags = [];
   for (const w of worldSrc) {
-    const mark = { t: +w.t, kind: 'world', type: w.type, text: WORLD_RU[w.type] || String(w.type) };
-    const tag = DETECT_TAG[w.type];
+    const mark = { t: +w.t, kind: 'world', type: w.type, text: worldText(w) };
+    const tag = w.type === 'fault' ? FAULT_TAG[w.kind] : DETECT_TAG[w.type];
     if (tag) {
-      const hit = alarms.find((al) => al.t >= w.t && al.data && al.data.tag === tag);
+      const limit = w.type === 'fault' && fin(w.until) != null ? +w.until + 10 : Infinity;
+      const hit = detectors.find((al) => al.t >= w.t && al.t <= limit && al.data.tag === tag);
       if (hit) {
         mark.sub = hit.t - w.t < 0.05 ? 'Агент заметил сразу' : `Агент заметил через ${sec(hit.t - w.t)}`;
         lags.push({ t0: +w.t, t1: +hit.t });
@@ -611,19 +780,30 @@ function buildModel(trace, prev) {
       laneJudge.push({ t: +e.t, kind: 'penalty', text });
       penalties.push({ t: +e.t, type: e.type, x: e.x, y: e.y, text });
     } else {
-      laneJudge.push({ t: +e.t, kind: 'penalty', text: String(e.type) });
+      laneJudge.push({ t: +e.t, kind: 'penalty', text: `Сообщение судьи: ${e.type}` });
     }
   }
   const laneAgent = [];
-  for (const al of alarms) laneAgent.push({ t: +al.t, kind: 'alarm', text: `Тревога агента: ${al.text}` });
+  for (const al of alarms) laneAgent.push({ t: +al.t, kind: 'alarm', text: `Тревога агента: ${ru(al.text)}` });
   for (const p of plans) {
     laneAgent.push({ t: +p.t, kind: 'plan', text: `Новый план${p.trigger ? ` — ${TRIGGER_RU[p.trigger] || p.trigger}` : ''}` });
   }
   laneAgent.sort(byT);
+  const laneInquiry = [];
+  const inquirySpans = [];
+  for (const q of inquiries) {
+    const c = q.conclusion;
+    const sub = !c ? 'Расследование не закончено'
+      : c.status === 'identified' ? `Вывод: причина найдена${c.best ? ` — ${c.best.statement}` : ''}`
+        : 'Вывод: недостаточно данных';
+    laneInquiry.push({ t: q.t0, kind: 'inquiry', text: `Расследование ${q.id}: ${q.anomaly.text}`, sub });
+    inquirySpans.push({ t0: q.t0, t1: q.t1 != null ? q.t1 : dur });
+  }
   const evSet = new Set();
   for (const mk of laneWorld) evSet.add(mk.t);
   for (const mk of laneJudge) evSet.add(mk.t);
   for (const al of alarms) evSet.add(+al.t);
+  for (const q of inquiries) { evSet.add(q.t0); if (q.t1 != null) evSet.add(q.t1); }
   const eventTimes = Array.from(evSet).sort((p, q) => p - q);
 
   // --- сообщения поверх арены ---
@@ -632,8 +812,21 @@ function buildModel(trace, prev) {
     if (w.type === 'sensor_fault') continue;
     if (WORLD_NOTICE[w.type]) notices.push({ t0: +w.t, t1: +w.t + 6, side: 'truth', tone: w.type === 'sensor_recovered' ? 'ok' : 'warn', text: WORLD_NOTICE[w.type] });
   }
-  for (const f of faults) notices.push({ t0: f.t0, t1: f.t1, side: 'truth', tone: 'warn', text: 'Сбой датчика: показания шумят, роботу об этом не сообщили' });
-  for (const al of alarms) notices.push({ t0: +al.t, t1: +al.t + 6, side: 'agent', tone: 'agent', text: `Агент заметил: ${al.text}` });
+  for (const f of faults) {
+    const what = f.kind && f.kind !== 'sensor_noise' && FAULT_RU[f.kind] ? `Сбой: ${FAULT_RU[f.kind]}` : 'Сбой датчика: показания шумят';
+    notices.push({ t0: f.t0, t1: f.t1, side: 'truth', tone: 'warn', text: `${what}, роботу об этом не сообщили` });
+  }
+  for (const lk of leaks) notices.push({ t0: lk.t0, t1: lk.t1, side: 'truth', tone: 'warn', text: 'Сбой: батарея сама теряет заряд, роботу об этом не сообщили' });
+  for (const al of alarms) notices.push({ t0: +al.t, t1: +al.t + 6, side: 'agent', tone: 'agent', text: `Агент заметил: ${ru(al.text)}` });
+  for (const q of inquiries) {
+    const end = q.t1 != null ? q.t1 : dur;
+    notices.push({ t0: q.t0, t1: Math.max(end, q.t0 + 0.5), side: 'agent', tone: 'agent', text: `Расследование ${q.id}: ${q.anomaly.text}` });
+    if (q.t1 != null && q.conclusion) {
+      const c = q.conclusion;
+      const text = c.status === 'identified' ? `Вывод ${q.id}: ${c.best ? c.best.statement : 'причина найдена'}` : `Вывод ${q.id}: недостаточно данных, причина не названа`;
+      notices.push({ t0: q.t1, t1: q.t1 + 7, side: 'agent', tone: c.status === 'identified' ? 'agent' : 'agent', text });
+    }
+  }
   notices.sort((p, q) => p.t0 - q.t0);
 
   // --- планы: в старых записях подцели пустые, тогда берём их из журнала ---
@@ -666,7 +859,9 @@ function buildModel(trace, prev) {
       backend: tr0.backend || null, id: tr0.id || null, arm: tr0.arm || null,
       agent: (tr0.agent && tr0.agent.name) || null, level: sc.level || null, seed: sc.seed != null ? sc.seed : null,
     }, memHazards, penalties, soilBands, trackMult, eventTimes, notices, lags,
-    lanes: { world: laneWorld, judge: laneJudge, agent: laneAgent },
+    inquiries, inquirySpans, poseFix, leaks,
+    energyModel: tr0.energy_model && typeof tr0.energy_model === 'object' ? tr0.energy_model : null,
+    lanes: { world: laneWorld, judge: laneJudge, agent: laneAgent, inquiry: laneInquiry },
     plans: planList,
     plansT: planList.map((p) => p.t),
     pathsT: paths.map((p) => +p.t),
@@ -679,6 +874,13 @@ function buildModel(trace, prev) {
     soilsAt,
     collectedAt: (t) => upperBound(collectT, t),
     faultAt: (t) => faults.find((f) => t >= f.t0 && t < f.t1) || null,
+    leakAt: (t) => leaks.find((f) => t >= f.t0 && t < f.t1) || null,
+    /** Поправка положения к моменту t: {shift, ang} или null, если её ещё не было. */
+    poseAt(t) {
+      if (!poseFix) return null;
+      const i = upperBound(poseFix.T, t) - 1;
+      return i < 0 ? null : { shift: poseFix.S[i], ang: poseFix.A[i] };
+    },
     stateAt(t) {
       if (!n) {
         const b = base || [0, 0];
@@ -1440,6 +1642,38 @@ function createArena(host, cfg) {
       ctx.lineCap = 'butt';
     }
 
+    // 9а. Расследования: где агент заметил странность (это знание агента, а не истина)
+    if (model.inquiries.length && (L.beliefSamples || L.beliefSoil || L.beliefHazards)) {
+      for (const q of model.inquiries) {
+        if (q.t0 > t) break;
+        if (q.anomaly.x == null || q.anomaly.y == null) continue;
+        const px = X(q.anomaly.x), py = Y(q.anomaly.y);
+        const going = q.t1 == null ? !model.finished : t < q.t1;
+        if (going) {
+          const u = ((t - q.t0) % 1.4) / 1.4;
+          ctx.beginPath();
+          ctx.arc(px, py, 12 + 16 * u, 0, TAU);
+          ctx.strokeStyle = rgba(th.ink, 0.75 * (1 - u));
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        }
+        ctx.font = `700 10px ${th.font}`;
+        const w2 = Math.max(18, ctx.measureText(q.id).width + 9);
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(px - w2 / 2, py - 9, w2, 18, 9);
+        else ctx.rect(px - w2 / 2, py - 9, w2, 18);
+        ctx.fillStyle = rgba(going ? th.ink : th.surface, 1);
+        ctx.fill();
+        ctx.strokeStyle = rgba(going ? th.surface : th.ink, 1);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = going ? '#fff' : rgba(th.ink, 1);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(q.id, px, py + 0.5);
+      }
+    }
+
     // 10. Робот
     if (st.has) {
       const rr = clamp(0.105 * k, 7.5, 16);
@@ -1640,8 +1874,8 @@ function createLegend(host, api) {
  * Шкала времени
  * ========================================================================================== */
 
-const MARK_ICON = { world: ICO.mWorld, sample: ICO.mSample, penalty: ICO.mPenalty, alarm: ICO.mAlarm, plan: ICO.mPlan };
-const MARK_RANK = { world: 5, penalty: 4, alarm: 3, sample: 2, plan: 1 };
+const MARK_ICON = { world: ICO.mWorld, sample: ICO.mSample, penalty: ICO.mPenalty, alarm: ICO.mAlarm, plan: ICO.mPlan, inquiry: ICO.mInquiry };
+const MARK_RANK = { world: 5, penalty: 4, alarm: 3, inquiry: 3, sample: 2, plan: 1 };
 
 function niceStep(span, maxTicks) {
   const steps = [1, 2, 5, 10, 20, 30, 60, 120, 300, 600];
@@ -1742,7 +1976,7 @@ function createTimeline(host, api) {
       const track = h('div', 'rp-tl-lane');
       track.style.gridRow = String(li + 1);
       for (const lg of lane.lags || []) {
-        const bar2 = h('i', 'rp-tl-lag');
+        const bar2 = h('i', `rp-tl-lag${lane.lagClass ? ` ${lane.lagClass}` : ''}`);
         bar2.style.left = pos(lg.t0);
         bar2.style.width = `${(clamp((Math.min(lg.t1, dur) - Math.max(lg.t0, t0)) / span, 0, 1) * 100).toFixed(3)}%`;
         track.appendChild(bar2);
@@ -1909,7 +2143,8 @@ function createStatus(host, api) {
   const tTime = tile('Время');
   const tBat = tile('Заряд');
   const mBat = meter();
-  tBat.sub.appendChild(mBat.el);
+  const batNote = h('span', 'rp-tile-note');
+  tBat.sub.append(mBat.el, batNote);
   const tCol = tile('Собрано');
   const pips = h('div', 'rp-pips');
   tCol.sub.appendChild(pips);
@@ -1934,6 +2169,9 @@ function createStatus(host, api) {
     mBat.fill.style.width = `${(frac * 100).toFixed(1)}%`;
     const tone = batteryTone(frac);
     if (mBat.el.dataset.tone !== tone) mBat.el.dataset.tone = tone;
+    const leak = m.leakAt(t);
+    setText(batNote, leak ? 'утечка' : '');
+    batNote.classList.toggle('rp-tile-note-warn', !!leak);
     const got = m.collectedAt(t);
     setText(tCol.value, `${got} из ${m.total}`);
     const pk = `${got}/${m.total}`;
@@ -1953,17 +2191,17 @@ function createStatus(host, api) {
     const final = m.finished && m.result.score != null ? +m.result.score : null;
     const liveScore = !m.finished && m.result && m.result.score != null && t >= m.dur - 0.3 ? +m.result.score : null;
     setText(tScore.value, liveScore != null ? num(liveScore, 1) : score != null ? num(score, 1) : final != null ? num(final, 1) : '—');
-    setText(tScore.sub, final != null && score != null && Math.abs(score - final) > 0.049 ? `итог ${num(final, 1)}` : final != null ? 'итог прогона' : 'прогон идёт');
+    setText(tScore.sub, final != null && score != null && Math.abs(score - final) > 0.049 ? `итог ${num(final, 1)}` : final != null ? 'итог прогона' : api.follow ? 'прогон идёт' : 'итога в записи нет');
 
     const r = m.finished ? m.result : null;
     const ok = outcomeOf(r);
-    const key = r ? `${r.score}|${r.reason}|${r.returned}|${r.samples_collected}` : 'live';
+    const key = r ? `${r.score}|${r.reason}|${r.returned}|${r.samples_collected}` : `live:${api.follow}`;
     if (key !== outKey) {
       outKey = key;
       outcome.textContent = '';
       outcome.appendChild(h('span', 'rp-outcome-title', 'Итог прогона'));
       if (!r || !ok) {
-        outcome.appendChild(h('span', 'rp-outcome-text', 'прогон ещё идёт'));
+        outcome.appendChild(h('span', 'rp-outcome-text', api.follow ? 'прогон ещё идёт' : 'в записи итога нет: прогон не дошёл до конца или судья ещё не подвёл итог'));
       } else {
         outcome.appendChild(h('span', `rp-badge rp-badge-${ok.tone}`, ok.text));
         const facts = [
@@ -1973,6 +2211,13 @@ function createStatus(host, api) {
         ];
         const pen = (r.collisions || 0) + (r.false_collects || 0) + (r.hazard_hits || 0);
         facts.push(pen ? `${pen} ${plural(pen, 'штраф', 'штрафа', 'штрафов')}` : 'без штрафов');
+        const iq = r.inquiries && typeof r.inquiries === 'object' ? r.inquiries : null;
+        if (iq && fin(iq.total)) {
+          const bits = [];
+          if (fin(iq.identified)) bits.push(`причина найдена в ${iq.identified}`);
+          if (fin(iq.insufficient)) bits.push(`данных не хватило в ${iq.insufficient}`);
+          facts.push(`${iq.total} ${plural(iq.total, 'расследование', 'расследования', 'расследований')}${bits.length ? ` (${bits.join(', ')})` : ''}`);
+        }
         outcome.appendChild(h('span', 'rp-outcome-text', facts.join(' · ')));
       }
     }
@@ -2038,14 +2283,19 @@ function createCharts(host, api) {
   const tip = h('div', 'rp-tip rp-chart-tip');
   tip.hidden = true;
   const P = { l: 34, r: 12, t: 8, plot: 84, axis: 20 };
+  // Общая ось времени у всех графиков. Третий — поправка положения по лидару — есть только там,
+  // где одометрия расходилась с картой (прогоны в Gazebo); у каждого графика своя ось значений.
   const charts = [
-    { key: 'battery', title: 'Заряд', axis: false },
-    { key: 'sensor', title: 'Датчик образцов', axis: true },
+    { key: 'battery', title: 'Заряд' },
+    { key: 'sensor', title: 'Датчик образцов' },
+    { key: 'pose', title: 'Поправка положения по лидару, см', hint: 'На сколько сантиметров лидар сдвинул положение робота: так сильно одометрия разошлась с картой' },
   ];
   for (const c of charts) {
     c.fig = h('figure', `rp-chart rp-chart-${c.key}`);
     const head = h('figcaption', 'rp-chart-head');
-    head.appendChild(h('span', 'rp-chart-title', c.title));
+    const title = h('span', 'rp-chart-title', c.title);
+    if (c.hint) title.title = c.hint;
+    head.appendChild(title);
     c.keyBox = h('span', 'rp-chart-key');
     c.now = h('span', 'rp-chart-now');
     head.append(c.keyBox, c.now);
@@ -2058,15 +2308,16 @@ function createCharts(host, api) {
     it.append(h('i', swatchCls), h('span', null, text));
     box.appendChild(it);
   };
-  keyItem(charts[0].keyBox, 'rp-key-soil', 'робот на дорогом грунте');
-  keyItem(charts[0].keyBox, 'rp-key-pen', 'штраф');
-  keyItem(charts[1].keyBox, 'rp-key-fault', 'сбой датчика');
-  keyItem(charts[1].keyBox, 'rp-key-sample', 'образец собран');
   root.appendChild(tip);
   host.appendChild(root);
 
   let W = 0, t0 = 0, dur = 1, span = 1, plotW = 1;
+  let shown = [];
   const xOf = (t) => P.l + ((clamp(t, t0, dur) - t0) / span) * plotW;
+  /** Ряд графика: времена и значения. */
+  const seriesOf = (c, m) => (c.key === 'pose'
+    ? (m.poseFix ? { T: m.poseFix.T, V: m.poseFix.S, n: m.poseFix.T.length } : { T: [], V: [], n: 0 })
+    : { T: m.T, V: m.tr[c.key] || [], n: m.n });
 
   function build() {
     const m = api.model();
@@ -2077,18 +2328,41 @@ function createCharts(host, api) {
     dur = Math.max(m.dur, t0 + 0.001);
     span = dur - t0;
     plotW = Math.max(10, W - P.l - P.r);
-    for (const c of charts) {
-      const H = P.t + P.plot + (c.axis ? P.axis : 6);
+    shown = charts.filter((c) => c.key !== 'pose' || m.poseFix);
+    for (const c of charts) c.fig.hidden = !shown.includes(c);
+    // пояснения к полосам и отметкам — только то, что в этом прогоне есть
+    charts[0].keyBox.textContent = '';
+    keyItem(charts[0].keyBox, 'rp-key-soil', 'робот на дорогом грунте');
+    if (m.leaks.length) keyItem(charts[0].keyBox, 'rp-key-fault', 'утечка заряда');
+    keyItem(charts[0].keyBox, 'rp-key-pen', 'штраф');
+    charts[1].keyBox.textContent = '';
+    keyItem(charts[1].keyBox, 'rp-key-fault', 'сбой датчика');
+    keyItem(charts[1].keyBox, 'rp-key-sample', 'образец собран');
+    for (const c of shown) {
+      const axis = c === shown[shown.length - 1];
+      const plot = c.key === 'pose' ? Math.round(P.plot * 0.66) : P.plot;
+      const H = P.t + plot + (axis ? P.axis : 6);
       c.H = H;
+      c.plot = plot;
       c.svg.textContent = '';
       c.svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
       c.svg.setAttribute('width', W);
       c.svg.setAttribute('height', H);
-      const data = m.tr[c.key] || [];
-      const yMax = c.key === 'battery'
-        ? Math.max(m.rules.battery_start || 0, data.length ? Math.max.apply(null, data) : 0, 1)
-        : 1;
-      c.yOf = (v) => P.t + P.plot - (clamp(v, 0, yMax) / yMax) * P.plot;
+      const ser = seriesOf(c, m);
+      const data = ser.V;
+      let yMax = 1;
+      let yt = [0, 0.5, 1];
+      if (c.key === 'battery') {
+        yMax = Math.max(m.rules.battery_start || 0, data.length ? Math.max.apply(null, data) : 0, 1);
+        const stp = yMax <= 12 ? 5 : yMax <= 30 ? 10 : yMax <= 80 ? 20 : 50;
+        yt = [];
+        for (let v = 0; v <= yMax + 1e-6; v += stp) yt.push(v);
+      } else if (c.key === 'pose') {
+        const need = Math.max(m.poseFix.max * 1.08, 1);
+        yMax = [2, 5, 10, 20, 50, 100, 200, 500].find((v) => v >= need) || Math.ceil(need / 100) * 100;
+        yt = [0, yMax / 2, yMax];
+      }
+      c.yOf = (v) => P.t + plot - (clamp(v, 0, yMax) / yMax) * plot;
       c.yMax = yMax;
 
       // фон: полосы
@@ -2097,41 +2371,41 @@ function createCharts(host, api) {
         for (const b of m.soilBands) {
           const x0 = xOf(b.t0);
           const w = Math.max(1.5, xOf(b.t1) - x0);
-          s('rect', { x: x0.toFixed(1), y: P.t, width: w.toFixed(1), height: P.plot, fill: soilCss(b.mult), opacity: 0.34 }, bands);
+          s('rect', { x: x0.toFixed(1), y: P.t, width: w.toFixed(1), height: plot, fill: soilCss(b.mult), opacity: 0.34 }, bands);
           if (w >= 24) s('text', { x: (x0 + 3).toFixed(1), y: P.t + 11, class: 'rp-ch-bandlabel' }, bands).textContent = mult(b.mult);
         }
-      } else {
+        for (const lk of m.leaks) {
+          const x0 = xOf(lk.t0);
+          const w = Math.max(1.5, xOf(Math.min(lk.t1, dur)) - x0);
+          s('rect', { x: x0.toFixed(1), y: P.t, width: w.toFixed(1), height: plot, class: 'rp-ch-fault' }, bands);
+          if (w >= 50) s('text', { x: (x0 + 4).toFixed(1), y: P.t + plot - 5, class: 'rp-ch-bandlabel' }, bands).textContent = 'утечка';
+        }
+      } else if (c.key === 'sensor') {
         for (const f of m.faults) {
           const x0 = xOf(f.t0);
           const w = Math.max(1.5, xOf(Math.min(f.t1, dur)) - x0);
-          s('rect', { x: x0.toFixed(1), y: P.t, width: w.toFixed(1), height: P.plot, class: 'rp-ch-fault' }, bands);
+          s('rect', { x: x0.toFixed(1), y: P.t, width: w.toFixed(1), height: plot, class: 'rp-ch-fault' }, bands);
           if (w >= 78) s('text', { x: (x0 + 4).toFixed(1), y: P.t + 11, class: 'rp-ch-bandlabel' }, bands).textContent = 'сбой датчика';
         }
       }
       // сетка и подписи оси Y
       const grid = s('g', { class: 'rp-ch-grid' }, c.svg);
-      const yt = c.key === 'battery' ? (() => {
-        const stp = yMax <= 12 ? 5 : yMax <= 30 ? 10 : yMax <= 80 ? 20 : 50;
-        const arr = [];
-        for (let v = 0; v <= yMax + 1e-6; v += stp) arr.push(v);
-        return arr;
-      })() : [0, 0.5, 1];
       for (const v of yt) {
         const y = Math.round(c.yOf(v)) + 0.5;
         s('line', { x1: P.l, x2: W - P.r, y1: y, y2: y, class: v === 0 ? 'rp-ch-base' : 'rp-ch-gridline' }, grid);
-        s('text', { x: P.l - 6, y: y + 4, class: 'rp-ch-ytick' }, grid).textContent = c.key === 'battery' ? num(v, 0) : num(v, v === 0.5 ? 1 : 0);
+        s('text', { x: P.l - 6, y: y + 4, class: 'rp-ch-ytick' }, grid).textContent = c.key === 'sensor' ? num(v, v === 0.5 ? 1 : 0) : num(v, Number.isInteger(v) ? 0 : 1);
       }
-      if (c.axis) {
+      if (axis) {
         const stp = niceStep(span, Math.max(3, Math.floor(plotW / 62)));
         for (let v = Math.ceil((t0 - 1e-6) / stp) * stp; v <= dur + 1e-6; v += stp) {
           const x = xOf(v);
-          const txt = s('text', { x: x.toFixed(1), y: P.t + P.plot + 15, class: 'rp-ch-xtick' }, grid);
+          const txt = s('text', { x: x.toFixed(1), y: P.t + plot + 15, class: 'rp-ch-xtick' }, grid);
           txt.textContent = v + stp > dur + 1e-6 ? `${num(v, 0)} с` : num(v, 0);
         }
       }
       // линия: будущее бледное, прошедшее яркое
       let d = '';
-      for (let i = 0; i < m.n; i++) d += `${i ? 'L' : 'M'}${xOf(m.T[i]).toFixed(1)} ${c.yOf(data[i] || 0).toFixed(1)}`;
+      for (let i = 0; i < ser.n; i++) d += `${i ? 'L' : 'M'}${xOf(ser.T[i]).toFixed(1)} ${c.yOf(data[i] || 0).toFixed(1)}`;
       const clipId = uid('rp-clip');
       const cp = s('clipPath', { id: clipId }, c.svg);
       c.clip = s('rect', { x: 0, y: 0, width: 0, height: H }, cp);
@@ -2149,7 +2423,7 @@ function createCharts(host, api) {
           s('circle', { r: 5.5, class: 'rp-ch-pen' }, g);
           s('path', { d: 'M0-2.8v3M0 2.6v.1', class: 'rp-ch-penmark' }, g);
         }
-      } else {
+      } else if (c.key === 'sensor') {
         for (const e of m.events) {
           if (e.type !== 'sample_collected') continue;
           const x = xOf(e.t);
@@ -2157,14 +2431,15 @@ function createCharts(host, api) {
           s('path', { d: `M${x.toFixed(1)} ${y - 5.5}l5.5 5.5-5.5 5.5-5.5-5.5z`, class: 'rp-ch-sample' }, marks);
         }
       }
-      c.hover = s('line', { y1: P.t, y2: P.t + P.plot, class: 'rp-ch-hover', visibility: 'hidden' }, c.svg);
-      c.cursor = s('line', { y1: P.t - 2, y2: P.t + P.plot, class: 'rp-ch-cursor' }, c.svg);
+      c.hover = s('line', { y1: P.t, y2: P.t + plot, class: 'rp-ch-hover', visibility: 'hidden' }, c.svg);
+      c.cursor = s('line', { y1: P.t - 2, y2: P.t + plot, class: 'rp-ch-cursor' }, c.svg);
       c.dot = s('circle', { r: 4.5, class: 'rp-ch-dot' }, c.svg);
       const first = data.length ? data[0] : 0;
       const lastV = data.length ? data[data.length - 1] : 0;
       c.svg.setAttribute('aria-label', c.key === 'battery'
         ? `Заряд по времени: в начале ${num(first, 1)}, в конце ${num(lastV, 1)}. Точные значения — в блоке «Состояние сейчас».`
-        : 'Показание датчика образцов по времени, от 0 до 1. Точные значения — в блоке «Состояние сейчас».');
+        : c.key === 'sensor' ? 'Показание датчика образцов по времени, от 0 до 1. Точные значения — в блоке «Состояние сейчас».'
+          : `Поправка положения по лидару по времени, в сантиметрах: наибольшая ${num(m.poseFix.max, 1)}, в конце ${num(lastV, 1)}.`);
     }
     lastX = -1;
     setCursor(api.clock.t, m.stateAt(api.clock.t));
@@ -2173,11 +2448,12 @@ function createCharts(host, api) {
   let lastX = -1;
   function setCursor(t, st) {
     if (!W) return;
+    const m = api.model();
     const x = xOf(t);
     if (Math.abs(x - lastX) > 0.05) {
       lastX = x;
       const xs = x.toFixed(1);
-      for (const c of charts) {
+      for (const c of shown) {
         if (!c.cursor) continue;
         c.cursor.setAttribute('x1', xs);
         c.cursor.setAttribute('x2', xs);
@@ -2191,6 +2467,13 @@ function createCharts(host, api) {
     }
     setText(charts[0].now, `${num(st.battery, 1)} ед.`);
     setText(charts[1].now, num(st.sensor, 2));
+    const pc = charts[2];
+    if (shown.includes(pc) && pc.dot) {
+      const pf = m.poseAt(t);
+      pc.dot.setAttribute('visibility', pf ? 'visible' : 'hidden');
+      if (pf) pc.dot.setAttribute('cy', pc.yOf(pf.shift).toFixed(1));
+      setText(pc.now, pf ? `${num(pf.shift, 1)} см · поворот ${num(pf.ang, 1)}°` : 'поправок ещё не было');
+    }
   }
 
   // наведение: вертикаль и подсказка со всеми значениями
@@ -2209,7 +2492,7 @@ function createCharts(host, api) {
     if (!hv) return;
     const m = api.model();
     const x = xOf(hv.t).toFixed(1);
-    for (const cc of charts) {
+    for (const cc of shown) {
       cc.hover.setAttribute('x1', x);
       cc.hover.setAttribute('x2', x);
       cc.hover.setAttribute('visibility', 'visible');
@@ -2223,9 +2506,12 @@ function createCharts(host, api) {
     };
     row('rp-tip-key-battery', num(m.tr.battery[hv.i], 1), 'заряд, ед.');
     row('rp-tip-key-sensor', num(m.tr.sensor[hv.i], 2), 'датчик образцов');
+    const pf = m.poseAt(hv.t);
+    if (pf) row('rp-tip-key-pose', num(pf.shift, 1), `поправка положения, см (поворот ${num(pf.ang, 1)}°)`);
     const notes = [];
     if (m.trackMult[hv.i] > 1.01) notes.push(`робот на дорогом грунте ${mult(m.trackMult[hv.i])}`);
-    if (m.faultAt(hv.t)) notes.push('датчик шумит (сбой)');
+    if (m.faultAt(hv.t)) notes.push('сбой датчика образцов');
+    if (m.leakAt(hv.t)) notes.push('утечка заряда (сбой батареи)');
     const near = span * 0.012;
     for (const p of m.penalties) if (Math.abs(p.t - hv.t) <= near) notes.push(p.text);
     for (const ev of m.events) if (ev.type === 'sample_collected' && Math.abs(ev.t - hv.t) <= near) notes.push('образец собран');
@@ -2315,7 +2601,7 @@ function createPlan(host, api) {
       when.addEventListener('click', () => api.seekUser(p.t));
       meta.appendChild(when);
       if (p.trigger) meta.appendChild(h('span', 'rp-plan-trigger', `причина: ${TRIGGER_RU[p.trigger] || p.trigger}`));
-      why.textContent = p.reasoning || '—';
+      why.textContent = ru(p.reasoning) || '—';
       const list = p.subgoals || [];
       const shown = list.length > 5 ? list.slice(0, 4) : list;
       for (const g of shown) goals.appendChild(h('li', null, subgoalText(g)));
@@ -2368,7 +2654,7 @@ function createJournal(host, api) {
       const b = button(`rp-j rp-j-${kd.cls}`);
       b.hidden = true;
       const bodyEl = h('span', 'rp-j-body');
-      bodyEl.append(h('span', 'rp-j-kind', kd.label), h('span', 'rp-j-text', e.text));
+      bodyEl.append(h('span', 'rp-j-kind', kd.label), h('span', 'rp-j-text', ru(e.text)));
       b.append(h('span', 'rp-j-t', num(e.t, 1)), bodyEl);
       b.title = `Перейти к ${sec(e.t)}`;
       b.addEventListener('click', () => api.seekUser(e.t));
@@ -2458,9 +2744,9 @@ function createHypotheses(host, api) {
         top.append(h('span', 'rp-h-id', hp.id || ''), h('span', `rp-badge rp-badge-${stt}`, HYP_RU[stt] || stt),
           h('span', 'rp-h-when', closed ? `${num(hp.t_open, 1)} → ${num(hp.t_close, 1)} с` : `с ${sec(hp.t_open)}`));
         b.appendChild(top);
-        b.appendChild(h('div', 'rp-h-text', hp.statement || ''));
-        if (closed && hp.verdict) b.appendChild(h('div', 'rp-h-sub', `Вердикт: ${hp.verdict}`));
-        else if (hp.test) b.appendChild(h('div', 'rp-h-sub', `Проверка: ${hp.test}`));
+        b.appendChild(h('div', 'rp-h-text', ru(hp.statement)));
+        if (closed && hp.verdict) b.appendChild(h('div', 'rp-h-sub', `Вердикт: ${ru(hp.verdict)}`));
+        else if (hp.test) b.appendChild(h('div', 'rp-h-sub', `Проверка: ${ru(hp.test)}`));
         b.title = `Перейти к ${sec(closed ? hp.t_close : hp.t_open)}`;
         b.addEventListener('click', () => api.seekUser(closed ? hp.t_close : hp.t_open));
         if (prevStatus[hp.id] !== undefined && prevStatus[hp.id] !== stt) b.classList.add('rp-flash');
@@ -2530,6 +2816,511 @@ function createLlm(host, api) {
 }
 
 /* ============================================================================================
+ * Расследования: странность -> объяснения -> опыт -> предсказания и измерение -> вывод -> действие
+ * ========================================================================================== */
+
+/** Вероятность словами: «53 %», «меньше 1 %», «больше 99 %». */
+function pct(p) {
+  if (p == null) return '—';
+  if (p > 0 && p < 0.005) return 'меньше 1 %';
+  if (p > 0.995 && p < 1) return 'больше 99 %';
+  return `${num(p * 100, 0)} %`;
+}
+const bitsWord = (v) => (Math.abs(v - Math.round(v)) < 1e-9 ? plural(Math.round(v), 'бит', 'бита', 'бит') : 'бита');
+
+/** Круглые деления шкалы. */
+function niceAxis(lo, hi, target) {
+  if (!(hi > lo)) hi = lo + 1;
+  const raw = (hi - lo) / Math.max(1, target || 3);
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / pow;
+  const step = (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * pow;
+  const a = Math.floor(lo / step + 1e-9) * step;
+  const b = Math.ceil(hi / step - 1e-9) * step;
+  const ticks = [];
+  for (let v = a; v <= b + step * 1e-6; v += step) ticks.push(+v.toFixed(10));
+  return { lo: a, hi: b, ticks, step };
+}
+
+/**
+ * Шкала опыта: что предсказывало каждое объяснение (среднее ± разброс) и что получилось на самом деле.
+ * show: {measured: показывать ли измерение, winner: объяснение-победитель или null}
+ */
+function predScale(test, show) {
+  if (!test.preds.length) return null;
+  const ms = show.measured ? test.measured : null;
+  const vals = [];
+  for (const p of test.preds) vals.push(p.mean - 1.3 * p.sigma, p.mean + 1.3 * p.sigma);
+  if (test.measured) vals.push(test.measured.value - test.measured.sigma, test.measured.value + test.measured.sigma);
+  let lo = Math.min.apply(null, vals);
+  let hi = Math.max.apply(null, vals);
+  // Величины здесь почти всегда неотрицательные (расход, разброс): тогда шкала начинается с нуля.
+  const nonNeg = test.preds.every((p) => p.mean >= 0) && (!test.measured || test.measured.value >= 0);
+  if (nonNeg && lo < (hi - lo) * 0.6) lo = 0;
+  const pad = (hi - lo) * 0.06 || 0.5;
+  const ax = niceAxis(lo === 0 && nonNeg ? 0 : lo - pad, hi + pad, 3);
+  const span = ax.hi - ax.lo;
+  const d = digitsFor(span);
+  const pos = (v) => clamp(((v - ax.lo) / span) * 100, 0, 100);
+  const unit = test.unit ? ` ${test.unit}` : '';
+
+  const root = h('div', 'rp-sc');
+  const rows = test.preds.length;
+  // сетка делений — под строками
+  const grid = h('div', 'rp-sc-grid');
+  grid.style.gridRow = `2 / span ${rows}`;
+  for (const tk of ax.ticks) {
+    const line = h('i', tk === 0 ? 'rp-sc-zero' : null);
+    line.style.left = `${pos(tk).toFixed(2)}%`;
+    grid.appendChild(line);
+  }
+  root.appendChild(grid);
+
+  // подпись измерения над шкалой
+  const top = h('div', 'rp-sc-top');
+  if (ms) {
+    const x = pos(ms.value);
+    const lab = h('span', 'rp-sc-mlabel');
+    lab.append(h('span', null, 'измерено '), h('b', null, `${num(ms.value, d)}${unit}`));
+    lab.style.left = `${x.toFixed(2)}%`;
+    lab.dataset.side = x < 28 ? 'left' : x > 72 ? 'right' : 'mid';
+    top.appendChild(lab);
+  } else if (test.measured) {
+    top.appendChild(h('span', 'rp-sc-wait', 'измерение ещё идёт'));
+  } else {
+    top.appendChild(h('span', 'rp-sc-wait', 'опыт не проводился: только предсказания'));
+  }
+  root.appendChild(top);
+
+  const said = [];
+  test.preds.forEach((p, i) => {
+    const win = show.winner && show.winner === p.alt;
+    let fit = null;
+    if (ms) {
+      const sd = Math.hypot(p.sigma, ms.sigma);
+      fit = sd > 0 ? Math.abs(ms.value - p.mean) / sd <= 2 : Math.abs(ms.value - p.mean) < 1e-9;
+    }
+    const cls = `rp-sc-cell${win ? ' rp-sc-win' : ''}${fit === false ? ' rp-sc-miss' : ''}`;
+    const row = String(i + 2);
+    const letter = h('span', `rp-q-letter ${cls}`, p.alt.letter);
+    letter.title = p.alt.statement;
+    letter.style.gridRow = row;
+    const track = h('div', `rp-sc-track ${cls}`);
+    track.style.gridRow = row;
+    const a = pos(p.mean - p.sigma);
+    const b = pos(p.mean + p.sigma);
+    const band = h('i', 'rp-sc-int');
+    band.style.left = `${a.toFixed(2)}%`;
+    band.style.width = `${Math.max(b - a, 0).toFixed(2)}%`;
+    const dot = h('i', 'rp-sc-dot');
+    dot.style.left = `${pos(p.mean).toFixed(2)}%`;
+    track.append(band, dot);
+    track.title = `${p.alt.letter}. ${p.alt.statement}: предсказание ${num(p.mean, d)} ± ${num(p.sigma, d)}${unit}`;
+    const val = h('span', `rp-sc-val ${cls}`, `${num(p.mean, d)} ± ${num(p.sigma, d)}`);
+    val.style.gridRow = row;
+    const mark = h('span', `rp-sc-fit ${cls}`);
+    mark.style.gridRow = row;
+    if (fit != null) {
+      mark.appendChild(icon(fit ? ICO.check : ICO.cross, 'rp-ico rp-sc-fitico'));
+      mark.appendChild(h('span', null, fit ? 'сходится' : 'не сходится'));
+    }
+    root.append(letter, track, val, mark);
+    said.push(`${p.alt.letter} — ${num(p.mean, d)} ± ${num(p.sigma, d)}${fit == null ? '' : fit ? ', сходится' : ', не сходится'}`);
+  });
+
+  // отметка измерения поверх всех строк
+  if (ms) {
+    const over = h('div', 'rp-sc-over');
+    over.style.gridRow = `1 / span ${rows + 1}`;
+    if (ms.sigma > 0) {
+      const a = pos(ms.value - ms.sigma);
+      const b = pos(ms.value + ms.sigma);
+      const band = h('i', 'rp-sc-mband');
+      band.style.left = `${a.toFixed(2)}%`;
+      band.style.width = `${Math.max(b - a, 0).toFixed(2)}%`;
+      over.appendChild(band);
+    }
+    const line = h('i', 'rp-sc-mline');
+    line.style.left = `${pos(ms.value).toFixed(2)}%`;
+    over.appendChild(line);
+    root.appendChild(over);
+  }
+
+  const axis = h('div', 'rp-sc-axis');
+  axis.style.gridRow = String(rows + 2);
+  ax.ticks.forEach((tk, i) => {
+    const lab = h('span', null, num(tk, digitsFor(ax.step * 4)));
+    lab.style.left = `${pos(tk).toFixed(2)}%`;
+    if (i === 0) lab.dataset.side = 'left';
+    else if (i === ax.ticks.length - 1) lab.dataset.side = 'right';
+    axis.appendChild(lab);
+  });
+  const unitNote = h('span', 'rp-sc-unit', test.unit || '');
+  unitNote.style.gridRow = String(rows + 2);
+  root.append(axis, unitNote);
+  root.setAttribute('role', 'img');
+  root.setAttribute('aria-label', `Опыт «${test.name}». ${ms ? `Измерено ${num(ms.value, d)}${unit}. ` : ''}Предсказания объяснений: ${said.join('; ')}.`);
+  return root;
+}
+
+function createInquiries(host, api) {
+  const root = h('section', 'rp-inq');
+  root.hidden = true;
+  root.setAttribute('aria-label', 'Расследования агента');
+  const head = h('div', 'rp-inq-head');
+  const title = h('h3', 'rp-inq-title', 'Расследования');
+  const sum = h('span', 'rp-inq-sum');
+  const lead = h('p', 'rp-inq-lead');
+  const chain = ['заметил странность', 'выдвинул объяснения', 'выбрал опыт', 'сверил предсказания с измерением', 'сделал вывод'];
+  chain.forEach((txt, i) => {
+    if (i) lead.appendChild(icon(ICO.arrow, 'rp-ico rp-inq-arrow'));
+    lead.appendChild(h('span', null, txt));
+  });
+  head.append(title, sum, lead);
+  const list = h('div', 'rp-inq-list');
+  const extra = h('div', 'rp-inq-extra');
+  root.append(head, list, extra);
+  host.appendChild(root);
+
+  let cards = [];
+  const manual = new Map();          // раскрыл или свернул карточку сам человек
+
+  const seekBtn = (text, t, hint) => {
+    const b = button('rp-link rp-q-when', text);
+    b.title = hint || `Перейти к ${sec(t)}`;
+    b.addEventListener('click', (e) => { e.stopPropagation(); api.seekUser(t); });
+    return b;
+  };
+  const stepBox = (n, name) => {
+    const box = h('section', 'rp-q-step');
+    const hd = h('div', 'rp-q-stephead');
+    hd.append(h('span', 'rp-q-stepn', String(n)), h('span', 'rp-q-stepname', name));
+    box.appendChild(hd);
+    return box;
+  };
+
+  /* --- 1. что заметил --- */
+  function stepNoticed(q) {
+    const box = stepBox(1, 'Что заметил');
+    box.appendChild(h('p', 'rp-q-big', cap(q.anomaly.text)));
+    const an = q.anomaly;
+    const rate = q.topic === 'energy' || /ед/.test(an.unit);
+    if (rate && an.observed != null && an.expected != null && Math.abs(an.observed - an.expected) > 1e-9) {
+      const max = Math.max(Math.abs(an.observed), Math.abs(an.expected), 1e-9);
+      const d = digitsFor(max);
+      const cmp = h('div', 'rp-q-cmp');
+      const line = (label, v, cls) => {
+        const bar = h('div', `rp-bar ${cls}`);
+        const fillEl = h('i');
+        fillEl.style.width = `${clamp((Math.abs(v) / max) * 100, 0, 100).toFixed(1)}%`;
+        bar.appendChild(fillEl);
+        cmp.append(h('span', 'rp-q-cmplab', label), bar, h('b', null, `${num(v, d)}${an.unit ? ` ${an.unit}` : ''}`));
+      };
+      line('ожидал', an.expected, 'rp-bar-prior');
+      line('получил', an.observed, 'rp-bar-post');
+      cmp.setAttribute('role', 'img');
+      cmp.setAttribute('aria-label', `Ожидал ${num(an.expected, d)}, получил ${num(an.observed, d)} ${an.unit}`);
+      box.appendChild(cmp);
+    }
+    const foot = h('div', 'rp-q-foot');
+    foot.appendChild(seekBtn(`на ${sec(q.t0)}`, q.t0, 'Перейти к моменту, когда агент заметил странность'));
+    if (an.x != null && an.y != null) foot.appendChild(h('span', null, `в точке ${xy(an.x, an.y)} — на арене отмечена значком ${q.id}`));
+    box.appendChild(foot);
+    return box;
+  }
+
+  /* --- 2. объяснения --- */
+  function stepAlts(q, st) {
+    const box = stepBox(2, 'Возможные объяснения');
+    const key = h('div', 'rp-q-key');
+    key.append(h('i', 'rp-q-keysw rp-bar-prior'), h('span', null, 'до опыта'), h('i', 'rp-q-keysw rp-bar-post'), h('span', null, 'после'));
+    box.appendChild(key);
+    const postShown = st.state === 'closed' || (q.measuredT.length > 0 && st.seen >= q.measuredT.length);
+    const c = st.state === 'closed' ? q.conclusion : null;
+    const winner = c && c.status === 'identified' ? c.best : null;
+    for (const a of q.alts) {
+      const post = postShown ? a.posterior : null;
+      const out = post != null && post < 0.05;
+      const row = h('div', `rp-alt${winner === a ? ' rp-alt-win' : ''}${out ? ' rp-alt-out' : ''}`);
+      const main = h('div', 'rp-alt-main');
+      const text = h('div', 'rp-alt-text');
+      text.appendChild(h('span', null, cap(a.statement)));
+      if (winner === a) {
+        const tag = h('span', 'rp-alt-tag rp-alt-tag-win');
+        tag.append(icon(ICO.check), h('span', null, 'подтвердилось'));
+        text.appendChild(tag);
+      } else if (out) {
+        text.appendChild(h('span', 'rp-alt-tag', 'отпало'));
+      } else if (post != null && c && c.status !== 'identified') {
+        text.appendChild(h('span', 'rp-alt-tag rp-alt-tag-keep', 'не исключено'));
+      }
+      const bars = h('div', 'rp-alt-bars');
+      const line = (label, v, cls, wait) => {
+        const bar = h('div', `rp-bar ${cls}`);
+        const fillEl = h('i');
+        fillEl.style.width = v == null ? '0%' : `${clamp(v * 100, 0, 100).toFixed(1)}%`;
+        bar.appendChild(fillEl);
+        bars.append(h('span', 'rp-alt-lab', label), bar, h('b', wait ? 'rp-alt-wait' : null, wait || pct(v)));
+      };
+      line('до', a.prior, 'rp-bar-prior');
+      line('после', post, 'rp-bar-post', postShown ? null : 'ждём опыта');
+      main.append(text, bars);
+      const letter = h('span', 'rp-q-letter', a.letter);
+      row.append(letter, main);
+      row.setAttribute('role', 'group');
+      row.setAttribute('aria-label', `${a.letter}. ${a.statement}: до опыта ${pct(a.prior)}${postShown ? `, после ${pct(a.posterior)}` : ''}`);
+      box.appendChild(row);
+    }
+    if (!q.alts.length) box.appendChild(h('div', 'rp-empty', 'Объяснения в записи не указаны.'));
+    return box;
+  }
+
+  /* --- 3. опыты, предсказания и измерение --- */
+  function stepTests(q, st) {
+    const box = stepBox(3, 'Опыт: что предсказывали объяснения и что вышло');
+    const tests = q.tests;
+    if (!tests.length) {
+      box.appendChild(h('div', 'rp-empty', 'Опытов, которые различили бы объяснения, не нашлось.'));
+      return box;
+    }
+    box.appendChild(h('p', 'rp-q-note', 'Агент берёт опыт, где больше всего пользы на единицу заряда. Польза — на сколько бит опыт уменьшит сомнения: один бит — вдвое меньше.'));
+    const maxEff = Math.max.apply(null, tests.map((x) => x.eff || 0).concat([1e-9]));
+    const c = st.state === 'closed' ? q.conclusion : null;
+    const winner = c && c.status === 'identified' ? c.best : null;
+    for (const x of tests) {
+      const done = !!x.measured;
+      const shown = done && x.measured.t <= st.t + 1e-6;
+      const el = h('div', `rp-t${done ? ' rp-t-done' : ' rp-t-skip'}`);
+      const hd = h('div', 'rp-t-head');
+      hd.appendChild(h('span', 'rp-t-name', cap(x.name)));
+      if (done) {
+        const tag = h('span', 'rp-t-tag rp-t-tag-done');
+        tag.append(icon(ICO.check), h('span', null, shown ? 'проведён' : 'выбран'));
+        hd.append(tag, seekBtn(`${sec(x.measured.t)}`, x.measured.t, 'Перейти к моменту измерения'));
+      } else {
+        hd.appendChild(h('span', 'rp-t-tag', st.state === 'closed' ? 'не понадобился' : 'в запасе'));
+      }
+      el.appendChild(hd);
+      const meta = [];
+      if (x.gain != null) meta.push(`польза ${num(x.gain, 2)} ${bitsWord(x.gain)}`);
+      if (x.cost != null) meta.push(x.free ? 'заряда почти не стоит' : `цена ${num(x.cost, 2)} ед. заряда`);
+      if (x.duration != null) meta.push(`${num(x.duration, x.duration % 1 ? 1 : 0)} с`);
+      if (meta.length) el.appendChild(h('div', 'rp-t-meta', meta.join(' · ')));
+      if (x.eff != null) {
+        const eff = h('div', 'rp-t-eff');
+        const bar = h('div', `rp-bar ${done ? 'rp-bar-post' : 'rp-bar-prior'}`);
+        const fillEl = h('i');
+        fillEl.style.width = `${clamp((x.eff / maxEff) * 100, 0, 100).toFixed(1)}%`;
+        bar.appendChild(fillEl);
+        eff.append(bar, h('b', null, x.free ? 'почти бесплатно' : `${num(x.eff, x.eff >= 10 ? 0 : 1)} бит на ед. заряда`));
+        eff.title = 'Польза опыта на единицу заряда: чем длиннее полоса, тем выгоднее опыт';
+        el.appendChild(eff);
+      }
+      const scale = predScale(x, { measured: shown, winner });
+      if (scale) {
+        if (done) el.appendChild(scale);
+        else {
+          const det = h('details', 'rp-t-more');
+          det.appendChild(h('summary', null, 'что предсказывали объяснения'));
+          det.appendChild(scale);
+          el.appendChild(det);
+        }
+      }
+      box.appendChild(el);
+    }
+    if (q.alts.some((a) => a.id === 'other')) {
+      const other = q.alts.find((a) => a.id === 'other');
+      box.appendChild(h('p', 'rp-q-note', `У объяснения ${other.letter} («${other.statement}») предсказаний нет: оно допускает любое значение.`));
+    }
+    return box;
+  }
+
+  /* --- 4. вывод и действие --- */
+  function stepConclusion(q, st) {
+    const box = stepBox(4, 'Вывод и действие');
+    const c = q.conclusion;
+    if (st.state !== 'closed' || !c) {
+      const wait = h('div', 'rp-q-verdict rp-q-verdict-wait');
+      const ended = q.t1 == null && api.model().finished;
+      wait.append(h('div', 'rp-q-vtitle', ended ? 'Расследование не закончено' : 'Вывода пока нет'),
+        h('div', 'rp-q-vsub', ended ? 'Прогон завершился раньше, чем агент успел сделать вывод.' : 'Агент ставит опыт и ждёт измерения.'));
+      box.appendChild(wait);
+      if (q.t1 != null) box.appendChild(seekBtn(`перейти к выводу — ${sec(q.t1)}`, q.t1, 'Перейти к моменту, когда агент сделал вывод'));
+      return box;
+    }
+    const ok = c.status === 'identified';
+    const v = h('div', `rp-q-verdict ${ok ? 'rp-q-verdict-ok' : 'rp-q-verdict-ins'}`);
+    const vt = h('div', 'rp-q-vtitle');
+    vt.append(icon(ok ? ICO.check : ICO.question), h('span', null, ok ? 'Причина найдена' : 'Недостаточно данных'));
+    v.appendChild(vt);
+    const subs = [];
+    if (ok && c.confidence != null) subs.push(`уверенность ${pct(c.confidence)}`);
+    if (!ok) subs.push('агент не стал называть причину наугад');
+    if (subs.length) v.appendChild(h('div', 'rp-q-vsub', subs.join(' · ')));
+    const text = cap(c.text.replace(/^недостаточно данных[:.]?\s*/i, ''));
+    if (text) v.appendChild(h('p', 'rp-q-vtext', text));
+    box.appendChild(v);
+    if (q.action) {
+      const act = h('div', 'rp-q-action');
+      act.append(h('div', 'rp-q-actlab', 'Что сделал дальше'), h('p', null, cap(q.action)));
+      box.appendChild(act);
+    }
+    if (st.truthOn && (q.verdict || (q.truth && q.truth.length))) {
+      const names = (q.truth || []).map((id) => CAUSE_RU[id] || (q.alts.find((a) => a.id === id) || {}).statement || id);
+      const real = names.length ? `На самом деле: ${names.join(' и ')}.` : '';
+      const tone = { correct: 'ok', wrong: 'bad' }[q.verdict] || 'none';
+      const word = { correct: 'вывод верный', wrong: 'вывод неверный', unverifiable: 'проверить нечем: явной причины в сценарии нет', insufficient: 'агент причину не назвал' }[q.verdict] || '';
+      const tr = h('div', `rp-q-truth rp-q-truth-${tone}`);
+      tr.appendChild(h('div', 'rp-q-actlab', 'Сверка судьи со скрытой правдой'));
+      const line = h('p');
+      if (tone !== 'none') line.appendChild(icon(tone === 'ok' ? ICO.check : ICO.cross));
+      line.appendChild(h('span', null, [word ? cap(word) + '.' : '', real].filter(Boolean).join(' ')));
+      tr.appendChild(line);
+      box.appendChild(tr);
+    }
+    if (q.critique.length) {
+      const cr = h('div', 'rp-q-crit');
+      cr.appendChild(h('div', 'rp-q-actlab', 'Возражения к выводу'));
+      const ul = h('ul');
+      for (const it of q.critique) {
+        const li = h('li');
+        li.appendChild(h('span', null, cap(it.issue)));
+        if (it.resolved != null) li.appendChild(h('span', `rp-t-tag${it.resolved ? ' rp-t-tag-done' : ''}`, it.resolved ? 'снято' : 'осталось'));
+        ul.appendChild(li);
+      }
+      cr.appendChild(ul);
+      box.appendChild(cr);
+    }
+    const notes = [];
+    if (INQ_SOURCE_RU[q.source]) notes.push(cap(INQ_SOURCE_RU[q.source]));
+    if (q.note) notes.push(cap(q.note));
+    if (notes.length) box.appendChild(h('p', 'rp-q-note', notes.join('. ')));
+    return box;
+  }
+
+  function makeCard(q) {
+    const el = h('article', 'rp-q');
+    const top = h('div', 'rp-q-top');
+    const toggle = button('rp-q-toggle');
+    toggle.appendChild(icon(ICO.chevron));
+    const headBtn = button('rp-q-head');
+    const body = h('div', 'rp-q-body');
+    top.append(headBtn, toggle);
+    el.append(top, body);
+    const card = { q, el, headBtn, toggle, body, key: '', open: false };
+    headBtn.addEventListener('click', () => {
+      manual.delete(q.id);                   // щелчок по карточке возвращает её к обычному поведению
+      api.seekUser(q.t0);
+    });
+    toggle.addEventListener('click', () => {
+      manual.set(q.id, !card.open);
+      update(api.clock.t, true);
+    });
+    return card;
+  }
+
+  function paintCard(card, st) {
+    const q = card.q;
+    const c = q.conclusion;
+    card.open = st.open;
+    card.el.dataset.state = st.state;
+    card.el.dataset.status = st.state === 'closed' && c ? (c.status === 'identified' ? 'identified' : 'insufficient') : '';
+    card.el.classList.toggle('rp-q-open', st.open);
+    // шапка
+    const hb = card.headBtn;
+    hb.textContent = '';
+    hb.appendChild(h('span', 'rp-q-id', q.id));
+    if (TOPIC_RU[q.topic]) hb.appendChild(h('span', 'rp-q-topic', TOPIC_RU[q.topic]));
+    if (st.state === 'future') {
+      hb.appendChild(h('span', 'rp-q-anomaly rp-q-muted', `впереди — начнётся на ${sec(q.t0)}`));
+    } else {
+      hb.appendChild(h('span', 'rp-q-anomaly', cap(q.anomaly.text)));
+      hb.appendChild(h('span', 'rp-q-time', q.t1 != null && st.state === 'closed' ? `${num(q.t0, 1)} → ${sec(q.t1)}` : `с ${sec(q.t0)}`));
+      if (st.state === 'closed' && c) {
+        const ok = c.status === 'identified';
+        hb.appendChild(h('span', `rp-badge ${ok ? 'rp-badge-good' : 'rp-badge-open'}`, ok ? 'причина найдена' : 'недостаточно данных'));
+        if (ok && c.best && !st.open) hb.appendChild(h('span', 'rp-q-short', c.best.statement));
+      } else {
+        hb.appendChild(h('span', 'rp-badge rp-badge-live', q.t1 == null && api.model().finished ? 'не закончено' : 'идёт'));
+      }
+    }
+    hb.title = st.state === 'future' ? `Перейти к началу расследования: ${sec(q.t0)}` : `Перейти к моменту, когда агент заметил странность: ${sec(q.t0)}`;
+    card.toggle.disabled = st.state === 'future';
+    card.toggle.setAttribute('aria-expanded', String(st.open));
+    card.toggle.setAttribute('aria-label', st.open ? `Свернуть расследование ${q.id}` : `Развернуть расследование ${q.id}`);
+    card.toggle.title = st.open ? 'Свернуть' : 'Развернуть';
+    // тело
+    card.body.textContent = '';
+    card.body.hidden = !st.open;
+    if (!st.open) return;
+    const steps = h('div', 'rp-q-steps');
+    steps.append(stepNoticed(q), stepAlts(q, st), stepTests(q, st), stepConclusion(q, st));
+    card.body.appendChild(steps);
+  }
+
+  function update(t, force) {
+    if (!cards.length) return;
+    const truthOn = api.truthOn();
+    let cur = -1;
+    for (let i = 0; i < cards.length; i++) if (cards[i].q.t0 <= t + 1e-6) cur = i;
+    cards.forEach((card, i) => {
+      const q = card.q;
+      const state = t + 1e-6 < q.t0 ? 'future' : (q.t1 != null && t + 1e-6 >= q.t1 ? 'closed' : 'open');
+      const seen = state === 'future' ? 0 : q.measuredT.filter((x) => x <= t + 1e-6).length;
+      const open = state !== 'future' && (manual.has(q.id) ? manual.get(q.id) : i === cur);
+      const key = `${state}:${seen}:${open}:${truthOn}`;
+      if (key === card.key && !force) return;
+      const flash = card.key && card.key.split(':')[0] !== state && state !== 'future';
+      card.key = key;
+      paintCard(card, { state, seen, open, truthOn, t });
+      if (flash) {
+        card.el.classList.remove('rp-flash');
+        void card.el.offsetWidth;
+        card.el.classList.add('rp-flash');
+      }
+    });
+  }
+
+  function build() {
+    const m = api.model();
+    const qs = m.inquiries;
+    root.hidden = !qs.length;
+    list.textContent = '';
+    extra.textContent = '';
+    cards = qs.map(makeCard);
+    for (const card of cards) list.appendChild(card.el);
+    if (!qs.length) return;
+    const found = qs.filter((q) => q.conclusion && q.conclusion.status === 'identified').length;
+    const ins = qs.filter((q) => q.conclusion && q.conclusion.status !== 'identified').length;
+    const parts = [`${qs.length} ${plural(qs.length, 'расследование', 'расследования', 'расследований')}`];
+    if (found) parts.push(`причина найдена: ${found}`);
+    if (ins) parts.push(`недостаточно данных: ${ins}`);
+    if (qs.length - found - ins) parts.push(`не закончено: ${qs.length - found - ins}`);
+    setText(sum, parts.join(' · '));
+    // что агент узнал о расходе заряда за прогон
+    const em = m.energyModel;
+    const UNIT = { per_m: 'ед/м', per_m_load: 'ед/м', per_rad: 'ед/рад', per_s: 'ед/с' };
+    const rows = em ? Object.keys(em).filter((k) => em[k] && fin(em[k].value) != null) : [];
+    if (rows.length) {
+      extra.appendChild(h('div', 'rp-inq-extratitle', 'Модель расхода заряда, которую агент уточнил за этот прогон'));
+      const dl = h('div', 'rp-inq-model');
+      for (const k of rows) {
+        const sd = Math.abs(fin(em[k].sigma) || 0);
+        const d = sd > 0 ? (sd >= 1 ? 1 : sd >= 0.1 ? 2 : 3) : 2;
+        const it = h('div', 'rp-inq-modelrow');
+        it.append(h('span', null, cap(ru(em[k].label || k))),
+          h('b', null, `${num(em[k].value, d)}${sd > 0 ? ` ± ${num(sd, d)}` : ''}${UNIT[k] ? ` ${UNIT[k]}` : ''}`));
+        dl.appendChild(it);
+      }
+      extra.appendChild(dl);
+    }
+    update(api.clock.t, true);
+  }
+
+  return { el: root, build, update, destroy() { root.remove(); } };
+}
+
+/* ============================================================================================
  * mountReplay
  * ========================================================================================== */
 
@@ -2568,7 +3359,10 @@ export function mountReplay(container, opts = {}) {
       { label: 'среда', title: 'Скрытые изменения среды. Полоска после метки — сколько прошло, пока агент заметил', marks: model.lanes.world, lags: model.lags },
       { label: 'судья', title: 'Сообщения судьи: собранные образцы и штрафы', marks: model.lanes.judge },
       { label: 'агент', title: 'Тревоги агента (треугольники) и моменты, когда он менял план (штрихи)', marks: model.lanes.agent },
-    ],
+    ].concat(model.inquiries.length ? [
+      { label: 'расследования', title: 'Расследования агента: лупа — момент, когда он заметил странность, полоска — пока шли опыты', marks: model.lanes.inquiry, lags: model.inquirySpans, lagClass: 'rp-tl-lag-inq' },
+    ] : []),
+    truthOn: () => !!(layers.truthSamples || layers.truthSoil || layers.truthHazards),
     seekUser(t) {
       clock.seek(t);
       if (follow) setFollowing(clock.t >= model.dur - 0.3);
@@ -2588,12 +3382,18 @@ export function mountReplay(container, opts = {}) {
   // шапка: режимы показа и сведения о прогоне
   let viewSwitch = null;
   let runInfo = null;
+  let inqJump = null;
   if (!compact) {
     const head = h('div', 'rp-head');
     const toolbar = h('div', 'rp-toolbar');
     toolbar.appendChild(h('span', 'rp-toolbar-label', 'Показать'));
     viewSwitch = createViewSwitch(toolbar, api, false);
     head.appendChild(toolbar);
+    // быстрый переход к панели расследований (она под ареной)
+    inqJump = button('rp-inq-jump');
+    inqJump.hidden = true;
+    inqJump.title = 'Показать панель расследований';
+    head.appendChild(inqJump);
     runInfo = createRunInfo(head, 'full');
     root.appendChild(head);
   }
@@ -2614,7 +3414,7 @@ export function mountReplay(container, opts = {}) {
   const timeline = createTimeline(stage, api);
   const statusLine = compact ? createStatusLine(stage, api) : null;
 
-  let status = null, charts = null, plan = null, journal = null, hypotheses = null, llm = null;
+  let status = null, charts = null, plan = null, journal = null, hypotheses = null, llm = null, inquiries = null;
   if (!compact) {
     const sideA = h('div', 'rp-side-a');
     const logs = h('div', 'rp-logs');
@@ -2632,12 +3432,15 @@ export function mountReplay(container, opts = {}) {
     journal = createJournal(logcol, api);
     llm = createLlm(logcol, api);
     hypotheses = createHypotheses(logs, api);
+    inquiries = createInquiries(root, api);
+    inqJump.addEventListener('click', () => inquiries.el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
 
   function syncLayers() {
     arena.setLayers(layers);
     if (viewSwitch) viewSwitch.sync(layers);
     if (legend) legend.sync(layers, model);
+    if (inquiries) inquiries.update(clock.t);       // сверка с правдой видна только вместе со слоями «как на самом деле»
   }
 
   function setFollowing(v) {
@@ -2657,6 +3460,7 @@ export function mountReplay(container, opts = {}) {
     if (journal) journal.update(t);
     if (hypotheses) hypotheses.update(t);
     if (llm) llm.update(t);
+    if (inquiries) inquiries.update(t);
     if (follow && !following && t >= model.dur - 1e-6 && !clock.playing) setFollowing(true);
     for (const cb of timeCbs) {
       try { cb(t, st); } catch (e) { console.error(e); }
@@ -2668,6 +3472,13 @@ export function mountReplay(container, opts = {}) {
     timeline.build();
     if (charts) charts.build();
     if (journal) journal.build();
+    if (inquiries) inquiries.build();
+    if (inqJump) {
+      const nq = model.inquiries.length;
+      inqJump.hidden = !nq;
+      inqJump.textContent = '';
+      if (nq) inqJump.append(icon(ICO.mInquiry, 'rp-ico'), h('span', null, `Расследования: ${nq}`), icon(ICO.down, 'rp-ico'));
+    }
     if (runInfo) runInfo.sync(model);
     syncLayers();
   }
@@ -2735,7 +3546,7 @@ export function mountReplay(container, opts = {}) {
       clock.destroy();
       timeline.destroy();
       arena.destroy();
-      for (const part of [status, charts, plan, journal, hypotheses, llm, statusLine, runInfo]) if (part) part.destroy();
+      for (const part of [status, charts, plan, journal, hypotheses, llm, inquiries, statusLine, runInfo]) if (part) part.destroy();
       timeCbs.clear();
       root.remove();
     },
@@ -2755,6 +3566,8 @@ const COMPARE_ROWS = [
   { label: 'Заезды в опасную зону', get: (r) => r.hazard_hits, fmt: (v) => num(v, 0), better: 'lower' },
   { label: 'Ложные сборы', get: (r) => r.false_collects, fmt: (v) => num(v, 0), better: 'lower' },
   { label: 'Столкновения', get: (r) => r.collisions, fmt: (v) => num(v, 0), better: 'lower' },
+  { label: 'Расследований', get: (r) => (r.inquiries ? fin(r.inquiries.total) : null), fmt: (v) => num(v, 0), better: null },
+  { label: 'Причина названа верно', get: (r) => (r.inquiries ? fin(r.inquiries.correct) : null), fmt: (v) => num(v, 0), better: 'higher' },
   { label: 'Путь, м', get: (r) => r.distance, fmt: (v) => num(v, 1), better: null },
   { label: 'Время прогона, с', get: (r) => (r.time != null ? r.time : r.t), fmt: (v) => num(v, 1), better: null },
 ];
@@ -2791,8 +3604,8 @@ export function mountCompare(container, opts = {}) {
     range: () => [totalStart(), totalDur()],
     lanes: () => [
       { label: 'среда', title: 'Скрытые изменения среды — одинаковые для обоих прогонов', marks: (models[0].lanes.world.length ? models[0] : models[1]).lanes.world.map((mk) => ({ t: mk.t, kind: mk.kind, text: mk.text })) },
-      { label: labels[0], title: 'Образцы, штрафы и тревоги первого прогона', marks: models[0].lanes.judge.concat(models[0].lanes.agent.filter((mk) => mk.kind === 'alarm')) },
-      { label: labels[1], title: 'Образцы, штрафы и тревоги второго прогона', marks: models[1].lanes.judge.concat(models[1].lanes.agent.filter((mk) => mk.kind === 'alarm')) },
+      { label: labels[0], title: 'Образцы, штрафы, тревоги и расследования первого прогона', marks: models[0].lanes.judge.concat(models[0].lanes.agent.filter((mk) => mk.kind === 'alarm'), models[0].lanes.inquiry) },
+      { label: labels[1], title: 'Образцы, штрафы, тревоги и расследования второго прогона', marks: models[1].lanes.judge.concat(models[1].lanes.agent.filter((mk) => mk.kind === 'alarm'), models[1].lanes.inquiry) },
     ],
     seekUser(t) { clock.seek(t); },
     toggle() { clock.toggle(); },

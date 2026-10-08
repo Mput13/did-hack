@@ -22,6 +22,7 @@
 .pl-key i.pl-key__path { height: 0; border: 0; border-top: 3px dashed var(--blue); border-radius: 0; }
 .pl-check { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; color: var(--ink); font-size: 15px; }
 .pl-check__box { width: 18px; height: 18px; accent-color: var(--ink); cursor: pointer; }
+.pl-slam[hidden] { display: none; }
 
 .pl-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow-y: auto; padding-right: 2px; }
 .pl-card { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; }

@@ -274,10 +274,13 @@ def fig_story(arena, trace):
 def fig_mapping(arena, trace):
     from did.mapping import OccupancyMapper
     m = OccupancyMapper(arena)
+    first = None
     for s in trace['scans']:
         r = np.array(s['r'], dtype=float) / 100.0
         r[r <= 0] = np.inf
         m.update(s['x'], s['y'], s['th'], r)
+        if first is None:               # сколько пола видно с базы по первому же скану
+            first = round(m.coverage(), 4)
     fig, ax = axes()
     img = np.zeros((arena.h, arena.w, 4))
     inside = ndimage.binary_dilation(arena.free, iterations=2)
@@ -291,7 +294,8 @@ def fig_mapping(arena, trace):
     draw_robot(ax, tr['x'][0], tr['y'][0], tr['th'][0])
     name = save(fig, 'map_lidar.png')
     return {'file': name, 'scans': int(m.scans), 'rays': len(trace['scans'][0]['r']),
-            'coverage': round(m.coverage(), 4), 'agreement': round(m.agreement(), 4), 'run': trace['id']}
+            'coverage': round(m.coverage(), 4), 'agreement': round(m.agreement(), 4),
+            'coverage_first_scan': first, 'run': trace['id']}
 
 
 def path_len(pts):

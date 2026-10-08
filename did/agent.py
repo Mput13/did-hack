@@ -110,6 +110,7 @@ class Agent:
         self.hazard_map = HazardMap()                       # гипотезы о том, где опасные зоны
         self.hazards = []                                   # [(x, y, r)] — их краткая сводка для журнала
         self._risk = np.zeros(arena.free.shape)             # вероятность опасной зоны по клеткам
+        self._risk_full = self._risk                        # то же без временного исключения зоны, из которой выезжаем
         self._X, self._Y = arena.cell_centers()
         self._trail = deque(maxlen=14)                      # последние ~0,7 м пути: подход к месту штрафа
         self._trail_pause = -1e9
@@ -235,6 +236,7 @@ class Agent:
     def _sync_hazards(self, t, new=False):
         """Пересчитать карту риска и сводку по зонам после нового штрафа или уточнения."""
         self._risk = self.hazard_map.risk(self._X, self._Y, skip=self._grace[1])
+        self._risk_full = self._risk if self._grace[1] is None else self.hazard_map.risk(self._X, self._Y)
         self._risk_version = self.hazard_map.version
         self.hazards = [(x, y, r) for x, y, r in self.hazard_map.summary()]
         self._cost_dirty = True

@@ -52,7 +52,8 @@ def _job(args, knowledge=None):
         s = run_episode(level, seed, arm['agent'], experiment=spec_id, arm=folder,
                         scenario_args={**cond.get('scenario', {})},
                         config=arm.get('config'), rules=cond.get('rules'), llm=arm.get('llm'),
-                        sim=cond.get('sim'), knowledge=knowledge)
+                        sim=cond.get('sim'), knowledge=knowledge, study=arm.get('study'))
+        s.pop('study', None)              # отчёт исследования лежит в записи прогона, в сводку идут только метрики
         s['arm'], s['condition'] = arm['id'], cond['id']
         if knowledge is None:
             s.pop('science', None)            # нужно только варианту с памятью, в сводку не идёт

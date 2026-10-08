@@ -89,6 +89,7 @@ class FastWorld:
 
     backend = 'fastsim'
     dt = TICK_S
+    score_delay = 0.0           # итог судьи известен сразу
 
     def __init__(self, arena, level, seed, rules='base', drift=True):
         self.arena, self.level, self.seed, self.rules_name = arena, level, int(seed), rules
@@ -210,7 +211,7 @@ class Pilot:
         self._gaps.append((wall, gap))
         if gap > LAG_S:
             # Робот какое-то время ехал вслепую по последней команде: дальше — медленно, пока такты не выровняются.
-            self._slow_until = wall + 3.0
+            self._slow_until = wall + 5.0
         self.battery = obs.battery
         if obs.sensor is not None:
             self.sensor = obs.sensor
@@ -565,7 +566,7 @@ class Pilot:
     def _mission_tick(self, obs):
         bot = self.bot
         if self._finish_at is None and (obs.done or bot.finished):
-            self._finish_at = time.monotonic() + 1.5        # дождаться итогового счёта судьи
+            self._finish_at = time.monotonic() + self.world.score_delay     # дождаться итогового счёта судьи
         if self._finish_at is not None and time.monotonic() >= self._finish_at:
             self._end_mission('finished')
 
@@ -690,6 +691,7 @@ class Pilot:
             'mission': self._mission_view() if self.mission else None,
             'agents': [{'id': k, 'label': v} for k, v in MISSION_AGENTS.items() if k in PRESETS],
             'truth': w.truth(),
+            'slam': w.slam_view() if hasattr(w, 'slam_view') else None,
         }
 
 
@@ -943,7 +945,9 @@ HUB = PilotHub()
 def run_ros(level, seed, rules='base', wait_s=600.0):
     """Пульт при запущенном стенде (pixi run stand-gui / pixi run demo). Работает до Ctrl+C."""
     import rclpy
+    from nav_msgs.msg import OccupancyGrid
     from rclpy.executors import SingleThreadedExecutor
+    from rclpy.qos import DurabilityPolicy, QoSProfile
     from std_srvs.srv import Trigger
 
     from .ros_agent import SETTLE_UNTIL_S, RosIO
@@ -953,6 +957,15 @@ def run_ros(level, seed, rules='base', wait_s=600.0):
             super().__init__()
             self.reset_cli = self.create_client(Trigger, '/did/reset')
             self.clock_wall = 0.0
+            self.slam = None                    # последняя карта SLAM Toolbox: (номер, клетка, x0, y0, сетка)
+            latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+            self.create_subscription(OccupancyGrid, '/slam/map', self._on_slam, latched)
+
+        def _on_slam(self, msg):
+            i = msg.info
+            grid = np.asarray(msg.data, dtype=np.int8).reshape(i.height, i.width)
+            self.slam = ((self.slam[0] + 1) if self.slam else 1, i.resolution, i.origin.position.x,
+                         i.origin.position.y, grid)
 
         def _on_clock(self, msg):
             super()._on_clock(msg)
@@ -962,12 +975,14 @@ def run_ros(level, seed, rules='base', wait_s=600.0):
         """Стенд Gazebo как мир пульта."""
         backend = 'gazebo'
         can_respawn = False
+        score_delay = 1.5       # с: итоговый /did/score приходит чуть позже финиша
 
         def __init__(self, io):
             self.io = io
             self.level, self.seed, self.rules_name = level, seed, rules
             self.rules = Rules(**SCIENCE) if rules == 'science' else Rules()
             self.scenario = generate(level, seed, load_arena())    # только для подписи записи, если нет /did/truth
+            self._slam = (0, None)
             self._still = None                  # (поза, с какого времени симуляции она не меняется)
             self._settled = False
             self._t_spawn = None                # время симуляции, когда судья увидел робота
@@ -1016,6 +1031,29 @@ def run_ros(level, seed, rules='base', wait_s=600.0):
 
         def score(self):
             return self.io.score or {}
+
+        def slam_view(self):
+            """Карта SLAM Toolbox на сетке арены — для показа рядом с нашей. None, если SLAM не запущен.
+
+            Кадр карты SLAM начинается там, где робот стоял при запуске, то есть на базе.
+            """
+            m = self.io.slam
+            if m is None or m[0] == self._slam[0]:
+                return self._slam[1]
+            ver, res, ox, oy, grid = m
+            X, Y = arena.cell_centers()
+            ix = np.floor((X - BASE[0] - ox) / res).astype(np.intp)
+            iy = np.floor((Y - BASE[1] - oy) / res).astype(np.intp)
+            ok = (ix >= 0) & (ix < grid.shape[1]) & (iy >= 0) & (iy < grid.shape[0])
+            v = np.full(arena.free.shape, -1, dtype=np.int16)
+            v[ok] = grid[iy[ok], ix[ok]]
+            seen, occ = v >= 0, v > 50
+            view = {'res': arena.res, 'x0': arena.x0, 'y0': arena.y0, 'w': arena.w, 'h': arena.h, 'enc': 'occ',
+                    'version': ver, 'data': encode_grid(np.where(seen, np.where(occ, 255, 1), 0)),
+                    'coverage': round(float(seen[arena.free].mean()), 4),
+                    'agreement': round(float((occ == arena.solid)[seen].mean()), 4) if seen.any() else 0.0}
+            self._slam = (ver, view)
+            return view
 
         def world_log(self):
             return (self.io.truth or {}).get('world_log', [])

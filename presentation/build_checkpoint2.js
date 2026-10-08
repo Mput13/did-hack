@@ -10,7 +10,9 @@
 //        --no-pdf — только pptx и текст доклада.
 //
 // Числа на слайдах читаются из runs/*/summary.json, runs/llm_real/*.summary.json и data/checkpoint2.json.
-// Снимки показа берутся из demo/shots/, шаги сценария — из docs/demo_script.md, если эти файлы есть.
+// Снимки показа берутся из demo/shots/, шаги сценария — из docs/demo_script.md, если эти файлы есть:
+// один снимок встаёт в середину слайда «Сценарий», два — занимают его нижнюю половину целиком.
+// Пока их нет, в середине стоит снимок проигрывателя веб-лаборатории (figures/lab_shots.js).
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
@@ -106,7 +108,10 @@ const R = D.rules;
 const RANGE_M = R.battery_start / R.drain_per_m;
 
 // ---------- 2. снимки показа и шаги сценария, если их уже положили ----------
-const SHOTS_DIR = path.join(ROOT, "demo", "shots");
+const SHOTS_DIR = process.env.DEMO_SHOTS_DIR || path.join(ROOT, "demo", "shots");
+// Запасной снимок интерфейса (проигрыватель веб-лаборатории): node figures/lab_shots.js при запущенном pixi run lab.
+const LAB_SHOT = path.join(__dirname, "assets", "c2", "shots", "lab_run_gazebo_hard.png");
+const LAB_META = fs.existsSync(LAB_SHOT.replace(/\.png$/, ".json")) ? JSON.parse(fs.readFileSync(LAB_SHOT.replace(/\.png$/, ".json"), "utf8")) : null;
 const SHOTS = fs.existsSync(SHOTS_DIR)
   ? fs.readdirSync(SHOTS_DIR).filter((f) => /\.(png|jpe?g)$/i.test(f)).sort().map((f) => path.join(SHOTS_DIR, f))
   : [];
@@ -118,29 +123,33 @@ function shotCaption(file) {
   if (/replay|player|проигр/.test(name)) return "Проигрыватель: прогон по секундам";
   return path.basename(file).replace(/\.[^.]+$/, "").replace(/^\d+[_-]?/, "").replace(/[_-]+/g, " ");
 }
-const DEFAULT_STEPS = [
-  ["Старт", `база, заряд ${ru(R.battery_start, 0)}; стены известны, образцы — нет`],
-  ["Поиск", "слушает датчик, уточняет карту вероятностей"],
-  ["Сбор", `подъезжает ближе ${ru(R.collect_radius_m * 100, 0)} см и забирает образец`],
-  ["Проверка гипотез", "штраф, расход, шум: причина ищется опытом"],
-  ["Возврат", "считает заряд на дорогу и едет на базу"],
-];
-function demoSteps() {
-  const f = path.join(ROOT, "docs", "demo_script.md");
-  if (!fs.existsSync(f)) return null;
-  const cut = (s, n) => (s.length > n ? s.slice(0, n - 1).replace(/[\s,;:.—-]+\S*$/, "") + "…" : s);
-  const steps = [];
-  for (const line of fs.readFileSync(f, "utf8").split("\n")) {
-    const m = line.match(/^\s*(?:\d+[.)]|#{2,3}\s+(?:Шаг\s*\d+[.:)]?)?)\s*(.+?)\s*$/);
-    if (!m) continue;
-    const clean = m[1].replace(/[*_`]/g, "").trim();
-    const parts = clean.split(/\s+[—–-]\s+|:\s+|\.\s+/);
-    if (!parts[0]) continue;
-    steps.push([cut(parts[0], 24), cut(parts.slice(1).join(". ") || "", 62)]);
-  }
-  return steps.length >= 3 ? steps.slice(0, 5) : null;
+// Сценарий показа (docs/demo_script.md): полный путь «запуск → карта → задача → движение → результат».
+// Текст шагов на слайде написан по этому файлу; из него же читаются числа и проверяется, что шаги не поменялись.
+const DEMO_FILE = path.join(ROOT, "docs", "demo_script.md");
+const DEMO = fs.existsSync(DEMO_FILE) ? fs.readFileSync(DEMO_FILE, "utf8") : "";
+const demoNum = (re) => { const m = DEMO.match(re); return m ? m[1].replace(".", ",") : null; };
+const DEMO_FIRST_MAP = demoNum(/Карта построена:\s*(\d+)\s*%/);       // сколько пола лидар видит ещё до движения
+const DEMO_READY_S = demoNum(/около\s+(\d+)\s+секунд от запуска/);
+const DEMO_STEP_NAMES = [...DEMO.matchAll(/^\|\s*(\d+)\.\s*([^|]+?)\s*\|/gm)].map((m) => m[2]);
+if (DEMO && !["Запуск", "Маршрут", "Миссия"].every((w) => DEMO_STEP_NAMES.some((n) => n.startsWith(w)))) {
+  console.warn("ВНИМАНИЕ: шаги в docs/demo_script.md изменились (" + DEMO_STEP_NAMES.join(", ") + ") — сверьте слайд «Сценарий работы робота».");
 }
-const STEPS = demoSteps() || DEFAULT_STEPS;
+const STEPS = [
+  ["Запуск", "одна команда поднимает мир, робота, судью и пульт"],
+  ["Карта", DEMO_FIRST_MAP ? `робот ещё стоит, а лидар уже видит ${DEMO_FIRST_MAP}% пола` : "лидар строит карту с первой секунды"],
+  ["Задача", "точка или маршрут щелчком по карте — или миссия: собрать образцы"],
+  ["Движение", "путь в обход столбов; положение поправляется по лидару"],
+  ["Результат", "образцы собраны, робот на базе; счёт судьи и журнал гипотез"],
+];
+// Из снимков показа берём один с пультом и один с окном Gazebo, если по именам их можно различить.
+function pickShots(files) {
+  const pult = files.find((f) => /pult|pilot|пульт/i.test(path.basename(f)));
+  const gzw = files.find((f) => /gazebo|gz/i.test(path.basename(f)) && f !== pult);
+  const picked = [pult, gzw].filter(Boolean);
+  for (const f of files) if (picked.length < 2 && !picked.includes(f)) picked.push(f);
+  return picked.slice(0, 2);
+}
+const DEMO_SHOTS = pickShots(SHOTS);
 
 // ---------- 3. оформление ----------
 const TEAM = [
@@ -336,50 +345,64 @@ pres.addSection({ title: SEC_A });
 // ---------- 3. сценарий работы робота ----------
 {
   const st = D.story, res = st.result;
-  const s = content(SEC_A, "Сценарий работы робота",
-    `Один настоящий прогон в Gazebo на трудном уровне: собрано ${res.samples_collected} из ${res.samples_total}, робот вернулся на базу`, [
-      "Робот стартует с базы и слушает датчик близости: каждое показание уточняет карту вероятностей, синее на кадрах.",
-      "Когда место становится уверенным, он подъезжает и собирает образец.",
-      `Если что-то идёт не так — штраф, лишний расход, шум датчика, — он записывает гипотезу и проверяет её: в этом прогоне гипотез ${st.hypotheses.total}, подтверждено ${st.hypotheses.confirmed}.`,
-      "Заряд на дорогу домой он считает сам и возвращается на базу.",
-      "ЗДЕСЬ — ЖИВОЙ ПОКАЗ: открыть пульт, щёлкнуть точку на карте, показать, как робот едет в Gazebo и как строится карта (около минуты).",
-    ]);
+  const runLine = `настоящая миссия в Gazebo на трудном уровне: собрано ${res.samples_collected} из ${res.samples_total}, робот вернулся на базу`;
+  const s = content(SEC_A, "Сценарий работы робота", "Полный сценарий одной командой: запуск → карта → задача → движение → результат", [
+    "Полный сценарий — пять шагов: запуск, карта, задача, движение, результат.",
+    `Одна команда поднимает мир, робота, судью и пульт. Робот ещё стоит, а лидар уже строит карту${DEMO_FIRST_MAP ? `: видно ${DEMO_FIRST_MAP} процентов пола` : ""}.`,
+    "Задачу можно дать щелчком по карте — точку или маршрут — либо запустить миссию, и тогда робот сам ищет образцы.",
+    `На кадрах ${runLine}. По дороге он получил штраф, заметил сбой датчика и записал гипотезы: всего ${st.hypotheses.total}, подтверждено ${st.hypotheses.confirmed}.`,
+    "ЗДЕСЬ — ЖИВОЙ ПОКАЗ (docs/demo_script.md): пульт уже открыт; показать карту из одной точки, поставить маршрут из пяти-шести точек, нажать «Ехать», затем «Домой» и «Запустить миссию». Полный сценарий показа идёт около пяти минут — для короткой защиты хватит маршрута и начала миссии, итог миссии есть на слайде.",
+  ]);
   const n = STEPS.length, sw = (CW - (n - 1) * 0.2) / n;
   STEPS.forEach(([head, body], i) => {
     const x = X0 + i * (sw + 0.2);
     hexBadge(s, i + 1, x, TOP + 0.02, 0.44, `step-${i + 1}-badge`, C.text2);
-    text(s, head, { x: x + 0.62, y: TOP, w: sw - 0.62, h: 0.48, fontSize: 15, bold: true, valign: "middle", objectName: `step-${i + 1}-head` });
+    text(s, head, { x: x + 0.62, y: TOP, w: sw - 0.62, h: 0.48, fontSize: 16, bold: true, valign: "middle", objectName: `step-${i + 1}-head` });
     text(s, body, { x, y: TOP + 0.55, w: sw, h: 0.5, fontSize: 13, color: C.text2, objectName: `step-${i + 1}-body` });
   });
-  const y0 = 3.02;
-  if (SHOTS.length) {
-    // Снимки показа: до двух рядом, во всю ширину.
-    const shots = SHOTS.slice(0, 2), w = (CW - (shots.length - 1) * 0.3) / shots.length, h = 3.25;
-    shots.forEach((file, i) => {
+  const y0 = 2.98;
+  const quote = (q) => {
+    if (!q) return "";
+    let t = q.text.split(". Проверка")[0].replace(/(\d)\.(\d)/g, "$1,$2").replace(/-(\d)/g, "−$1");
+    if (t.length > 56) {                       // длинную запись режем по концу фразы или по запятой
+      const cutAt = Math.max(t.lastIndexOf(". ", 56), t.lastIndexOf(", ", 56));
+      t = cutAt > 20 ? t.slice(0, cutAt) : t.slice(0, 55).replace(/\s+\S*$/, "") + "…";
+    }
+    return t;
+  };
+  // Кадр прогона с подписью: секунда прогона по часам судьи (как в проигрывателе), заряд, собрано; строка журнала.
+  const frame = (f, i, x, fw) => {
+    const fh = fw * 4.79 / 5;
+    image(s, ASSET(f.file), { x, y: y0, w: fw, h: fh }, `frame-${i + 1}`, `Кадр прогона: ${f.label}`);
+    text(s, `${ru(f.t, 0)} с · заряд ${ru(f.battery, 0)} · собрано ${f.collected} из ${f.total}`,
+      { x: x - 0.15, y: y0 + fh + 0.04, w: fw + 0.3, h: 0.28, fontSize: 13, bold: true, align: "center", valign: "middle", objectName: `frame-${i + 1}-state` });
+    text(s, `Журнал: «${quote(f.quote)}»`, { x: x - 0.15, y: y0 + fh + 0.34, w: fw + 0.3, h: 0.5, fontSize: 11, color: C.text2, align: "center", objectName: `frame-${i + 1}-quote` });
+  };
+  const legend = () => text(s, `Кадры — ${runLine}. Синее — где агент ждёт образец, жёлтые кольца — где образцы на самом деле, зелёное — собрано, красное — штраф.`,
+    { x: X0, y: 6.54, w: CW, h: 0.26, fontSize: 11, color: C.accent5, align: "center", valign: "middle", objectName: "frames-legend" });
+  const center = DEMO_SHOTS[0] || (fs.existsSync(LAB_SHOT) ? LAB_SHOT : null);
+  if (DEMO_SHOTS.length >= 2) {
+    // Снимки показа: два рядом, во всю ширину.
+    const w = (CW - 0.3) / 2, h = 3.3;
+    DEMO_SHOTS.forEach((file, i) => {
       const x = X0 + i * (w + 0.3);
-      image(s, file, { x, y: y0, w, h }, `shot-${i + 1}`, shotCaption(file));
-      text(s, shotCaption(file), { x, y: y0 + h + 0.08, w, h: 0.4, fontSize: 13, color: C.text2, align: "center", objectName: `shot-${i + 1}-caption` });
+      const r = image(s, file, { x, y: y0, w, h, align: "top" }, `shot-${i + 1}`, shotCaption(file));
+      text(s, shotCaption(file), { x, y: r.y + r.h + 0.08, w, h: 0.4, fontSize: 13, color: C.text2, align: "center", objectName: `shot-${i + 1}-caption` });
     });
+  } else if (center) {
+    // Начало и конец прогона — кадрами, середина — снимком интерфейса (или первым снимком показа).
+    const cw = 5.9, fw = (CW - cw - 0.5) / 2;
+    frame(st.frames[0], 0, X0, fw);
+    frame(st.frames[st.frames.length - 1], st.frames.length - 1, X0 + CW - fw, fw);
+    const cap = DEMO_SHOTS[0] ? shotCaption(center)
+      : `Веб-лаборатория: тот же прогон в проигрывателе${LAB_META && LAB_META.time_s ? `, ${ru(LAB_META.time_s, 0)} с` : ""} — карта, графики, журнал гипотез`;
+    const r = image(s, center, { x: X0 + fw + 0.25, y: y0, w: cw, h: 3.2, align: "top" }, "scenario-shot", cap);
+    text(s, cap, { x: X0 + fw + 0.25, y: r.y + r.h + 0.05, w: cw, h: 0.26, fontSize: 12, color: C.text2, align: "center", valign: "middle", objectName: "scenario-shot-caption" });
+    legend();
   } else {
-    const fw = 2.55, fh = fw * 4.79 / 5, gap = (CW - 4 * fw) / 3;
-    const quote = (q) => {
-      if (!q) return "";
-      let t = q.text.split(". Проверка")[0].replace(/(\d)\.(\d)/g, "$1,$2").replace(/-(\d)/g, "−$1");
-      if (t.length > 56) {                       // длинную запись режем по концу фразы или по запятой
-        const cutAt = Math.max(t.lastIndexOf(". ", 56), t.lastIndexOf(", ", 56));
-        t = cutAt > 20 ? t.slice(0, cutAt) : t.slice(0, 55).replace(/\s+\S*$/, "") + "…";
-      }
-      return t;
-    };
-    st.frames.forEach((f, i) => {
-      const x = X0 + i * (fw + gap);
-      image(s, ASSET(f.file), { x, y: y0, w: fw, h: fh }, `frame-${i + 1}`, `Кадр прогона: ${f.label}`);
-      text(s, `${ru(f.since_start, 0)} с · заряд ${ru(f.battery, 0)} · собрано ${f.collected} из ${f.total}`,
-        { x: x - 0.15, y: y0 + fh + 0.04, w: fw + 0.3, h: 0.28, fontSize: 13, bold: true, align: "center", valign: "middle", objectName: `frame-${i + 1}-state` });
-      text(s, `Журнал: «${quote(f.quote)}»`, { x: x - 0.15, y: y0 + fh + 0.34, w: fw + 0.3, h: 0.58, fontSize: 11, color: C.text2, align: "center", objectName: `frame-${i + 1}-quote` });
-    });
-    text(s, "Синее — где агент ждёт образец · жёлтые кольца — где образцы на самом деле · зелёные — собраны · красное — штраф и опасная зона в памяти агента",
-      { x: X0, y: 6.52, w: CW, h: 0.28, fontSize: 11, color: C.accent5, align: "center", valign: "middle", objectName: "frames-legend" });
+    const fw = 2.55, gap = (CW - 4 * fw) / 3;
+    st.frames.forEach((f, i) => frame(f, i, X0 + i * (fw + gap), fw));
+    legend();
   }
 }
 
@@ -508,7 +531,7 @@ pres.addSection({ title: SEC_A });
   ], { x: X0 + 0.25, y: 5.72, w: 4.85, h: 1.08, fontSize: 14, valign: "middle", objectName: "layers-text" });
 
   const iw = 3.1, ix = [6.3, 9.63], ih = 2.97;
-  [["Карта, построенная роботом", map.file, `по ${map.scans} сканам лидара в Gazebo; увидено ${pct(map.coverage, 1)}% пола, оранжевое — путь робота`, "Карта занятости, построенная по сканам лидара, и путь робота"],
+  [["Карта, построенная роботом", map.file, `по ${map.scans} сканам из записи прогона в Gazebo; увидено ${pct(map.coverage, 1)}% пола, оранжевое — путь робота`, "Карта занятости, построенная по сканам лидара, и путь робота"],
     ["Путь по сетке со стоимостями", nav.file, `оранжевое — путь на базу, ${ru(nav.path_m)} м; серое — запрет у стен; цветное — дорогой грунт`, "Путь на базу по сетке: запретная полоса у стен и зоны дорогого грунта"]]
     .forEach(([head, file, cap, alt], i) => {
       text(s, head, { x: ix[i], y: TOP, w: iw, h: 0.3, fontSize: 14, bold: true, objectName: `map-${i + 1}-head` });
@@ -744,7 +767,7 @@ function writeSpeech() {
   writeSpeech();
   console.log("готово:", OUT);
   console.log("доклад:", SPEECH);
-  console.log(`снимков показа: ${SHOTS.length}; шаги сценария: ${STEPS === DEFAULT_STEPS ? "по умолчанию" : "из docs/demo_script.md"}; серий: ${EXP_IDS.length}, прогонов: ${TOTAL_RUNS}, проверок: ${TESTS}`);
+  console.log(`снимков показа: ${SHOTS.length}${DEMO_SHOTS.length ? " (на слайде: " + DEMO_SHOTS.map((f) => path.basename(f)).join(", ") + ")" : ""}; сценарий показа: ${DEMO ? "docs/demo_script.md, шагов " + DEMO_STEP_NAMES.length : "файла нет"}; серий: ${EXP_IDS.length}, прогонов: ${TOTAL_RUNS}, проверок: ${TESTS}`);
   if (!ARGS.has("--no-pdf")) {
     const render = path.join(__dirname, "render_checkpoint2.js");
     if (fs.existsSync(render)) spawnSync(process.execPath, [render], { stdio: "inherit" });

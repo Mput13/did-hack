@@ -41,6 +41,8 @@ exp = "python -m did.experiments"
 run = "python -m did.runner"
 check = "pytest tests -q"
 explain = "python tools/build_explainer.py"
+# Проверка перед показом: всё ли на месте и запускается ли (с --gazebo — ещё и мир с судьёй).
+preflight = "python tools/preflight.py"
 # Агент в Gazebo: при запущенном стенде (agent-ros) или всё одной командой (gazebo-run).
 agent-ros = "python -m did.ros_agent"
 gazebo-run = { cmd = "python tools/gazebo_run.py", depends-on = ["build"] }

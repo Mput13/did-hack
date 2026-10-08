@@ -29,6 +29,14 @@ METRICS = {
     'inq_insufficient': ('Исход «недостаточно данных» за прогон', 'шт.', 'lower'),
     'inq_energy': ('Заряд на опыты', 'ед.', 'lower'),
     'faults_found': ('Найдено сбоев', 'доля', 'higher'),
+    # исследования по заданию (did/study.py): оценка робота против скрытой правды сценария
+    'study_error_pct': ('Ошибка оценки', '% от истины', 'lower'),
+    'study_covered': ('Истина в заявленном интервале 95%', 'доля прогонов', 'higher'),
+    'study_halfwidth_pct': ('Заявленная погрешность, 95%', '% от оценки', 'lower'),
+    'study_reached': ('Требуемая точность достигнута', 'доля прогонов', 'higher'),
+    'study_measurements': ('Учтённых замеров', 'шт.', 'lower'),
+    'study_energy': ('Заряд на исследование', 'ед.', 'lower'),
+    'study_time': ('Время исследования', 'с', 'lower'),
 }
 
 
@@ -146,34 +154,51 @@ def verdict(pair, better):
 # ---------------------------------------------------------------------------------------------
 
 def fault_intervals(world):
-    """Когда какой сбой действовал: [(вид, начало, конец)] по журналу судьи."""
-    out, open_sensor = [], {}
+    """Когда какой сбой действовал: [(вид, начало, конец)] по журналу судьи.
+
+    Повторный штраф в той же зоне продлевает идущий сбой, а не начинает новый: перекрывающиеся
+    записи одного вида сливаются в один эпизод.
+    """
+    raw, open_sensor = [], {}
     for w in world:
         if w['type'] == 'fault':
-            out.append((w['kind'], w['t'], w['until']))
+            raw.append((w['kind'], w['t'], w['until']))
         elif w['type'] == 'sensor_fault':
             open_sensor[w.get('kind', 'sensor_noise')] = w['t']
         elif w['type'] == 'sensor_recovered' and w.get('kind') in open_sensor:
-            out.append((w['kind'], open_sensor.pop(w['kind']), w['t']))
-    out += [(k, t0, 1e9) for k, t0 in open_sensor.items()]
+            raw.append((w['kind'], open_sensor.pop(w['kind']), w['t']))
+    raw += [(k, t0, 1e9) for k, t0 in open_sensor.items()]
+    out = []
+    for kind, a, b in sorted(raw):
+        if out and out[-1][0] == kind and a <= out[-1][2] + 0.5:
+            out[-1] = (kind, out[-1][1], max(out[-1][2], b))
+        else:
+            out.append((kind, a, b))
     return out
 
 
 def score_inquiries(inquiries, scenario, world):
-    """Сколько расследований назвали настоящую причину, сколько ошиблись, сколько честно не смогли."""
+    """Сверка выводов исследователя со скрытой правдой сценария.
+
+    Исходы: correct — названа настоящая причина; partial — причин на самом деле было две, названа одна;
+    wrong — названа не та; insufficient — агент честно не вынес вывода; unverifiable — проверить нечем.
+    Выводы «по исключению» (без нового опыта) считаются наравне с остальными.
+    """
     from .scenario import soil_mult
     faults = fault_intervals(world)
     change = next((w['t'] for w in world if w['type'] == 'soil_change'), None)
     after = next((e['soils'] for e in scenario.events if e['type'] == 'soil_change'), None)
-    out = {'total': 0, 'identified': 0, 'insufficient': 0, 'correct': 0, 'wrong': 0, 'unverifiable': 0,
-           'tests': 0, 'energy': 0.0, 'by_cause': {}}
+    out = {'total': 0, 'identified': 0, 'insufficient': 0, 'correct': 0, 'partial': 0, 'wrong': 0, 'unverifiable': 0,
+           'quick': 0, 'tests': 0, 'energy': 0.0, 'by_cause': {}}
     for q in inquiries:
         c = q.get('conclusion')
         if not c:
             continue
         out['total'] += 1
-        out['tests'] += sum(1 for x in q['tests'] if x.get('measured'))
-        out['energy'] += sum(x['cost'] for x in q['tests'] if x.get('measured'))
+        measured = [x for x in q['tests'] if x.get('measured')]
+        out['tests'] += len(measured)
+        out['energy'] += sum(x['cost'] for x in measured)       # цена — заряд, реально ушедший на манёвр
+        out['quick'] += 0 if measured else 1
         t0, t1 = q['t_open'] - 4.0, q['t_close'] or q['t_open']
         active = {k for k, a, b in faults if a <= t1 and b >= t0}
         if q['topic'] == 'energy':
@@ -181,8 +206,8 @@ def score_inquiries(inquiries, scenario, world):
             x, y = q['anomaly']['x'], q['anomaly']['y']
             dear = max(soil_mult(soils, x + dx, y + dy) for dx in (-0.15, 0, 0.15) for dy in (-0.15, 0, 0.15)) >= 1.4
             truth = ({'leak'} if 'leak' in active else set()) | ({'soil'} if dear else set())
-        elif q['topic'] == 'fault':        # проверка после штрафа: какой сбой начался на самом деле
-            truth = {k.replace('sensor_', '') for k in active} or {'none'}
+        elif q['topic'] == 'fault':        # проверка батареи после штрафа
+            truth = {'leak'} if 'leak' in active else {'none'}
         else:
             truth = {k.replace('sensor_', '') for k in active if k.startswith('sensor_')} or {'ok'}
         q['truth'] = sorted(truth)
@@ -191,15 +216,17 @@ def score_inquiries(inquiries, scenario, world):
             verdict = 'insufficient'
         else:
             out['identified'] += 1
-            verdict = 'correct' if c['best'] in truth else 'unverifiable' if not truth else 'wrong'
+            verdict = ('unverifiable' if not truth else 'wrong' if c['best'] not in truth
+                       else 'partial' if len(truth) > 1 else 'correct')
             out[verdict] += 1
         q['verdict'] = verdict
         key = '+'.join(sorted(truth)) or 'нет явной причины'
-        cell = out['by_cause'].setdefault(key, {'n': 0, 'correct': 0, 'wrong': 0, 'insufficient': 0, 'unverifiable': 0})
+        cell = out['by_cause'].setdefault(key, {'n': 0, 'correct': 0, 'partial': 0, 'wrong': 0, 'insufficient': 0,
+                                                'unverifiable': 0})
         cell['n'] += 1
         cell[verdict] += 1
     out['energy'] = round(out['energy'], 2)
-    # сколько настоящих сбоев агент вообще заметил расследованием
+    # сколько настоящих эпизодов сбоя агент заметил расследованием
     found = 0
     for k, a, b in faults:
         name = k.replace('sensor_', '')

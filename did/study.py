@@ -207,7 +207,8 @@ _FIELD_RU = {'quantity': 'что исследуем', 'region': 'область'
              'hypotheses': 'объяснения', 'length_m': 'длина пробега', 'repeats': 'число повторов',
              'seconds': 'длительность паузы', 'angle_deg': 'угол разворота', 'rel_error': 'точность',
              'max_measurements': 'максимум замеров', 'time_s': 'лимит времени', 'energy': 'заряд',
-             'reserve': 'запас на возврат', 'max': 'сколько участков', 'sites': 'места', 'confidence': 'уверенность'}
+             'reserve': 'запас на возврат', 'max': 'сколько участков', 'sites': 'места', 'confidence': 'уверенность',
+             'straight': 'прямые пробеги', 'pause': 'паузы', 'spin': 'развороты', 'title': 'название'}
 _TYPE_RU = {'missing': 'не задано', 'extra_forbidden': 'такого поля в задании нет',
             'greater_than': 'нужно больше {gt}', 'greater_than_equal': 'нужно не меньше {ge}',
             'less_than': 'нужно меньше {lt}', 'less_than_equal': 'нужно не больше {le}',
@@ -223,7 +224,10 @@ def _schema_problems(exc):
     for e in exc.errors(include_url=False):
         where = ' → '.join(f'№{p + 1}' if isinstance(p, int) else _FIELD_RU.get(p, str(p)) for p in e['loc'])
         try:
-            what = _TYPE_RU[e['type']].format(**(e.get('ctx') or {}))
+            ctx = dict(e.get('ctx') or {})
+            if 'expected' in ctx:
+                ctx['expected'] = str(ctx['expected']).replace("'", '').replace(' or ', ', ')
+            what = _TYPE_RU[e['type']].format(**ctx)
         except (KeyError, IndexError):
             what = str(e['msg']).removeprefix('Value error, ')
         out.append(f'{where}: {what}' if where else what)
@@ -588,9 +592,9 @@ def check_study(spec, arena, rules=None, scenario=None, carried=0, graph=None):
         'region': None if region is None else {'shape': region.shape, 'x': round(region.x, 3), 'y': round(region.y, 3),
                                               'r': round(region.r, 3), 'w': round(region.w, 3), 'h': round(region.h, 3)},
         'sites': sites,
-        'route': {'meters': round(road_m, 2), 'energy': round(road_e, 1), 'seconds': round(road_s)},
-        'costs': {'road': round(road_e, 1), 'measure_min': round(lo, 1), 'measure_max': round(hi, 1),
-                  'reserve': reserve, 'budget': budget, 'seconds_min': round(road_s + meas_s)},
+        'route': {'meters': round(float(road_m), 2), 'energy': round(float(road_e), 1), 'seconds': round(float(road_s))},
+        'costs': {'road': round(float(road_e), 1), 'measure_min': round(float(lo), 1), 'measure_max': round(float(hi), 1),
+                  'reserve': reserve, 'budget': budget, 'seconds_min': round(float(road_s + meas_s))},
     }
     plan['steps'] = plan_steps(spec, plan)
     return plan
@@ -679,7 +683,7 @@ def prepare(spec, arena, rules=None, scenario=None, carried=0):
 # =================================================================================================
 
 PRESETS = [
-    {'id': 'soil_b', 'title': 'Расход в области B', 'level': 'medium', 'seed': 3,
+    {'id': 'soil_b', 'title': 'Расход в области B', 'level': 'medium', 'seed': 2,
      'text': 'Исследовать расход в области B. Сравнивать прямолинейное движение. Разрешить максимум два '
              'контрольных участка. Обязательно сохранить запас на возврат.',
      'spec': {'title': 'Расход в области B', 'quantity': 'soil_cost', 'region': {'zone': 'B'},
@@ -737,7 +741,7 @@ def _soils_at(scenario, world, t):
     return after if (change is not None and after is not None and t >= change) else scenario.soils
 
 
-def _path_mult(soils, m, n=24):
+def _path_mult(soils, m, n=400):
     xs = np.linspace(m['x0'], m['x1'], n)
     ys = np.linspace(m['y0'], m['y1'], n)
     return float(np.mean([soil_mult(soils, x, y) for x, y in zip(xs, ys)]))
@@ -927,6 +931,57 @@ def run_study(spec, level='medium', seed=3, rules='science', experiment='study',
     raw = spec if isinstance(spec, dict) else load_spec(spec).to_dict()
     arm = kw.pop('arm', None) or f"{raw.get('quantity', 'spec')}-{spec_key(raw)}"
     return run_episode(level, seed, 'study', experiment=experiment, arm=arm, rules=rules, study=raw, save=save, **kw)
+
+
+# --- для сервера лаборатории (did/lab/server.py): ответы как (код, словарь) ----------------------
+
+def api_presets():
+    """GET /api/study/presets: готовые задания и словари для формы конструктора."""
+    return {'presets': PRESETS,
+            'quantities': [{'id': k, 'label': v[0], 'unit': v[1], 'needs': v[2], 'title': v[3]} for k, v in QUANTITIES.items()],
+            'actions': ACTIONS, 'laws': DEFAULT_LAWS,
+            'defaults': StudySpec(quantity='soil_cost').model_dump()}
+
+
+def _api_setup(body):
+    from .arena import load_arena
+    from .scenario import generate
+    level = body.get('level') or 'medium'
+    if level not in ('easy', 'medium', 'hard'):
+        raise StudyError([f'нет уровня «{level}»: есть easy, medium, hard'])
+    try:
+        seed = int(body.get('seed') or 1)
+    except (TypeError, ValueError) as e:
+        raise StudyError(['номер сценария должен быть целым числом']) from e
+    arena = load_arena()
+    scenario = generate(level, seed, arena)
+    return level, seed, arena, scenario, Rules(**SCIENCE)
+
+
+def api_plan(body):
+    """POST /api/study/plan {level, seed, spec}: проверка задания и черновой план, без прогона."""
+    try:
+        level, seed, arena, scenario, rules = _api_setup(body)
+        ready = prepare(body.get('spec'), arena, rules, scenario)
+    except StudyError as e:
+        return 400, {'error': 'Задание не принято: ' + '; '.join(e.problems), 'problems': e.problems}
+    plan = dict(ready['plan'])
+    plan['task'] = describe(ready['spec']) if ready['spec'] else ''
+    plan['zones'] = [str(z.id) for z in scenario.soils]          # только имена областей: цены остаются скрытыми
+    return 200, plan
+
+
+def api_run(body):
+    """POST /api/study {level, seed, spec}: провести исследование в быстром симуляторе, вернуть сводку с отчётом."""
+    code, plan = api_plan(body)
+    if code != 200:
+        return code, plan
+    if not plan['ok']:
+        errors = [p['text'] for p in plan['problems'] if p['level'] == 'error']
+        return 400, {'error': 'Задание не принято: ' + '; '.join(errors), 'problems': errors, 'plan': plan}
+    spec = load_spec(body.get('spec')).to_dict()
+    summary = run_study(spec, body.get('level') or 'medium', int(body.get('seed') or 1))
+    return 200, summary
 
 
 def main():

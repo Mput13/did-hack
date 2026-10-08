@@ -41,7 +41,7 @@ WIN_S = 0.8             # окно усреднения показаний ба�
 CALIB_S = 6.0           # пауза у базы: шум показаний и расход на месте (он входит в поправку каждого замера)
 CHECK_S = 3.0           # пауза-проверка после штрафа или странного замера: не идёт ли утечка
 NEAR_M = 0.09           # ближе этого к началу участка подъезжать заново не нужно
-AIM_TOL = 0.03          # рад: точность наведения перед пробегом
+AIM_TOL = 0.02          # рад: точность наведения перед пробегом (за 0,5 м увод не больше сантиметра)
 SURPRISE_Z = 5.0        # замер, который модель не ждала: в подбор не идёт, сначала проверка
 CONTROL_LIMIT = 0.12    # контрольный участок дороже номинала на столько — это не обычный пол
 CONTROL_DOUBT = 0.04    # дороже на столько — подозрительно: если можно, беру другой участок
@@ -102,6 +102,7 @@ class StudyAgent(LawMixin, Agent):
         self._check_at = None           # пора проверить паузой, не идёт ли утечка
         self._leak = 0                  # сколько проверок подряд показали утечку
         self._doubt = None              # контрольный участок, на котором расход вдруг вырос
+        self._ctrl_doubt = 0.0          # на сколько принятый контроль дороже номинала, если заменить его нечем
         self._noise = [2 * BATTERY_NOISE ** 2 / 2, 2]     # сумма квадратов и число: шум одного показания
         self._b0 = self._t_prev = self._last = None
         self._dt = 0.1
@@ -329,6 +330,37 @@ class StudyAgent(LawMixin, Agent):
             return 'time'
         return None
 
+    def _afford_control(self, obs):
+        """Хватит ли бюджета на контрольные пробеги и после них — на пробеги в области и дорогу домой.
+
+        Если нет, контроль пропускается: оценка против номинала полезнее, чем контроль без оценки.
+        """
+        site, n = self._control(), self.spec.allowed.straight.repeats
+        ctrl, test = self._leg_step(obs, site, 'control'), self._leg_step(obs, self.site, 'test')
+        if ctrl is None or test is None:
+            return True
+        hop, e = self.graph.plan(ctrl['after'], test['start'])
+        if hop is None:
+            return True
+        need = (ctrl['e_travel'] + n * ctrl['e_meas'] + e * self._per_m() + n * test['e_meas']
+                + self._home_cost(*test['after']) * HOME_MARGIN + self.spec.budget.reserve)
+        if need <= self.spec.budget.energy - self.spent(obs):
+            return True
+        for c in self.controls:
+            c.setdefault('bad', 'на него не хватило заряда')
+        left = self.spec.budget.energy - self.spent(obs)
+        if self._count('control', 'straight'):
+            self._warn('skipctrl', 'на повтор контрольного пробега заряда не хватило: контроль измерен без повтора')
+            self.journal.add(obs.t, 'decision', f'На повтор контрольного пробега и замеры в области бюджета не хватит (нужно около '
+                             f'{need:.0f} ед., осталось {left:.0f}): еду в область, контроль остаётся без повтора')
+        else:
+            self._warn('skipctrl', 'на контрольный участок заряда не хватило: робот поехал сразу в область, сравнение идёт '
+                                   'с номиналом из условия, а он известен хуже')
+            self.journal.add(obs.t, 'decision', f'Бюджета не хватит и на контрольные пробеги, и на замеры в области (нужно около '
+                             f'{need:.0f} ед., осталось {left:.0f}). Контроль пропускаю: оценка против номинала из условия '
+                             'полезнее, чем контроль без оценки')
+        return False
+
     def _decide(self, obs):
         """Остановиться или выбрать следующий замер: наибольшее сужение погрешности на единицу заряда."""
         st, est, need = self.spec.stop, self.estimate(), self._required()
@@ -336,6 +368,8 @@ class StudyAgent(LawMixin, Agent):
             return self._conclude(obs, 'precision')
         if self._count('test') + self._count('control') >= st.max_measurements:
             return self._conclude(obs, 'max_measurements')
+        if need == ('control', 'straight') and not self.tests and not self._afford_control(obs):
+            need = self._required()                # на контроль заряда не хватит: сразу в область, сравнение с номиналом
         cands = self._options(obs)
         if need:
             cands = [c for c in cands if (c['role'], c['kind']) == need] or cands
@@ -419,7 +453,7 @@ class StudyAgent(LawMixin, Agent):
         k = k_hi = 1.0
         aim = 0.0
         if s['kind'] == 'straight':
-            feat = (s['length'], 0.03, s['length'] / MEASURE_V + 0.45 + s['win'])
+            feat = (s['length'], 0.0, s['length'] / MEASURE_V + 0.45 + s['win'])
             aim = 2.0 * max(float(self.model.mean[2]), 0.1)          # наведение перед пробегом — не часть замера
             if self.q == 'soil_cost' and s['role'] == 'test':
                 est = self.estimate()
@@ -494,7 +528,7 @@ class StudyAgent(LawMixin, Agent):
             return None
         value, sigma = got
         spread = self._birge()
-        sigma *= spread
+        sigma = math.hypot(sigma * spread, abs(value) * self._ctrl_doubt)      # сомнительный контроль — тоже погрешность
         half = 1.96 * sigma
         return {'value': value, 'sigma': sigma, 'ci95': [value - half, value + half],
                 'rel': half / abs(value) if abs(value) > 1e-9 else math.inf, 'spread': spread}
@@ -562,7 +596,8 @@ class StudyAgent(LawMixin, Agent):
                 done = dt >= m['hold'] - 1e-6
             elif m['kind'] == 'straight':
                 blocked = self._front < 0.16 or dt > m['length'] / MEASURE_V + 4.0
-                self._command(io, 0.0 if blocked else MEASURE_V, float(np.clip(2.0 * _wrap(m['heading'] - obs.th), -0.4, 0.4)))
+                # Курс на пробеге не подправляется: поворот тоже стоит заряда и попал бы в цену метра.
+                self._command(io, 0.0 if blocked else MEASURE_V, 0.0)
                 done = m['path'] >= m['length'] - 0.012 or blocked
             else:
                 self._command(io, 0.0, m['dir'] * SPIN_W)
@@ -719,8 +754,9 @@ class StudyAgent(LawMixin, Agent):
                 rec.update(used=False, note='участок не годится как контроль')
                 return self._drop_control(site, why, obs)
             if self.q == 'soil_cost' and dev > CONTROL_DOUBT:
+                self._ctrl_doubt = max(self._ctrl_doubt, dev)
                 self._warn('ctrl', f'контрольный участок на {dev:.0%} дороже номинала, а другого задание не разрешает: '
-                                   'оценка может быть занижена')
+                                   'оценка может быть занижена, погрешность увеличена на эту величину')
             self._learn(rec)
             if rec['role'] == 'test':
                 self._inq_record(rec, obs)

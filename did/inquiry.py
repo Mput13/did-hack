@@ -48,6 +48,9 @@ class Investigator:
         self._susp = []                # подряд идущие окна, которых модель не ждала
         self._cusum = 0.0
         self._checkup_at = None        # когда провести проверку после штрафа
+        self.companion = None          # расследование датчика, которое делит паузу с проверкой батареи
+        self._noise_pending = False    # тревога о шуме пришла во время другого расследования
+        self._recheck_until = -1e9     # датчик не удалось проверить (сигнал у нуля): проверить, когда появится
         self._rest_ok_t = -1e9         # когда опыт «постоять» последний раз показал, что утечки нет
         self._path = [0.0, 0.0]        # пройдено метров и накручено радиан: сколько поворотов приходится на метр
         self._wait_from = None         # с какого времени робот стоит и ждёт, пока оживёт залипший датчик
@@ -119,15 +122,19 @@ class Investigator:
             if (strong and len(self._susp) >= 2) or z > 8.0 or self._cusum >= 5.0:
                 self._cusum = 0.0
                 self._open_energy(obs)
-            return
-        if self._cusum == 0.0:
+                return
+        elif self._cusum == 0.0:
             self._susp.clear()
+        # В обучение идут все окна в пределах ±2,5 разброса — и «дороже», и «дешевле» прогноза. Если брать
+        # только те, что не дороже, оценка расхода систематически занижается.
+        if abs(z) > 2.5:
+            if z < -3.0 and known and mult > 1.4 and moving and a.cfg.learn_soil:
+                a._on_model_mismatch('дешевле', mx, my, m.soil_ratio(ds, dth, dt, n, spent), mult, obs.t)
+            return
         if moving and a.cfg.learn_soil:
             ratio = float(np.clip(m.soil_ratio(ds, dth, dt, n, spent), 0.2, 7.0))
             a.soil.add(mx, my, ds, ratio)
             a._cost_dirty = True
-            if z < -3.0 and known and mult > 1.4:
-                a._on_model_mismatch('дешевле', mx, my, ratio, mult, obs.t)
         if not moving or not known or mult < 1.25:
             m.learn(ds, dth, dt, n, spent)                 # обычный пол: уточняем коэффициенты модели
             self._discoveries(obs.t)
@@ -157,26 +164,28 @@ class Investigator:
         excess = tot('spent') - tot('mean')
         n, last = S[-1]['n'], S[-1]
         per_m, per_s, per_rad = m.per_meter(n), float(m.mean[3]), float(m.mean[2])
-        moving = ds > 0.08
+        moving = ds > 0.03
         rate = max(excess / dt, 0.02)
-        ratio = 1.0 + excess / (per_m * ds) if moving else None
+        base = last['mult'] if last['known'] else 1.0       # что модель уже считала множителем этого места
+        ratio = base + excess / (per_m * ds) if moving else None
         turn = per_rad + excess / dth if dth > 0.6 and dth / max(ds, 0.05) > 2.5 else None
         known_normal = last['known'] and last['mult'] < 1.25
         penalty = obs.t - self._penalty_t < 45.0
         if moving and turn is None and obs.t - self._rest_ok_t < 60.0 and self._penalty_t < self._rest_ok_t:
-            # Очевидный случай: утечку недавно исключил опыт, штрафов с тех пор не было — остаётся грунт.
-            if known_normal:
-                a._on_model_mismatch('дороже', last['x'], last['y'], ratio, last['mult'], obs.t)
-            for q in S:
-                if q['moving']:
-                    a.soil.add(q['x'], q['y'], q['ds'],
-                               float(np.clip(m.soil_ratio(q['ds'], q['dth'], q['dt'], q['n'], q['spent']), 0.2, 7.0)))
-            self.sites.append((last['x'], last['y']))
-            a._cost_dirty, a._cost_t = True, -1e9
-            a.journal.add(obs.t, 'observe', f'Расход ×{ratio:.1f} около ({last["x"]:.1f}; {last["y"]:.1f}). '
-                          f'Утечку исключил опыт {obs.t - self._rest_ok_t:.0f} с назад, штрафов с тех пор не было — значит, грунт',
-                          tag='soil_found')
-            self._susp = []
+            # Утечку недавно исключил опыт, штрафов с тех пор не было: вывод «грунт» делается по исключению,
+            # без нового опыта. Он записывается как расследование и проверяется наравне с остальными.
+            what = 'грунт здесь изменился и стал дороже' if known_normal else 'здесь дорогой грунт'
+            q = Inquiry(self._qid(), obs.t, 'energy',
+                        {'text': f'расход {tot("spent") / ds:.1f} ед/м при прогнозе {tot("mean") / ds:.1f}',
+                         'x': round(last['x'], 2), 'y': round(last['y'], 2), 'observed': round(tot('spent') / ds, 2),
+                         'expected': round(tot('mean') / ds, 2), 'unit': 'ед/м'},
+                        [Alternative('soil', f'{what}, примерно ×{ratio:.1f}', 0.9),
+                         Alternative(OTHER, 'причина не из этого списка', 0.1)], [])
+            q.note = (f'Без нового опыта: утечку исключила пауза {obs.t - self._rest_ok_t:.0f} с назад, '
+                      'штрафов с тех пор не было.')
+            self._start(q, obs, held=list(S), est={'rate': rate, 'ratio': ratio, 'turn': None,
+                                                   'known_normal': known_normal})
+            self._conclude(obs)
             return
         p_leak = self.know.get('p_leak_after_penalty', 0.5) if penalty else 0.12
 
@@ -239,14 +248,16 @@ class Investigator:
         return None
 
     def _in_danger(self, obs):
+        """Можно ли здесь стоять: риск считается по всем зонам, включая ту, из которой робот сейчас выезжает."""
         ix, iy = self.a.arena.w2g(obs.x, obs.y)
-        return bool(self.a._risk[iy, ix] > 0.05) or obs.t - self._penalty_t < 3.0
+        return bool(self.a._risk_full[iy, ix] > 0.05) or obs.t - self._penalty_t < 4.5
 
     def _qid(self):
         return f'Q{len(self.inquiries) + 1}'
 
-    def _start(self, inquiry, obs, held=None, est=None):
-        self.active = inquiry
+    def _start(self, inquiry, obs, held=None, est=None, activate=True):
+        if activate:
+            self.active = inquiry
         self.inquiries.append(inquiry)
         inquiry.held, inquiry.est = held or [], est or {}
         self._susp = []
@@ -287,13 +298,21 @@ class Investigator:
         q, a = self.active, self.a
         if q is None and self._checkup_at is not None and obs.t >= self._checkup_at:
             # Останавливаться можно только выехав из опасной зоны: внутри неё штраф повторяется.
-            if not self._in_danger(obs) or obs.t - self._checkup_at > 10.0:
+            if not self._in_danger(obs):
                 self._checkup_at = None
-                if self.sensor['mode'] == 'ok' and self.leak is None and not self._in_danger(obs):
-                    self._open_checkup(obs)
-                    q = self.active
+                self._open_checkup(obs)
+                q = self.active
+            elif obs.t - self._checkup_at > 12.0:
+                self._checkup_at = None
+        if q is None and self._noise_pending:
+            self._noise_pending = False
+            if a.health.degraded and self.sensor['mode'] == 'ok':
+                self.on_noise(obs)
+                q = self.active
         if q is None:
             return self._wait_for_sensor(obs, io)
+        if self.run is None and self._in_danger(obs):
+            return False                   # сначала выехать из опасного места, опыт — потом
         if self.run is None:
             test = q.choose()
             if test is None or a._returning and test.action['kind'] != 'pause':
@@ -365,29 +384,46 @@ class Investigator:
         return True
 
     def _measure(self, r, dt, obs):
-        q, m = self.active, self.model
+        q, m, a = self.active, self.model, self.a
         spent = r['b0'] - obs.battery
         per_m, per_s, per_rad = m.per_meter(r['n']), float(m.mean[3]), float(m.mean[2])
-        zs = np.array(r['zs']) if r['zs'] else np.array([0.0])
-        values = {
-            'rest': (spent / dt, BATTERY_NOISE / dt),
-            'straight': ((spent - per_rad * r['dth'] - per_s * dt) / max(per_m * r['ds'], 1e-6),
-                         BATTERY_NOISE / max(per_m * r['ds'], 0.05)),
-            'spin': ((spent - per_s * dt) / max(r['dth'], 0.2), BATTERY_NOISE / max(r['dth'], 0.2)),
-            'listen_std': (float(zs.std()), 0.012),
-            'listen_shift': (float(zs.mean()) - getattr(q, 'ref', 0.0), 0.02),
-        }
         kind = r['test'].action['kind']
+        zs = np.array(r['zs'])
+        heard = len(zs) >= 5                    # меньше пяти показаний — о датчике судить нельзя
+        values = {'rest': (spent / dt, BATTERY_NOISE / dt)}
+        if kind == 'straight' and r['ds'] >= 0.15:
+            values['straight'] = ((spent - per_rad * r['dth'] - per_s * dt) / (per_m * r['ds']),
+                                  BATTERY_NOISE / (per_m * r['ds']))
+        if kind == 'spin' and r['dth'] >= 0.6:
+            values['spin'] = ((spent - per_s * dt) / r['dth'], BATTERY_NOISE / r['dth'])
+        if heard:
+            values['listen_std'] = (float(zs.std()), 0.012)
+            values['listen_shift'] = (float(zs.mean()), 0.02)
         if kind == 'pause' and values['rest'][0] < per_s + 0.05:
             self._rest_ok_t = obs.t
-        for test in q.tests:              # одна пауза даёт сразу все «стоячие» измерения
-            if test.measured is None and (test is r['test'] or (kind == 'pause' and test.action['kind'] == 'pause')):
+        primary = r['test']
+        if primary.id not in values:
+            q.tests.remove(primary)             # опыт не удался (помеха, мало показаний): в расчёт не идёт
+            a.journal.add(obs.t, 'inquiry', f'{q.id}. Опыт «{primary.name}» не удался, результат не учитываю', inquiry=q.id)
+            return
+        for inquiry in (q, self.companion):     # одна пауза даёт замеры и батарее, и датчику
+            if inquiry is None:
+                continue
+            inquiry.last_z = float(zs[-1]) if heard else None
+            for test in list(inquiry.tests):
+                mine = test is primary
+                if not (mine or (kind == 'pause' and test.action['kind'] == 'pause' and test.measured is None)):
+                    continue
+                if test.id not in values:
+                    continue
                 value, sigma = values[test.id]
-                q.record(test.id, value, sigma, obs.t)
-                self.a.journal.add(obs.t, 'inquiry', f'{q.id}. Измерено: {value:.2f} {test.unit}. Теперь: '
-                                   + '; '.join(f"«{x.statement.split(',')[0]}» {q.posterior[x.id]:.0%}"
-                                               for x in q.alternatives), inquiry=q.id)
-        if kind == 'straight' and r['ds'] > 0.1:
+                if test.id == 'listen_shift':
+                    value -= getattr(inquiry, 'ref', 0.0)
+                inquiry.record(test.id, value, sigma, obs.t, cost=max(spent, 0.0) if mine else 0.0, maneuver=mine)
+                a.journal.add(obs.t, 'inquiry', f'{inquiry.id}. Измерено: {value:.2f} {test.unit}. Теперь: '
+                              + '; '.join(f"«{x.statement.split(',')[0]}» {inquiry.posterior[x.id]:.0%}"
+                                          for x in inquiry.alternatives), inquiry=inquiry.id)
+        if kind == 'straight':
             q.held.append({'ds': r['ds'], 'dth': r['dth'], 'dt': dt, 'spent': spent, 'x': obs.x, 'y': obs.y,
                            'n': r['n'], 'moving': True, 't': r['t0'], 'mean': 0.0, 'known': False, 'mult': 1.0})
 
@@ -396,17 +432,18 @@ class Investigator:
     # ======================================================================================
 
     def _conclude(self, obs):
-        q, a, m = self.active, self.a, self.model
+        q, a = self.active, self.a
         best = q.best[0]
-        status = 'identified' if q.settled else 'insufficient'
+        veto = None
+        if best == 'turn' and not any(x.id == 'spin' and x.measured for x in q.tests):
+            veto = 'цену поворота нельзя менять без опыта с поворотом'
+        status = 'identified' if q.settled and not veto else 'insufficient'
         t = obs.t
-        if q.topic == 'energy' or (q.topic == 'fault' and best == 'leak'):
+        if q.topic in ('energy', 'fault'):
             action = self._apply_energy(q, best, status, obs)
-        elif q.topic == 'fault' and best == 'none' and status == 'identified':
-            action = 'еду дальше как обычно'
         else:
             action = self._apply_sensor(q, best, status, obs)
-        c = q.close(t, action)
+        c = q.close(t, action, veto=veto)
         if self.roles is not None:
             from .llm_roles import explain
             text = explain(self.roles, q.to_dict())
@@ -416,6 +453,13 @@ class Investigator:
         a.journal.add(t, 'inquiry', f"{q.id}. Вывод: {c['text']}. Действие: {action}", inquiry=q.id,
                       status=c['status'], best=c['best'], tag=getattr(q, 'tag', None))
         self.active = None
+        if self.companion is not None:          # расследование датчика, делившее паузу с проверкой батареи
+            nxt, self.companion = self.companion, None
+            if nxt.order:
+                self.active = nxt
+                return self._conclude(obs)
+            self.inquiries.remove(nxt)
+            self._recheck_until = t + 25.0
         self._quiet_until = t + 0.6
         self._win = None
         a._path_goal = None
@@ -427,12 +471,20 @@ class Investigator:
         if status != 'identified':
             self.reserve_until = (2.0, obs.t + 30.0)
             return 'причина не установлена: на 30 секунд держу 2 ед. заряда в запасе сверх обычного'
+        if best == 'none':
+            return 'батарея в порядке, еду дальше как обычно'
         if best == 'leak':
             rate = max((rest['value'] - float(m.mean[3])) if rest else est['rate'], 0.02)
             t0 = q.held[0]['t'] if q.held else (self._penalty_t if q.topic == 'fault' else obs.t)
             self.leak = {'rate': rate, 't0': t0, 'until': t0 + self.know.get('fault_s', FAULT_S), 'low': 0}
             q.tag = 'leak'
             left = max(0.0, self.leak['until'] - obs.t)
+            # Причины могут совпасть: утечка могла идти на дорогом грунте. Окна, вызвавшие тревогу,
+            # разбираются заново уже без утечки — что осталось сверх обычного пола, уходит в карту грунта.
+            for s in q.held:
+                if s['moving'] and a.cfg.learn_soil:
+                    a.soil.add(s['x'], s['y'], s['ds'], float(np.clip(
+                        m.soil_ratio(s['ds'], s['dth'], s['dt'], s['n'], s['spent'] - rate * s['dt']), 0.2, 7.0)))
             return (f'расход {rate:.2f} ед/с не приписываю грунту; закладываю в запас на возврат '
                     f'{rate * left:.1f} ед. на оставшиеся ~{left:.0f} с сбоя')
         if best == 'soil':
@@ -485,46 +537,44 @@ class Investigator:
     # ======================================================================================
 
     def on_penalty(self, obs):
-        """Штраф в опасной зоне: после выезда из неё стоит проверить, не начался ли сбой."""
+        """Штраф в опасной зоне: идущий опыт прерывается, а после выезда из зоны стоит проверить, не начался ли сбой."""
         self._penalty_t = obs.t
-        self._checkup_at = obs.t + 3.5
+        self._checkup_at = obs.t + 4.5
+        if self.run is not None:
+            self.run = None
+            self.a.journal.add(obs.t, 'inquiry', 'Опыт прерван штрафом: измерение не учитываю, сначала выезжаю из зоны')
         zs = [v for _, _, _, v in self._z][-5:]
         self._pre_penalty = float(np.mean(zs)) if zs else 0.0
 
     def _open_checkup(self, obs):
+        """Проверка после штрафа. Батарея и датчик проверяются одной паузой, но как два отдельных вопроса:
+        сбой батареи и сбой датчика друг друга не исключают."""
         a, m = self.a, self.model
-        per_s, nominal = float(m.mean[3]), a.health.nominal
-        k = self.know
-        leak = k.get('leak_rate', {'value': 0.15, 'sigma': 0.1})
-        p = k.get('fault_priors', {'leak': 0.2, 'noise': 0.15, 'stuck': 0.15, 'bias': 0.15, 'none': 0.25})
-        alts = [Alternative('leak', 'после штрафа батарея начала терять заряд сама по себе', p['leak']),
-                Alternative('noise', 'после штрафа датчик образцов стал шуметь', p['noise']),
-                Alternative('stuck', 'после штрафа датчик образцов залип', p['stuck']),
-                Alternative('bias', 'после штрафа показания датчика занижены', p['bias']),
-                Alternative('none', 'штраф прошёл без последствий для батареи и датчика', p['none']),
-                Alternative(OTHER, 'причина не из этого списка', 0.1)]
-        same = (nominal, 0.4 * nominal)
-        tests = [TestOption('rest', f'постоять {PAUSE_S:.0f} секунды и измерить расход на месте',
-                            cost=per_s * PAUSE_S + 0.05, duration_s=PAUSE_S, unit='ед/с',
-                            predictions={'leak': (per_s + leak['value'], max(leak['sigma'], 0.03)), 'noise': (per_s, 0.012),
-                                         'stuck': (per_s, 0.012), 'bias': (per_s, 0.012), 'none': (per_s, 0.012)},
-                            action={'kind': 'pause'}, sigma=BATTERY_NOISE / PAUSE_S),
-                 TestOption('listen_std', 'за ту же паузу измерить разброс показаний датчика',
-                            cost=0.0, duration_s=PAUSE_S, unit='разброс',
-                            predictions={'noise': (0.22, 0.08), 'stuck': (0.0, 0.004), 'leak': same, 'bias': same,
-                                         'none': same},
-                            action={'kind': 'pause'}, sigma=0.012),
-                 TestOption('listen_shift', 'и сравнить среднее показание с тем, что было до штрафа',
-                            cost=0.0, duration_s=PAUSE_S, unit='сдвиг',
-                            predictions={'bias': (-0.2, 0.1), 'none': (0.0, 0.1), 'leak': (0.0, 0.1), 'noise': (0.0, 0.14),
-                                         'stuck': (0.0, 0.25)},
-                            action={'kind': 'pause'}, sigma=0.02)]
+        per_s = float(m.mean[3])
+        leak = self.know.get('leak_rate', {'value': 0.15, 'sigma': 0.1})
+        p_leak = self.know.get('p_leak_after_penalty', 0.3)
         q = Inquiry(self._qid(), obs.t, 'fault',
-                    {'text': 'после штрафа в опасной зоне проверяю, не начался ли сбой', 'x': round(obs.x, 2),
+                    {'text': 'после штрафа в опасной зоне проверяю, не теряет ли батарея заряд', 'x': round(obs.x, 2),
                      'y': round(obs.y, 2), 'observed': 0.0, 'expected': 0.0, 'unit': ''},
-                    alts, tests, energy_budget=1.0, max_tests=3)
-        q.ref, q.jump, q.trigger = self._pre_penalty, 0.2, 'checkup'
+                    [Alternative('leak', 'после штрафа батарея теряет заряд сама по себе', p_leak),
+                     Alternative('none', 'батарея в порядке', 0.9 - p_leak),
+                     Alternative(OTHER, 'причина не из этого списка', 0.1)],
+                    [TestOption('rest', f'постоять {PAUSE_S:.0f} секунды и измерить расход на месте',
+                                cost=per_s * PAUSE_S + 0.05, duration_s=PAUSE_S, unit='ед/с',
+                                predictions={'leak': (per_s + leak['value'], max(leak['sigma'], 0.03)),
+                                             'none': (per_s, 0.012)},
+                                action={'kind': 'pause'}, sigma=BATTERY_NOISE / PAUSE_S, repeatable=True)],
+                    energy_budget=1.0, max_tests=2)
         self._start(q, obs)
+        if self.sensor['mode'] != 'ok':
+            return
+        if self._pre_penalty > 0.25:
+            self.companion = self._open_sensor(obs, 'checkup', ref=self._pre_penalty, jump=0.2, activate=False)
+        else:
+            # Сигнал у нуля: шум, залипание и занижение сейчас неотличимы от нормы. Проверим, когда появится сигнал.
+            self._recheck_until = obs.t + 25.0
+            a.journal.add(obs.t, 'inquiry', 'Датчик образцов сейчас проверить нельзя: рядом нет образца, показание у нуля. '
+                          'Проверю, как только появится сигнал')
 
     def on_miss(self, obs):
         """Ложный сбор при высокой уверенности: значит, показаниям сейчас верить нельзя."""
@@ -561,6 +611,10 @@ class Investigator:
             self._recovered('noise', t, f'шум вернулся к {a.health.sigma:.2f}')
         if s['mode'] != 'ok' or self.active is not None or t < self._quiet_until or t - self._collect_t < 2.5:
             return z, sigma
+        if t <= self._recheck_until and len(self._z) >= 5 and np.mean([v for _, _, _, v in list(self._z)[-5:]]) > 0.3:
+            self._recheck_until = -1e9          # сигнал появился: теперь датчик можно проверить после штрафа
+            self._open_sensor(obs, 'noise', ref=float(np.mean([v for _, _, _, v in self._z])))
+            return z, sigma
         zs = list(self._z)
         if len(zs) >= 10:
             vals = [v for _, _, _, v in zs[-10:]]
@@ -576,21 +630,26 @@ class Investigator:
 
     def on_noise(self, obs):
         """Оценка шума датчика выросла (did.belief.SensorHealth): это сбой или робот просто быстро едет к образцу?"""
-        if self.sensor['mode'] == 'ok' and self.active is None:
+        if self.active is not None:
+            self._noise_pending = True          # не терять тревогу: разберём после текущего расследования
+        elif self.sensor['mode'] == 'ok':
             self._open_sensor(obs, 'noise', ref=float(np.mean([v for _, _, _, v in self._z])) if self._z else 0.0)
 
-    def _open_sensor(self, obs, trigger, ref=0.0, jump=0.0):
+    def _open_sensor(self, obs, trigger, ref=0.0, jump=0.0, activate=True):
         a = self.a
         nominal, est = a.health.nominal, max(a.health.sigma, 2.5 * a.health.nominal)
         penalty = obs.t - self._penalty_t < 45.0
         base = {'stuck': {'stuck': 0.75, 'noise': 0.03, 'bias': 0.02, 'ok': 0.1},
                 'shift': {'bias': 0.4, 'noise': 0.2, 'stuck': 0.02, 'ok': 0.28},
-                'noise': {'noise': 0.55, 'bias': 0.05, 'stuck': 0.02, 'ok': 0.28}}[trigger]
+                'noise': {'noise': 0.55, 'bias': 0.05, 'stuck': 0.02, 'ok': 0.28},
+                'checkup': {'noise': 0.2, 'bias': 0.2, 'stuck': 0.2, 'ok': 0.3}}[trigger]
+        base.update({k: v for k, v in self.know.get('sensor_priors', {}).items() if trigger == 'checkup'})
         if penalty:
             base['ok'] *= 0.4
         text = {'stuck': f'датчик образцов десять раз подряд выдал одно и то же значение {ref:.3f}, хотя робот едет',
                 'shift': f'показание датчика упало на {jump:.2f} почти без движения',
-                'noise': f'разброс показаний датчика вырос до {a.health.sigma:.2f} при норме {nominal:.2f}'}[trigger]
+                'noise': f'разброс показаний датчика вырос до {a.health.sigma:.2f} при норме {nominal:.2f}',
+                'checkup': 'после штрафа в опасной зоне проверяю датчик образцов'}[trigger]
         alts = [Alternative('noise', 'датчик образцов стал шуметь сильнее (сбой)', base['noise']),
                 Alternative('stuck', 'датчик залип и повторяет одно значение (сбой)', base['stuck']),
                 Alternative('bias', f'показания занижены примерно на {jump or 0.2:.2f} (сбой)', base['bias']),
@@ -601,18 +660,23 @@ class Investigator:
                             predictions={'noise': (est, 0.4 * est), 'stuck': (0.0, 0.004), 'bias': (nominal, 0.4 * nominal),
                                          'ok': (nominal, 0.4 * nominal)},
                             action={'kind': 'pause'}, sigma=0.012)]
-        if trigger == 'shift':
+        if trigger in ('shift', 'checkup'):
             tests.append(TestOption('listen_shift', 'там же сравнить среднее показание с прежним',
                                     cost=0.0, duration_s=PAUSE_S, unit='сдвиг',
-                                    predictions={'bias': (-jump, 0.05), 'ok': (0.0, 0.04), 'noise': (0.0, 0.12),
-                                                 'stuck': (-jump, 0.2)},
+                                    # после штрафа робот успел проехать, поэтому «прежнее» показание неточно
+                                    predictions=({'bias': (-jump, 0.1), 'ok': (0.0, 0.1), 'noise': (0.0, 0.14),
+                                                  'stuck': (0.0, 0.25)} if trigger == 'checkup' else
+                                                 {'bias': (-jump, 0.05), 'ok': (0.0, 0.04), 'noise': (0.0, 0.12),
+                                                  'stuck': (-jump, 0.2)}),
                                     action={'kind': 'pause'}, sigma=0.02))
         q = Inquiry(self._qid(), obs.t, 'sensor', {'text': text, 'x': round(obs.x, 2), 'y': round(obs.y, 2),
                                                   'observed': round(jump or a.health.sigma, 3),
-                                                  'expected': round(nominal, 3), 'unit': 'показание'},
+                                                  'expected': round(nominal, 3), 'unit': 'показание',
+                                                  'trigger': trigger},
                     alts, tests, energy_budget=1.0)
         q.ref, q.jump, q.trigger = ref, jump, trigger
-        self._start(q, obs)
+        self._start(q, obs, activate=activate)
+        return q
 
     def _apply_sensor(self, q, best, status, obs):
         a, t = self.a, obs.t
@@ -631,7 +695,8 @@ class Investigator:
             self.sensor = {'mode': 'noise', 't0': q.t_open, 'until': until}
             return f'снижаю вес показаний: считаю шум равным {a.health.effective_sigma():.2f}'
         if best == 'stuck':
-            self.sensor = {'mode': 'stuck', 'value': q.ref, 't0': q.t_open, 'until': until}
+            value = q.last_z if getattr(q, 'last_z', None) is not None else q.ref     # то, что датчик показывал в паузе
+            self.sensor = {'mode': 'stuck', 'value': value, 't0': q.t_open, 'until': until}
             return 'показания датчика не учитываю, пока они не начнут меняться; образцы не собираю вслепую'
         shift = next((x.measured['value'] for x in q.tests if x.id == 'listen_shift' and x.measured), -q.jump)
         self.sensor = {'mode': 'bias', 'bias': abs(shift), 't0': q.t_open, 'until': until}

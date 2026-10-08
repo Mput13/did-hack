@@ -32,14 +32,15 @@ from .planner import HeuristicPlanner
 CELL = 0.1            # м: сетка, на которой разложены миры
 RETRACE = 1.05        # обратная дорога по своему следу: во сколько раз она длиннее, чем путь туда
 DETECT = 5            # через сколько шагов пути (≈0,3 м) агент замечает дорогой грунт под колёсами
+HOT_MULT = 4.0        # до какого множителя может подорожать уже известный дорогой грунт, если среда изменилась
 
 
 @dataclass(frozen=True)
 class Settings:
     worlds: int = 48                  # сколько состояний среды в выборке
     risk_limit: float = 0.05          # допустимая вероятность не вернуться
-    choice: str = 'score'             # среди прошедших по риску: score — наибольшая ожидаемая ценность,
-    #                                   planner — выбирает правило планировщика («выгода на единицу заряда»)
+    choice: str = 'planner'           # кто выбирает среди прошедших по риску: planner — правило планировщика
+    #                                   («выгода на единицу заряда»), score — наибольшая ожидаемая ценность
     abort_margin: float = 1.3         # в пути от цели отказываемся, когда риск выше порога во столько раз
     # --- чего агент не знает о полу
     soil_rate: float = 0.20           # зон дорогого грунта на метр непроверенного пола: исходное предположение
@@ -74,7 +75,7 @@ DEFAULTS = Settings()                 # отладочные серии подм
 class Leg:
     """Отрезок пути глазами агента: шаги, оценка множителя грунта, доля непроверенного пола."""
 
-    __slots__ = ('ds', 'dm', 'unk', 'open', 'cell', 'risk', 'metres', 'length', 'unknown_m', 'est')
+    __slots__ = ('ds', 'dm', 'unk', 'open', 'cell', 'risk', 'metres', 'length', 'unknown_m', 'est', 'hot')
 
     def __init__(self, ds, mult, unk, cell, risk=0.0, est=None):
         self.ds = np.asarray(ds, dtype=float)             # длина шага, м
@@ -86,6 +87,9 @@ class Leg:
         self.dm = self.ds * np.asarray(mult, dtype=float)              # те же шаги в метрах обычного пола
         self.metres = float(self.dm.sum())                             # весь отрезок по оценке агента
         self.unknown_m = float(self.ds @ self.unk)
+        mult = np.asarray(mult, dtype=float)
+        # Сколько метров прибавится, если уже известный дорогой грунт на пути подорожает до верхнего множителя.
+        self.hot = self.ds * np.where(mult > 1.4, np.maximum(HOT_MULT - mult, 0.0), 0.0)
         self.est = self.metres if est is None else float(est)          # цена пути, по которой агент выбирает маршрут
 
 
@@ -181,8 +185,9 @@ class Worlds:
             return np.zeros(self.n)
         g = self.extra[:, leg.cell]
         out = leg.metres + g @ (leg.ds * leg.unk)
-        if self.stale.any():              # карта устарела: зоны могут лежать и на проверенном полу
-            out[self.stale] += g[self.stale] @ (leg.ds * np.maximum(self.s.stale_exposure - leg.unk, 0.0))
+        if self.stale.any():              # карта устарела: зоны лежат и на проверенном полу, известные подорожали
+            out[self.stale] += g[self.stale] @ (leg.ds * np.maximum(self.s.stale_exposure - leg.unk, 0.0)) \
+                + float(leg.hot.sum())
         return out
 
     def walk(self, leg):
@@ -191,7 +196,7 @@ class Worlds:
         unk = np.where(self.stale[:, None], np.maximum(leg.unk, self.s.stale_exposure), leg.unk)
         g = self.extra[:, leg.cell] * unk
         d = self.danger[:, leg.cell] & (leg.open[None, :] | self.stale[:, None])
-        return np.cumsum(leg.dm + g * leg.ds, axis=1), (g > 0.3) | d, d
+        return np.cumsum(leg.dm + g * leg.ds + self.stale[:, None] * leg.hot, axis=1), (g > 0.3) | d, d
 
     def hits(self, leg):
         """Сколько раз на отрезке робот въедет в опасную зону в каждом мире: (M,)."""
@@ -348,15 +353,15 @@ class Foresight:
         left_b = np.maximum(b, 0.0)
         score = (r.pts_sample * (got + found) + r.pts_hazard_hit * hits
                  + p_back * (r.pts_return + r.pts_battery_left * left_b))
-        # Вариант — не конец прогона: заряд, оставшийся после него, ещё пойдёт на следующие цели.
-        future = p_back * np.minimum(r.pts_sample * np.maximum(left - got, 0.0), s.future_per_unit * left_b) \
-            if opt.steps else 0.0
         end = np.maximum(b + sd * w.z, 0.0)                 # заряд на базе с учётом разброса расхода
         p5, p50, p95 = np.percentile(end, [5, 50, 95])
+        # Вариант — не конец прогона: заряд, который останется даже в худшем случае, пойдёт на следующие цели.
+        future = min(r.pts_sample * max(left - float(got.mean()), 0.0), s.future_per_unit * float(p5)) \
+            if opt.steps else 0.0
         risk = float(1.0 - p_back.mean())
         return {'id': opt.id, 'label': opt.label, 'route': route,
                 'samples': round(float(got.mean() + found), 2), 'score': round(float(score.mean()), 2),
-                'value': round(float(np.mean(score + future)), 2), 'risk': round(risk, 4),
+                'value': round(float(score.mean()) + future, 2), 'risk': round(risk, 4),
                 'battery_p5': round(float(p5), 1), 'battery_p50': round(float(p50), 1),
                 'battery_p95': round(float(p95), 1), 'cost': round(float(spent.mean()), 1),
                 'hits': round(float(hits.mean()), 2), 'unknown_m': round(unknown_m, 1),
@@ -397,7 +402,7 @@ class Advisor:
         self.route = 'fast'                       # каким из двух маршрутов сейчас ехать домой
         self.log = []                             # все решения прогона: таблицы «варианты × показатели»
         self.kappa = 1.0
-        self.rates = (self.s.soil_rate, self.s.hazard_rate)
+        self.rates = (self.s.soil_rate, self.s.hazard_rate)   # зон грунта и опасных зон на метр непроверенного пола
         self._unk = np.ones(arena.free.shape)
         self._version = None
         self._safe_field = None
@@ -416,7 +421,11 @@ class Advisor:
         new_m = float(seen.sum()) * soil.res                     # сколько нового пола уже проверено колёсами
         zones = soil.zones() if a.cfg.learn_soil else []
         # Частота на метр непроверенного пола: исходное предположение плюс то, что встретилось на своём пути.
-        lam_s = (s.soil_rate * s.soil_weight_m + len(zones)) / (s.soil_weight_m + new_m)
+        found = []
+        for z in zones:                                          # одна зона, задетая в двух местах, — одна находка
+            if all(math.hypot(z['x'] - q['x'], z['y'] - q['y']) > 0.9 for q in found):
+                found.append(z)
+        lam_s = (s.soil_rate * s.soil_weight_m + len(found)) / (s.soil_weight_m + new_m)
         lam_h = (s.hazard_rate * s.hazard_weight_m + len(a.hazard_map.zones)) / (s.hazard_weight_m + new_m)
         self.rates = (lam_s, lam_h)
         mults = tuple(sorted(round(min(max(z['mult'], 1.5), 5.0) * 2) / 2 for z in zones)) + tuple(s.soil_mults)
@@ -537,8 +546,9 @@ class Advisor:
         options = self._options(obs, targets) if left > 0 else self._options(obs, [])
         rows = self.core.compare(options, **self._context(obs))
         by_id = {r['id']: r for r in rows}
+        floor = by_id['home']['value']                          # цель должна быть не хуже, чем «сразу домой»
         for tg in state['candidates'] + state['explore_points']:
-            tg['feasible'] = tg['id'] in by_id and by_id[tg['id']]['ok']
+            tg['feasible'] = tg['id'] in by_id and by_id[tg['id']]['ok'] and by_id[tg['id']]['value'] >= floor
         self._p = {tg['id']: p for tg, _, p in targets}
         best = self.core.choose(rows)
         subgoals, note = next(o for o in options if o.id == best['id']).subgoals, ''
