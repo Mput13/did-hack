@@ -90,7 +90,7 @@ def _soil_truth(judge, arena):
 
 def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, scenario=None,
                 scenario_args=None, config=None, rules=None, agent_rules=None, llm=None, sim=None, save=True, quiet=True,
-                knowledge=None, study=None, truth=False, soil_probe=False):
+                knowledge=None, study=None, truth=False, soil_probe=False, roles=None):
     """Прогон целиком. Возвращает сводку: идентификаторы, метрики, путь к записи.
 
     study — задание исследования (словарь did.study.StudySpec) для агента 'study'.
@@ -100,6 +100,9 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     см. did.calibrate.assumed_rules.
     truth=True — писать в запись истинную позу робота на каждом шаге симулятора (поле truth).
     soil_probe — добавить в метрики разбор смены грунта по скрытой правде (did.metrics.SoilProbe).
+    roles — модель в ролях автора, критика и рассказчика расследований отдельно от планировщика:
+    опции did.llm.make_client или {'client': готовый клиент}. None — как раньше: роли ведёт модель
+    планировщика, если он llm, иначе расследования идут без модели.
     """
     arena = load_arena()
     if rules == 'science':                 # набор правил с несколькими причинами расхода и сбоями
@@ -138,6 +141,9 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
         extra['study'] = prepare(study, arena, bot_rules, scenario)
     if extra and cfg.planner == 'llm':              # та же модель — автор и критик расследований
         extra['roles'] = planner.client
+    if roles is not None and getattr(cfg, 'science', False):
+        from .llm import make_client
+        extra['roles'] = roles['client'] if 'client' in roles else make_client(**roles)
     if agent == ORACLE:
         extra['soil_truth'] = _soil_truth(world.judge, arena)
     if agent in ORACLES:

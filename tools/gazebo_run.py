@@ -16,20 +16,28 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LEFTOVERS = ('gz sim', 'parameter_bridge', 'robot_state_publisher', 'judge_node', 'ros_gz_bridge', 'rviz2')
 
 
-def stop(proc):
-    if proc.poll() is None:
+def stop(proc, grace=15.0):
+    """Остановить стенд по его группе процессов — и только её: чужие Gazebo и узлы ROS не трогаем."""
+    try:
         os.killpg(proc.pid, signal.SIGINT)
+    except (ProcessLookupError, PermissionError):
+        return
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        proc.poll()
         try:
-            proc.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
-    if subprocess.run(['pgrep', '-f', 'tools/demo.py'], stdout=subprocess.DEVNULL).returncode == 0:
-        return                                  # рядом идёт показ: его Gazebo трогать нельзя
-    for name in LEFTOVERS:                      # launch иногда оставляет дочерние процессы
-        subprocess.run(['pkill', '-f', name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            os.killpg(proc.pid, 0)              # в группе ещё кто-то жив (launch иногда оставляет детей)
+        except ProcessLookupError:
+            return
+        except PermissionError:             # macOS: в группе остался только завершившийся, но ещё не убранный процесс
+            pass
+        time.sleep(0.2)
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def main():
