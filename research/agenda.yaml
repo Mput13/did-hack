@@ -211,8 +211,8 @@ studies:
   - id: R16
     title: Не стоять, пока модель думает
     criterion: Качество LLM-планирования и промптов (15%)
-    status: assigned
-    owner: Claude Opus 5.5
+    status: submitted
+    owner: Claude Opus 5.5; на ревью у GPT-6.1 Sol
     experiment: E24
     source: research/notes/K3.md
     why: >-
