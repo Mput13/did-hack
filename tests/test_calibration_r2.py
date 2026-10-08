@@ -199,3 +199,76 @@ def test_fault_readings_do_not_vote_on_law(arena):
     assert not np.array_equal(bot.cal.bank.score, score)
     fine = bot.cal.bank.zoom()                              # сужение сетки проигрывает историю с тем же счётом
     assert fine is None or fine.score[fine.null] == pytest.approx(bot.cal.bank.score[bot.cal.bank.null])
+
+
+def test_gazebo_run_does_not_hand_stand_rules_to_calibrating_agent(monkeypatch):
+    """Ревью, круг 2: в Gazebo калибрующийся агент тоже стартует с допущений, а не с объекта правил стенда."""
+    pytest.importorskip('rclpy')
+    import did.ros_agent as ra
+    from did.config import Rules
+
+    class Seen(Exception):
+        pass
+
+    class FakeIO:
+        score, odom, truth = {}, (0.0, 0.0, 0.0), None
+        _t = 0.0
+
+        def ready(self):
+            return True
+
+        @property
+        def sim_time(self):
+            FakeIO._t += 1.0
+            return FakeIO._t
+
+        def now(self):
+            return 1e9
+
+        def command(self, v, w):
+            pass
+
+        def restart_clock(self):
+            pass
+
+        def destroy_node(self):
+            pass
+
+    class FakeExecutor:
+        def add_node(self, node):
+            pass
+
+        def spin(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    stand = {}
+
+    def fake_rules(**kw):
+        # правила стенда отличаются от допущений команды по всем трём калибруемым величинам
+        stand['rules'] = Rules(sensor_range_m=1.5, sensor_law='sqrt', drain_per_m=3.75, **kw)
+        return stand['rules']
+
+    def fake_agent(arena, cfg, **kw):
+        raise Seen(cfg.name, kw['rules'])
+
+    monkeypatch.setattr(ra, 'Rules', fake_rules)
+    monkeypatch.setattr(ra, 'RosIO', FakeIO)
+    monkeypatch.setattr(ra, 'SingleThreadedExecutor', FakeExecutor)
+    monkeypatch.setattr(ra, 'Agent', fake_agent)
+    monkeypatch.setattr(ra.rclpy, 'init', lambda *a, **k: None)
+    monkeypatch.setattr(ra.rclpy, 'shutdown', lambda *a, **k: None)
+    monkeypatch.setattr(ra.time, 'sleep', lambda s: None)
+    default = Rules()
+    for name in ('adaptive_cal', 'adaptive_cal_v2'):
+        with pytest.raises(Seen) as e:
+            ra.run('hard', 1101, name, 'test', settle_s=1.0, quiet=True)
+        got = e.value.args[1]
+        assert got is not stand['rules']
+        assert (got.sensor_range_m, got.sensor_law, got.drain_per_m) == \
+            (default.sensor_range_m, default.sensor_law, default.drain_per_m)
+    with pytest.raises(Seen) as e:                   # обычный агент по-прежнему получает правила стенда
+        ra.run('hard', 1101, 'adaptive', 'test', settle_s=1.0, quiet=True)
+    assert e.value.args[1] is stand['rules']
