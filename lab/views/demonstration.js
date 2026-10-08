@@ -16,7 +16,7 @@ export async function render(root, ctx) {
   try { arena = await getArena(); } catch (e) { fill(root, errorBox('Карта не загрузилась', e.message, ctx.reload)); return; }
   if (!ctx.alive()) return;
   let state = null, timer, polling = false, mutation = false, tool = 'point', task = 'route';
-  let comparison = null, recording = null, notice = null, scenarioKey = '', missionKey = '';
+  let comparison = null, recording = null, notice = null, scenarioKey = '', missionKey = '', journalShown = false;
   let slamNavSeen = false, agentsKey = '';     // режим карты SLAM уже замечен; список агентов уже заполнен
   const noticeBox = h('p', { class: 'dm-notice', role: 'status', 'aria-live': 'polite', hidden: true });
   const say = (text, bad = false) => { notice = { text, bad }; paint(); };
@@ -232,9 +232,16 @@ export async function render(root, ctx) {
       } else if (done) fill(result, h('h2', { class: 'pl-h' }, 'Результат'), h('strong', { class: 'dm-result-title' }, 'Маршрут выполнен'));
     }
     // Вместе с решениями и гипотезами — расследования агента-исследователя («вопрос — опыт — вывод», kind = inquiry).
-    const entries = (m?.journal || []).filter((e) => ['alarm', 'hypothesis', 'verdict', 'decision', 'inquiry'].includes(e.kind)).slice(-5);
+    // Карточка узкая, поэтому из расследования опыт и замеры не показываем (остаются странность и вывод), а уточнения одной и той же цели — последним; новое сверху.
+    const target = (e) => e?.kind === 'decision' && e.text.startsWith('Кандидат ');
+    const entries = (m?.journal || []).filter((e) => ['alarm', 'hypothesis', 'verdict', 'decision'].includes(e.kind) || e.kind === 'inquiry' && !/^Q\d+\. (Опыт|Измерено)/.test(e.text))
+      .filter((e, i, all) => !(target(e) && target(all[i + 1]))).slice(-5).reverse();
     cycle.hidden = !entries.length;
-    fill(cycle, h('h2', { class: 'pl-h' }, 'Последние решения агента'), entries.map((e) => h('p', { class: 'dm-caption' }, `${num(e.t, 0)} с · ${e.text}`)));
+    // Карта закреплена, а журнал в правой колонке ниже экрана: с первым решением каждой миссии подводим его к карте (один раз).
+    const shown = s?.mode === 'mission' && !!entries.length;
+    if (shown && !journalShown) requestAnimationFrame(() => cycle.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    journalShown = shown;
+    fill(cycle, h('h2', { class: 'pl-h' }, 'Последние решения агента'), entries.map((e) => h('p', { class: 'dm-caption' }, `${num(e.t, 0)} с · ${e.text.length > 240 ? `${e.text.slice(0, 237)}…` : e.text}`)));
   }
   async function poll() {
     if (!ctx.alive() || polling) return;
