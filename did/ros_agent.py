@@ -29,12 +29,12 @@ from std_srvs.srv import Trigger
 
 from .agent import Agent, make_config
 from .arena import load_arena
-from .config import BASE, LEVELS, Rules
-from .metrics import run_metrics
+from .config import BASE, LEVELS, SCIENCE, Rules
+from .metrics import run_metrics, score_inquiries
 from .recorder import Recorder, save_trace
 from .robot_io import Observation
 from .runner import RUNS, make_planner
-from .scenario import generate
+from .scenario import Scenario, generate
 
 TICK_S = 0.1
 # После появления в мире Burger ещё около 30 с времени симуляции качается на задней опоре: колёса на
@@ -200,10 +200,11 @@ class RosIO(Node):
         self.path_pub.publish(path)
 
 
-def run(level, seed, agent, experiment, arm=None, llm=None, wait_s=120.0, settle_s=8.0, quiet=False):
+def run(level, seed, agent, experiment, arm=None, llm=None, wait_s=120.0, settle_s=8.0, quiet=False,
+        rules=None, knowledge=None):
     """Провести один прогон в Gazebo. Стенд (симуляция и судья) должен быть уже запущен."""
     arena = load_arena()
-    rules = Rules()
+    rules = Rules(**SCIENCE) if rules == 'science' else Rules()   # должны совпадать с правилами судьи в стенде
     rclpy.init()
     io = RosIO()
     executor = SingleThreadedExecutor()
@@ -238,17 +239,20 @@ def run(level, seed, agent, experiment, arm=None, llm=None, wait_s=120.0, settle
         arm = arm or cfg.name
         rec = Recorder()
         bot = Agent(arena, cfg, n_samples=LEVELS[level]['samples'], rules=rules,
-                    planner=make_planner(cfg, llm, seed), recorder=rec)
+                    planner=make_planner(cfg, llm, seed), recorder=rec, knowledge=knowledge)
         scenario = generate(level, seed, arena)     # только для подписи записи, если /did/truth не придёт
         run_id = f'{experiment}/{arm}/{level}-{seed}'
 
         def snapshot(result=None):
             truth = io.truth or {}
             score = result or io.score
-            return rec.build(run_id=run_id, experiment=experiment, arm=arm, backend='gazebo',
-                             agent={'name': cfg.name, 'config': cfg.to_dict()},
-                             scenario=truth.get('scenario') or scenario.to_dict(), rules=rules.to_dict(),
-                             result=score, world=truth.get('world_log', []), journal=bot.journal)
+            trace = rec.build(run_id=run_id, experiment=experiment, arm=arm, backend='gazebo',
+                              agent={'name': cfg.name, 'config': cfg.to_dict()},
+                              scenario=truth.get('scenario') or scenario.to_dict(), rules=rules.to_dict(),
+                              result=score, world=truth.get('world_log', []), journal=bot.journal)
+            if bot.inv:
+                trace.update(bot.inv.export())           # расследования и модель расхода
+            return trace
 
         last_tick = last_live = -1e9
         wall0 = time.monotonic()
@@ -276,6 +280,10 @@ def run(level, seed, agent, experiment, arm=None, llm=None, wait_s=120.0, settle
         truth = io.truth or {}
         metrics = run_metrics(score, rules, bot.journal, truth.get('world_log', []), rec.plans, rec.llm)
         trace = snapshot({**score, **metrics})
+        if bot.inv:
+            true_scenario = Scenario.from_dict(truth['scenario']) if truth.get('scenario') else scenario
+            trace['result']['inquiries'] = metrics['inquiries'] = score_inquiries(
+                trace['inquiries'], true_scenario, truth.get('world_log', []))
         path = save_trace(trace, RUNS / experiment / arm / f'{level}-{seed}.json.gz')
         _write_live({'active': False})
         summary = {'id': run_id, 'experiment': experiment, 'arm': arm, 'agent': cfg.name, 'level': level,
@@ -314,9 +322,11 @@ def main():
     ap.add_argument('--agent', default='adaptive')
     ap.add_argument('--exp', default='gazebo', help='папка внутри runs/')
     ap.add_argument('--arm', default=None)
-    ap.add_argument('--llm', default=None, choices=['mock', 'http'])
+    ap.add_argument('--llm', default=None, choices=['mock', 'http', 'ollama', 'codex'])
+    ap.add_argument('--rules', default=None, choices=['science'], help='те же правила, что у судьи в стенде')
     args = ap.parse_args()
-    run(args.level, args.seed, args.agent, args.exp, arm=args.arm, llm={'kind': args.llm} if args.llm else None)
+    run(args.level, args.seed, args.agent, args.exp, arm=args.arm, llm={'kind': args.llm} if args.llm else None,
+        rules=args.rules)
 
 
 if __name__ == '__main__':

@@ -51,6 +51,23 @@ function fit(text, font, maxW) {
   return `${t.trimEnd()}…`;
 }
 
+/** Подпись в одну или две строки: перенос по пробелу, вторая строка при нехватке места обрезается с многоточием. */
+function wrap2(text, font, maxW) {
+  if (textWidth(text, font) <= maxW) return [text];
+  const words = String(text).split(/\s+/);
+  let best = null;
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(' ');
+    const b = words.slice(i).join(' ');
+    const wa = textWidth(a, font);
+    if (wa > maxW) break;
+    const score = Math.max(wa, textWidth(b, font));
+    if (!best || score <= best.score) best = { a, b, score };
+  }
+  if (!best) return [fit(text, font, maxW)];
+  return [best.a, fit(best.b, font, maxW)];
+}
+
 /**
  * Раскладка точек внутри строки. По горизонтали значение точное, по вертикали точки расступаются.
  * Прогоны с одинаковым значением (доли, штрафы, «вернулся / нет») собираются в плотную кучку вокруг
@@ -116,7 +133,7 @@ export function stripChart(host, cfg) {
   const scale = domainFor(info, values);
   // Чем больше прогонов в строке, тем выше строка и мельче точки — чтобы кучки одинаковых значений оставались узкими.
   const most = Math.max(1, ...groups.flatMap((g) => g.rows.map((r) => r.points.length)));
-  const ROW = most <= 24 ? 30 : most <= 45 ? 38 : 44;
+  const BASE_ROW = most <= 24 ? 30 : most <= 45 ? 38 : 44;
   const R = most <= 24 ? 3.2 : most <= 45 ? 2.8 : 2.5;
   const GAP = 12;
   const PAD = 18;                // поле внутри области графика: кучке у края шкалы есть куда расти
@@ -133,9 +150,12 @@ export function stripChart(host, cfg) {
     const multi = groups.length > 1;
     // Слева либо подписи вариантов (когда их больше двух), либо подписи групп.
     let gutter = 0;
+    let ROW = BASE_ROW;
     if (cfg.rowLabels) {
       const longest = Math.max(...groups.flatMap((g) => g.rows.map((r) => textWidth(r.label, labelFont))));
       gutter = Math.min(Math.max(90, longest + 26), W * 0.4);
+      // Длинные подписи вариантов переносятся на вторую строку — строкам нужно чуть больше высоты.
+      if (longest + 26 > gutter) ROW = Math.max(ROW, 36);
     } else if (multi) {
       const longest = Math.max(...groups.map((g) => textWidth(g.label, headFont)));
       gutter = Math.min(Math.max(70, longest + 14), W * 0.34);
@@ -162,8 +182,12 @@ export function stripChart(host, cfg) {
         const cy = y + ROW / 2;
         if (cfg.rowLabels) {
           layers.text.append(s('circle', { cx: 6, cy, r: 5, fill: row.color }));
-          const t = fit(row.label, labelFont, gutter - 26);
-          layers.text.append(s('text', { x: 18, y: cy + 4.5, class: 'lb-ch-label' }, t, t !== row.label ? s('title', null, row.label) : null));
+          const lines = wrap2(row.label, labelFont, gutter - 26);
+          const cut = lines.join(' ') !== row.label;
+          lines.forEach((line, li) => {
+            const ty = lines.length === 1 ? cy + 4.5 : cy - 3 + li * 15;
+            layers.text.append(s('text', { x: 18, y: ty, class: 'lb-ch-label' }, line, cut ? s('title', null, row.label) : null));
+          });
         }
         const pts = row.points.map((p) => ({ ...p, px: x(p.v), key: p.run.seed || 0 }));
         dodge(pts, R, ROW / 2 - R - 2.5, x0 + R + 1, x1 - R - 1);
@@ -187,7 +211,12 @@ export function stripChart(host, cfg) {
         y += ROW;
       });
       if (!cfg.rowLabels && multi) {
-        layers.text.append(s('text', { x: 0, y: (gTop + y) / 2 + 5, class: 'lb-ch-head' }, fit(g.label, headFont, gutter - 8)));
+        const lines = g.rows.length > 1 ? wrap2(g.label, headFont, gutter - 8) : [fit(g.label, headFont, gutter - 8)];
+        const cut = lines.join(' ') !== g.label;
+        lines.forEach((line, li) => {
+          const ty = (gTop + y) / 2 + 5 + (lines.length === 1 ? 0 : -8 + li * 16);
+          layers.text.append(s('text', { x: 0, y: ty, class: 'lb-ch-head' }, line, cut ? s('title', null, g.label) : null));
+        });
       }
       if (gi < groups.length - 1) {
         layers.grid.append(s('line', { x1: 0, x2: W, y1: y + GAP / 2, y2: y + GAP / 2, class: 'lb-ch-sep' }));
@@ -338,17 +367,19 @@ export function diffChart(cfg) {
         h('i', { class: 'lb-forest__pt', data: { tone }, style: { left: pos(p.mean) } }));
       const aBetter = better === 'higher' ? p.a_higher : p.b_higher;
       const bBetter = better === 'higher' ? p.b_higher : p.a_higher;
+      const single = p.n < 2;        // по одной паре интервал не посчитать — так и пишем
       numbers = h('div', { class: `lb-forest__num${cls}` },
         h('div', { class: 'lb-forest__main', text: diffWords(info, p.mean) }),
-        h('div', { class: 'lb-forest__sub', text: `95% интервал: от ${info.diffBare(p.ci[0])} до ${info.diffBare(p.ci[1])}` }));
+        h('div', { class: 'lb-forest__sub', text: single ? 'одна пара прогонов, интервала нет' : `95% интервал: от ${info.diffBare(p.ci[0])} до ${info.diffBare(p.ci[1])}` }));
       tally = h('div', { class: `lb-forest__num${cls}` },
         h('div', { class: 'lb-forest__main', text: `лучше в ${aBetter} из ${p.n}` }),
         h('div', { class: 'lb-forest__sub', text: `хуже в ${bBetter}, поровну в ${p.ties}` }));
       const tipRows = [
         h('div', { class: 'lb-tip__value', text: `${info.diff(p.mean)}${info.kind === 'num' && info.unitOf ? ` ${info.unitOf}` : ''}` }),
         h('div', { class: 'lb-tip__muted', text: `«${cfg.aLabel}» минус «${cfg.bLabel}», ${p.n} ${plural(p.n, 'сценарий', 'сценария', 'сценариев')}` }),
-        h('div', { class: 'lb-tip__muted', text: `95% интервал: от ${info.diffBare(p.ci[0])} до ${info.diffBare(p.ci[1])}` }),
-        p.sign_p != null ? h('div', { class: 'lb-tip__muted', text: `Будь варианты равны, такой перевес по числу сценариев выпадал бы с вероятностью ${num(p.sign_p * 100, p.sign_p < 0.01 ? 2 : 1)} %` }) : null,
+        single ? h('div', { class: 'lb-tip__muted', text: 'Сравнение одной пары прогонов: это наблюдение, а не статистика' })
+          : h('div', { class: 'lb-tip__muted', text: `95% интервал: от ${info.diffBare(p.ci[0])} до ${info.diffBare(p.ci[1])}` }),
+        p.sign_p != null && !single ? h('div', { class: 'lb-tip__muted', text: `Будь варианты равны, такой перевес по числу сценариев выпадал бы с вероятностью ${num(p.sign_p * 100, p.sign_p < 0.01 ? 2 : 1)} %` }) : null,
       ];
       plot.addEventListener('pointermove', (e) => tip.show(e.clientX, e.clientY, tipRows.filter(Boolean)));
       plot.addEventListener('pointerleave', () => tip.hide());

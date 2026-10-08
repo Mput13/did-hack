@@ -186,6 +186,36 @@ export function signed(v, digits = 1) {
   return Number(v) > 0 && !/^0(,0+)?$/.test(t) ? `+${t}` : t;
 }
 
+/**
+ * Тексты, собранные в Python (журнал, выводы, правила): десятичная точка → запятая, дефис перед числом → минус,
+ * «53%» → «53 %», «после 1 опыт(ов)» → «после 1 опыта».
+ */
+export function ruText(text) {
+  if (text == null) return '';
+  return String(text)
+    .replace(/(\d)\.(\d)/g, '$1,$2')
+    .replace(/(^|[\s(;:=≈×«])-(\d)/g, '$1−$2')
+    .replace(/(\d+)\s*опыт\(ов\)/g, (_, n) => `${n} ${plural(Number(n), 'опыта', 'опытов', 'опытов')}`)
+    .replace(/(\d)%/g, '$1 %');
+}
+
+const LEVEL_WORDS = { easy: ['лёгкий', 'лёгком'], medium: ['средний', 'среднем'], hard: ['трудный', 'трудном'] };
+/** Названия уровней в текстах опытов пишутся по-английски (easy, medium, hard) — показываем по-русски. */
+export function ruLevels(text) {
+  if (text == null) return '';
+  const id = '(easy|medium|hard)';
+  const cap = (w, like) => (/^[А-ЯЁA-Z]/.test(like) ? w[0].toUpperCase() + w.slice(1) : w);
+  return String(text)
+    .replace(new RegExp(`([Сс]ценари\\S*\\s+)?([Уу]ровн[яею]|[Уу]ровень)\\s+${id}\\b`, 'g'), (m0, pre, word, lv) => {
+      const [nom, loc] = LEVEL_WORDS[lv];
+      if (/ень$/.test(word)) return `${pre || ''}${cap(nom, word)} уровень`;
+      if (/не$/.test(word)) return `${pre || ''}${cap(loc, word)} уровне`;
+      return `${pre || ''}${cap(nom.replace(/ий$/, 'его').replace(/ый$/, 'ого'), word)} уровня`;
+    })
+    .replace(new RegExp(`(?<![А-Яа-яЁё\\w])([Вв]|[Нн]а)\\s+${id}\\b`, 'g'), (m0, prep, lv) => `${/^[ВН]/.test(prep) ? 'На' : 'на'} ${LEVEL_WORDS[lv][1]} уровне`)
+    .replace(new RegExp(`\\b${id}\\b`, 'g'), (m0, lv) => `«${LEVEL_WORDS[lv][0]}»`);
+}
+
 /** Склонение: plural(5, 'прогон', 'прогона', 'прогонов'). */
 export function plural(n, one, few, many) {
   const a = Math.abs(n) % 100;
@@ -231,11 +261,25 @@ const METRIC_LABELS = {
   false_collects: 'Ложные сборы', hazard_hits: 'Заезды в опасную зону', collisions: 'Столкновения',
 };
 
-/** Всё, что нужно для показа метрики: подпись, единица, что лучше и форматтеры. */
-export function metricInfo(id, metas) {
+/** Как показывать метрику, которой нет в списке выше: по единице из ответа сервера и по самим значениям. */
+function guessView(meta, hint) {
+  const unit = String(meta.unit || '').trim();
+  if (hint && hint.bool) return { kind: 'pct', bool: true };
+  if (/^доля/i.test(unit) || unit === '%') return { kind: 'pct' };
+  if (/^(шт|раз)\.?$/i.test(unit)) return { kind: 'count' };
+  const max = hint && Number.isFinite(hint.max) ? Math.abs(hint.max) : null;
+  const digits = max == null ? 2 : max >= 100 ? 0 : max >= 10 ? 1 : 2;
+  return { kind: 'num', digits, unit };
+}
+
+/**
+ * Всё, что нужно для показа метрики: подпись, единица, что лучше и форматтеры.
+ * metas — словарь metrics из ответа /api/experiment/<id>; hint — {max, bool} по значениям этой метрики в опыте.
+ */
+export function metricInfo(id, metas, hint) {
   const meta = (metas && metas[id]) || {};
-  const view = METRIC_VIEW[id] || { kind: 'num', digits: 2, unit: meta.unit || '' };
-  const label = meta.label || METRIC_LABELS[id] || id;
+  const view = METRIC_VIEW[id] || guessView(meta, hint);
+  const label = meta.label || METRIC_LABELS[id] || String(id).replace(/_/g, ' ');
   const better = meta.better || (['score', 'samples_share', 'returned'].includes(id) ? 'higher' : 'lower');
   const info = { id, label, better, kind: view.kind, bool: !!view.bool };
   if (view.kind === 'pct') {
@@ -258,14 +302,15 @@ export function metricInfo(id, metas) {
     info.diffBare = info.diff;
   } else {
     const d = view.digits ?? 1;
+    const tickDigits = (v) => (Number.isInteger(v) ? 0 : Math.abs(v) < 1 && d >= 2 ? 2 : 1);
     info.unit = view.unit || meta.unit || '';
     info.unitOf = view.unitOf || info.unit;        // «на 7,8 очка больше»
     info.diffUnit = info.unit;
     info.value = (v) => (v == null ? '—' : num(v, d));
     info.mean = (v) => (v == null ? '—' : num(v, d));
-    info.tick = (v) => num(v, Number.isInteger(v) ? 0 : 1);
+    info.tick = (v) => num(v, tickDigits(v));
     info.diff = (v) => (v == null ? '—' : signed(v, d || 1));
-    info.diffTick = (v) => signed(v, Number.isInteger(v) ? 0 : 1);
+    info.diffTick = (v) => signed(v, tickDigits(v));
     info.diffBare = info.diff;
   }
   info.title = info.unit ? `${label}, ${info.unit}` : label;
@@ -276,8 +321,10 @@ export function metricInfo(id, metas) {
 /** Значение метрики прогона как число (да/нет → 1/0), либо null. */
 export function metricValue(run, id) {
   const v = run.metrics ? run.metrics[id] : undefined;
-  if (v == null) return null;
-  return typeof v === 'boolean' ? (v ? 1 : 0) : Number(v);
+  if (v == null || typeof v === 'object') return null;      // вложенные сводки (detect, inquiries) — не число
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 // --- словари -----------------------------------------------------------------------------------
@@ -298,6 +345,12 @@ export const KINDS = {
   sensitivity: 'Устойчивость к условиям',
   llm: 'Языковая модель',
   transfer: 'Проверка в Gazebo',
+  robustness: 'Устойчивость к сбоям',
+  search: 'Стратегии поиска',
+  science: 'Расследования агента',
+  inquiry: 'Расследования агента',
+  knowledge: 'Память между прогонами',
+  memory: 'Память между прогонами',
 };
 
 export const BACKENDS = {
@@ -335,9 +388,22 @@ export function condName(cond) {
   return cond.label != null ? String(cond.label) : String(cond.id);
 }
 
+// Запасные подписи: основные приходят с сервера (/api/options) и из описаний опытов.
 export const AGENT_LABELS = {
   fixed: 'Фиксированный план',
   adaptive: 'С адаптацией',
+  adaptive_ig: 'С адаптацией, разведка по ожидаемой пользе',
+  adaptive_llm: 'С адаптацией, планирует языковая модель',
+  scientist: 'Исследователь: ведёт расследования',
+  scientist_llm: 'Исследователь с языковой моделью',
+  spiral: 'Спираль',
+  gradient: 'Подъём по сигналу',
+  no_soil: 'Без обучения грунтам',
+  no_change: 'Без обнаружения изменений',
+  no_hazard: 'Без памяти об опасных зонах',
+  no_sensor_health: 'Без контроля датчика',
+  static_reserve: 'Возврат по жёсткому порогу',
+  belief_only: 'Только карта образцов',
 };
 
 // --- цвета вариантов агента --------------------------------------------------------------------
@@ -346,18 +412,35 @@ export const AGENT_LABELS = {
 export const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
 const OTHER = '#8a939b';
 
-/** Цвета вариантов одного опыта: фиксированный план — синий, адаптивный — оранжевый, остальные по порядку. */
+// Пары оттенков, которые нельзя ставить в соседние строки графика: их трудно различить
+// (проверено скриптом validate_palette из набора правил для графиков; номера — места в PALETTE).
+const CLASH = new Set(['1-3', '1-4', '1-5', '1-7', '4-7']);
+const clash = (i, j) => i != null && j != null && CLASH.has(i < j ? `${i}-${j}` : `${j}-${i}`);
+
+/**
+ * Цвета вариантов одного опыта: фиксированный план — синий, адаптивный — оранжевый, остальные по порядку палитры,
+ * но так, чтобы соседние в списке варианты не получили похожие оттенки. Цвет зависит только от списка вариантов
+ * опыта, поэтому не меняется при фильтрах и сортировке.
+ */
 export function armColors(arms) {
+  const list = arms || [];
+  const slot = new Array(list.length).fill(null);
+  const used = new Set();
+  list.forEach((a, i) => {
+    if (a.agent === 'fixed' && !used.has(0)) { slot[i] = 0; used.add(0); }
+    else if (a.agent === 'adaptive' && !used.has(1)) { slot[i] = 1; used.add(1); }
+  });
+  list.forEach((a, i) => {
+    if (slot[i] != null) return;
+    const free = [];
+    for (let k = 2; k < PALETTE.length; k++) if (!used.has(k)) free.push(k);
+    if (!free.length) return;
+    const pick = free.find((k) => !clash(k, slot[i - 1]) && !clash(k, slot[i + 1])) ?? free[0];
+    slot[i] = pick;
+    used.add(pick);
+  });
   const map = new Map();
-  const rest = PALETTE.slice(2);
-  let k = 0;
-  let fixed = false;
-  let adaptive = false;
-  for (const a of arms || []) {
-    if (a.agent === 'fixed' && !fixed) { map.set(a.id, PALETTE[0]); fixed = true; }
-    else if (a.agent === 'adaptive' && !adaptive) { map.set(a.id, PALETTE[1]); adaptive = true; }
-    else map.set(a.id, rest[k++] || OTHER);
-  }
+  list.forEach((a, i) => map.set(a.id, slot[i] == null ? OTHER : PALETTE[slot[i]]));
   return map;
 }
 
@@ -512,7 +595,9 @@ export function select(options, value, onchange, attrs = {}) {
 /** Подпись варианта агента: из описания опыта, а для отдельных прогонов — из списка агентов. */
 export function agentLabel(agentId, options) {
   const a = options && options.agents ? options.agents.find((x) => x.id === agentId) : null;
-  return (a && a.label) || AGENT_LABELS[agentId] || agentId;
+  // Сервер, не знающий нового варианта, отдаёт вместо подписи его идентификатор — тогда берём свою.
+  if (a && a.label && a.label !== a.id) return a.label;
+  return AGENT_LABELS[agentId] || (a && a.label) || agentId || 'агент';
 }
 
 /** Порядок сценариев: уровень, затем номер. */

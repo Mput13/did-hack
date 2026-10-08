@@ -63,6 +63,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     rec = Recorder()
     planner = make_planner(cfg, llm, seed)
     extra = {'knowledge': knowledge} if getattr(cfg, 'science', False) else {}
+    if extra and cfg.planner == 'llm':              # та же модель — автор и критик расследований
+        extra['roles'] = planner.client
     bot = cls(arena, cfg, n_samples=len(scenario.samples), rules=rules, planner=planner, recorder=rec, **extra)
 
     wall = time.perf_counter()

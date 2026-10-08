@@ -813,7 +813,9 @@ def make_client(kind='mock', **opts):
     mock   — имитатор в процессе: seed, faults, script (см. did.llm_mock.MockResponder);
     http   — адрес, ключ и модель из DID_LLM_* (окружение или .env); opts — параметры ChatClient
              поверх окружения, например model или timeout_s;
-    ollama — локальный сервер Ollama: model ('qwen2.5:3b'), base_url, timeout_s (120), use_schema (True);
+    ollama — локальный сервер Ollama: model ('qwen2.5:3b'), base_url, timeout_s (120), use_schema (True).
+             Окно контекста задаёт сервер (на 16 ГБ памяти — 4096 токенов), а запрос планировщика —
+             3–4 тыс. токенов: если ответы портятся, запустите сервер с OLLAMA_CONTEXT_LENGTH=8192;
     codex  — GPT по подписке через Codex CLI: model ('gpt-6-luna'), effort ('low'), timeout_s (120),
              cache_dir, max_calls (см. did.llm_codex.CodexCliClient); ответы всегда кэшируются на диск.
     Для http и ollama cache=True кладёт ответы в тот же кэш (повторяемость прогонов).

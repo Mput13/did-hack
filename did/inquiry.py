@@ -29,8 +29,9 @@ def _wrap(a):
 
 class Investigator:
 
-    def __init__(self, agent, knowledge=None):
+    def __init__(self, agent, knowledge=None, roles=None):
         self.a = agent
+        self.roles = roles             # языковая модель в ролях автора и критика (did/llm_roles.py); None — без неё
         self.know = knowledge or {}
         r = agent.rules
         self.model = EnergyModel(r.drain_per_m, r.drain_idle_per_s, noise=BATTERY_NOISE,
@@ -249,9 +250,33 @@ class Investigator:
         self.inquiries.append(inquiry)
         inquiry.held, inquiry.est = held or [], est or {}
         self._susp = []
+        if self.roles is not None:
+            self._deliberate(inquiry, obs)
         alts = '; '.join(f'«{x.statement}» {x.prior:.0%}' for x in inquiry.alternatives)
         self.a.journal.add(obs.t, 'inquiry', f"{inquiry.id}. Странность: {inquiry.anomaly['text']}. "
                            f'Возможные объяснения: {alts}', inquiry=inquiry.id)
+
+    def _deliberate(self, q, obs):
+        """Автор предлагает, какие объяснения рассматривать и в каком порядке ставить опыты; критик ищет дыры.
+
+        Вероятности и вывод по-прежнему считает расчёт: модель только выбирает из допустимого и формулирует.
+        """
+        from .llm_roles import deliberate
+        a = self.a
+        state = {'battery': round(obs.battery, 1), 'return_cost': round(a._home_cost(obs.x, obs.y), 1),
+                 'carried': a.collected, 'time_s': round(obs.t, 1),
+                 'last_penalty_s_ago': round(obs.t - self._penalty_t, 1) if self._penalty_t > 0 else None}
+        d = deliberate(self.roles, q.context(state))
+        q.restrict(consider=d.proposal.consider, order=[step.test for step in d.proposal.plan])
+        q.source = d.proposal.source
+        q.note = d.proposal.rationale
+        q.critique = [{'issue': i.text, 'kind': i.kind, 'fix': i.fix, 'resolved': i not in (d.open_issues or [])}
+                      for i in (d.critique.issues if d.critique else [])]
+        if a.rec:
+            for ex in d.exchanges:
+                a.rec.add_llm(obs.t, ex)
+        a.journal.add(obs.t, 'llm', f'{q.id}. Автор: {d.proposal.rationale}'
+                      + (f' Критик: замечаний {len(q.critique)}.' if q.critique else ''), inquiry=q.id)
 
     # ======================================================================================
     # проведение опытов
@@ -382,6 +407,12 @@ class Investigator:
         else:
             action = self._apply_sensor(q, best, status, obs)
         c = q.close(t, action)
+        if self.roles is not None:
+            from .llm_roles import explain
+            text = explain(self.roles, q.to_dict())
+            if str(text).strip():
+                q.note = (q.note + ' ' if q.note else '') + 'Объяснение модели: ' + str(text)
+                a.journal.add(t, 'llm', f'{q.id}. {text}', inquiry=q.id)
         a.journal.add(t, 'inquiry', f"{q.id}. Вывод: {c['text']}. Действие: {action}", inquiry=q.id,
                       status=c['status'], best=c['best'], tag=getattr(q, 'tag', None))
         self.active = None
@@ -494,6 +525,16 @@ class Investigator:
                     alts, tests, energy_budget=1.0, max_tests=3)
         q.ref, q.jump, q.trigger = self._pre_penalty, 0.2, 'checkup'
         self._start(q, obs)
+
+    def on_miss(self, obs):
+        """Ложный сбор при высокой уверенности: значит, показаниям сейчас верить нельзя."""
+        if self.sensor['mode'] == 'bias':
+            self.a.journal.add(obs.t, 'inquiry', 'Поправка к показаниям датчика привела к промаху: отменяю её, '
+                               'сбой датчика, видимо, уже кончился', tag='sensor_recovered')
+            self.durations.append(('sensor_bias', round(obs.t - self.sensor.get('t0', obs.t), 1)))
+            self.sensor = {'mode': 'ok'}
+        self.a.belief.relax(0.15)
+        self._z.clear()
 
     def on_collect(self, t):
         self._collect_t = t

@@ -44,4 +44,8 @@ explain = "python tools/build_explainer.py"
 # Агент в Gazebo: при запущенном стенде (agent-ros) или всё одной командой (gazebo-run).
 agent-ros = "python -m did.ros_agent"
 gazebo-run = { cmd = "python tools/gazebo_run.py", depends-on = ["build"] }
+# Показ одной командой: сервер интерфейса + стенд Gazebo с окном + пульт (страница #/pilot).
+#   pixi run demo --level medium --seed 3        pixi run demo --fast   (без Gazebo)
+demo = { cmd = "python tools/demo.py", depends-on = ["build"] }
+pilot = "python -m did.pilot"
 test = { cmd = "colcon test --event-handlers console_direct+ && colcon test-result --verbose", cwd = "ws" }

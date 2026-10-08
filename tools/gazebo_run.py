@@ -39,7 +39,9 @@ def main():
     ap.add_argument('--gui', action='store_true', help='открыть окно Gazebo')
     ap.add_argument('--rviz', action='store_true')
     ap.add_argument('--no-hints', action='store_true', help='не рисовать скрытую правду на полу Gazebo')
-    ap.add_argument('--llm', default=None, choices=['mock', 'http'])
+    ap.add_argument('--llm', default=None, choices=['mock', 'http', 'ollama', 'codex'])
+    ap.add_argument('--rules', default=None, choices=['science'],
+                    help='science — правила с несколькими причинами расхода и сбоями (для агента scientist)')
     ap.add_argument('--pose-log', action='store_true',
                     help='писать журнал поз (одометрия против истины) в runs/<exp>/pose-<уровень>-<seed>.csv')
     args = ap.parse_args()
@@ -49,7 +51,7 @@ def main():
     log = open(logs / f'stand-{args.level}-{args.seed}.log', 'w')
     launch = ['ros2', 'launch', 'did_bringup', 'stand.launch.py', f'level:={args.level}', f'seed:={args.seed}',
               f'gui:={"true" if args.gui else "false"}', f'rviz:={"true" if args.rviz else "false"}',
-              f'show_truth:={"false" if args.no_hints else "true"}']
+              f'show_truth:={"false" if args.no_hints else "true"}', f'rules:={args.rules or "base"}']
     print('стенд:', ' '.join(launch))
     stand = subprocess.Popen(launch, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     code = 1
@@ -57,7 +59,7 @@ def main():
         arm = 'gazebo' if args.exp == 'E7' else None
         cmd = [sys.executable, '-m', 'did.ros_agent', '--level', args.level, '--seed', str(args.seed),
                '--agent', args.agent, '--exp', args.exp] + (['--arm', arm] if arm else []) \
-            + (['--llm', args.llm] if args.llm else [])
+            + (['--llm', args.llm] if args.llm else []) + (['--rules', args.rules] if args.rules else [])
         pose_log = None
         if args.pose_log:                       # сам завершится, когда судья закончит прогон
             out = ROOT / 'runs' / args.exp / f'pose-{args.level}-{args.seed}.csv'

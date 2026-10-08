@@ -113,6 +113,7 @@ class JudgeNode(Node):
         self.pub_map = self.create_publisher(OccupancyGrid, '/map', latched)
         self.create_service(Trigger, '/did/collect', self.on_collect)
         self.create_service(Trigger, '/did/finish', self.on_finish)
+        self.create_service(Trigger, '/did/reset', self.on_reset)     # служебный: нужен пульту показа
         self.create_subscription(Odometry, '/odom', self.on_odom, qos_profile_sensor_data)
         if self.use_gt:
             self.create_subscription(TFMessage, GZ_POSES, self.on_gz_poses, qos_profile_sensor_data)
@@ -248,6 +249,22 @@ class JudgeNode(Node):
 
     def on_finish(self, request, response):
         return self._act(self.judge.finish, response)
+
+    def on_reset(self, request, response):
+        """Новый прогон на том же сценарии: время, заряд, образцы и счёт — с начала. Робот остаётся где стоит.
+
+        Агент сервис не вызывает; им пользуется пульт (did/pilot.py), чтобы после ручной езды
+        автономная миссия начиналась с полным зарядом.
+        """
+        old = self.judge
+        self.judge = Judge(old.scenario, old.arena, old.rules, seed=old.scenario.seed)
+        self.t0 = self._now() if self.source is not None else None
+        self._score_key = self._world_key = None
+        self._done_logged = False
+        self._flush(force_score=True)
+        self.get_logger().info('прогон начат заново по запросу /did/reset')
+        response.success, response.message = True, 'судья начал прогон заново'
+        return response
 
     def _act(self, action, response):
         if self.source is None:

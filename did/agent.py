@@ -82,7 +82,8 @@ def make_config(name, **overrides):
 
 class Agent:
 
-    def __init__(self, arena, config, n_samples, rules=None, planner=None, recorder=None, knowledge=None):
+    def __init__(self, arena, config, n_samples, rules=None, planner=None, recorder=None, knowledge=None,
+                 roles=None):
         self.arena = arena
         self.cfg = config
         self.rules = rules or Rules()
@@ -144,7 +145,9 @@ class Agent:
         self._soil_h = []                                   # гипотезы о грунтах: [{'key', 'x', 'y'}]
         self._n_sample_h = 0
         self._last_cmd = (0.0, 0.0)
-        self.inv = Investigator(self, knowledge) if config.science else None
+        self._misses = deque(maxlen=6)                      # недавние ложные сборы: (t, x, y)
+        self._no_collect_until = -1e9
+        self.inv = Investigator(self, knowledge, roles) if config.science else None
 
     # ======================================================================================
     # один такт цикла
@@ -591,7 +594,14 @@ class Agent:
             self.journal.open(t, sg['key'], f"образец лежит около ({sg['x']:.1f}; {sg['y']:.1f})",
                               'подъехать вплотную и попробовать собрать', x=sg['x'], y=sg['y'])
         here = self.belief.prob_within(obs.x, obs.y, 0.25)
+        if t < self._no_collect_until:
+            here = min(here, 0.0)                  # пауза после промахов: только подъезжаем и слушаем
         if here >= self.cfg.collect_confidence:
+            if any(t - mt < 30.0 and math.hypot(obs.x - mx, obs.y - my) < 0.35 for mt, mx, my in self._misses):
+                # Здесь только что был промах: второй раз на том же месте не пробуем, как бы ни был уверен датчик.
+                self.belief.clear_disc(obs.x, obs.y, 0.35, factor=0.02)
+                self.journal.close(t, sg.get('key'), 'refuted', 'на этом месте уже был промах, повторно не собираю')
+                return self._end_subgoal(obs, io, 'candidate_lost')
             return self._try_collect(sg, obs, io, here)
         self.mode = 'approach'
         if self._drive_to(obs, io, (sg['x'], sg['y']), tol=0.05):
@@ -623,6 +633,14 @@ class Agent:
             self._wait_until = obs.t + 1.0      # дать датчику показать следующий ближайший образец
         else:
             self.belief.clear_disc(obs.x, obs.y, 0.30, factor=0.05)
+            self._misses.append((obs.t, obs.x, obs.y))
+            if sum(1 for mt, _, _ in self._misses if obs.t - mt < 25.0) >= 2:
+                # Два промаха подряд: карте образцов сейчас верить нельзя. Пауза в сборе и частичный сброс карты.
+                self._no_collect_until = obs.t + 15.0
+                self.belief.relax(0.4)
+                self.journal.add(obs.t, 'alarm', 'Два ложных сбора подряд: 15 секунд не собираю и заново набираю показания')
+            if self.inv:
+                self.inv.on_miss(obs)
             self.journal.add(obs.t, 'action', f'Сбор в ({obs.x:.2f}; {obs.y:.2f}) при уверенности {confidence:.0%}: '
                              'промах, получен штраф')
             self.journal.close(obs.t, sg.get('key'), 'refuted', 'образца в радиусе 0,3 м не оказалось')

@@ -17,6 +17,9 @@ API (всё JSON):
   GET  /api/live                      текущее состояние прогона в Gazebo (если идёт)
   GET  /api/knowledge                 знания, накопленные между прогонами (runs/_knowledge/kb.json);
                                       пока файла нет — {"rules": [], "runs": 0}
+  GET  /api/pilot/state               пульт (did/pilot.py): поза, карта по лидару, маршрут, миссия
+  POST /api/pilot/command {cmd, ...}  команда оператора: route | go | stop | home | reset | mission | finish
+  POST /api/pilot/start {backend: 'fastsim', level, seed}  пульт на быстром симуляторе; 'off' — выключить
 """
 import argparse
 import json
@@ -36,6 +39,7 @@ from ..config import LEVELS, Rules
 from ..experiments import build_index, list_specs, load_spec
 from ..runner import RUNS, run_episode
 from ..scenario import generate
+from ..pilot import HUB as PILOT
 
 STATIC = ROOT / 'lab'
 LIVE = RUNS / '_live' / 'state.json'
@@ -177,6 +181,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {'active': False})
             if path == '/api/knowledge':
                 return self._send(200, knowledge())
+            if path == '/api/pilot/state':
+                return self._send(*PILOT.state())
             return self._static(path)
         except Exception as exc:              # noqa: BLE001
             return self._error(500, f'{type(exc).__name__}: {exc}')
@@ -185,6 +191,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             body = self._body()
+            if path == '/api/pilot/command':
+                return self._send(*PILOT.command(body))
+            if path == '/api/pilot/start':
+                return self._send(*PILOT.start(body))
             if path == '/api/run':
                 agent = body.get('agent', 'adaptive')
                 if agent not in PRESETS:

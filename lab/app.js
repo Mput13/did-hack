@@ -18,6 +18,8 @@ const ROUTES = [
   { re: /^\/compare$/, view: compare, nav: 'home', title: 'Сравнение', wide: true },
   { re: /^\/scenarios$/, view: scenarios, nav: 'scenarios', title: 'Сценарии' },
   { re: /^\/live$/, view: live, nav: 'live', title: 'Живой прогон', wide: true },
+  // #/pilot — пульт: модуль подгружается при первом открытии страницы.
+  { re: /^\/pilot$/, view: { render: (...a) => import('./views/pilot.js').then((m) => m.render(...a)) }, nav: 'pilot', title: 'Пульт', wide: true },
 ];
 
 const main = document.getElementById('app');

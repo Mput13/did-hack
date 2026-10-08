@@ -195,15 +195,17 @@ class CodexCliClient:
                 text = (tmp / 'reply.txt').read_text(encoding='utf-8')
             except OSError:
                 text = ''
-        usage, failure = {}, None
+        usage, failure, said = {}, None, ''
         for ev in events:
             item = ev.get('item') if isinstance(ev.get('item'), dict) else {}
             if ev.get('type') == 'turn.completed' and isinstance(ev.get('usage'), dict):
                 usage = {k: v for k, v in ev['usage'].items() if isinstance(v, (int, float))}
             elif ev.get('type') in ('error', 'turn.failed'):
-                failure = ev.get('message') or (ev.get('error') or {}).get('message') or failure
-            elif item.get('type') == 'agent_message' and not text.strip():
-                text = str(item.get('text') or '')
+                error = ev.get('error')
+                failure = ev.get('message') or (error.get('message') if isinstance(error, dict) else error) or failure
+            elif item.get('type') == 'agent_message':
+                said = str(item.get('text') or '')
+        text = text if text.strip() else said    # файла ответа нет — берём последнее сообщение модели
         if proc.returncode != 0 or not text.strip():
             tail = [ln for ln in stderr.decode('utf-8', 'replace').splitlines()
                     if ln.strip() and not any(n in ln for n in _NOISE)]
