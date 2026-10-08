@@ -55,14 +55,43 @@ def _hypotheses(state):
     return out[:2]
 
 
-def mock_plan(state):
-    """Корректный план по простому правилу: выгодный кандидат, затем разведка, иначе — на базу."""
+def mock_plan(state, temperament=None, rng=None):
+    """Корректный план по простому правилу с учётом характера модели (normal, timid, random, careless)."""
+    rng = rng or random.Random(0)
     battery = _num(state.get('battery'))
+    battery_start = _num(state.get('battery_start'), 50.0)
     samples = state.get('samples') or {}
     subgoals, why = [], []
+
     if samples.get('total') and _num(samples.get('collected')) >= _num(samples.get('total')):
         why.append(f"Все образцы собраны ({samples.get('collected')} из {samples.get('total')}), еду на базу.")
         return {'reasoning': why[0], 'hypotheses': [], 'subgoals': [{'type': 'return_base'}]}
+
+    if temperament == 'timid':
+        if battery < 0.7 * battery_start:
+            why.append(f"Заряд {battery:.1f} опустился ниже 70% от начального ({0.7 * battery_start:.1f}), робко возвращаюсь на базу.")
+            return {'reasoning': why[0], 'hypotheses': [], 'subgoals': [{'type': 'return_base'}]}
+
+    elif temperament == 'random':
+        cands = [c for c in state.get('candidates', []) if c.get('feasible')]
+        points = [p for p in state.get('explore_points', []) if p.get('feasible')]
+        available = [('investigate', c['id']) for c in cands] + [('explore', p['id']) for p in points]
+        if available:
+            stype, sid = rng.choice(available)
+            why.append(f"Случайно выбрана цель {stype} {sid} при заряде {battery:.1f}.")
+            return {'reasoning': why[0], 'hypotheses': _hypotheses(state), 'subgoals': [{'type': stype, 'target': sid}]}
+        why.append(f"Нет выполнимых целей, возвращаюсь на базу.")
+        return {'reasoning': why[0], 'hypotheses': [], 'subgoals': [{'type': 'return_base'}]}
+
+    elif temperament == 'careless':
+        if rng.random() < 1/3:
+            infeasible_c = [c for c in state.get('candidates', []) if not c.get('feasible')]
+            infeasible_p = [p for p in state.get('explore_points', []) if not p.get('feasible')]
+            infeasibles = [('investigate', c['id']) for c in infeasible_c] + [('explore', p['id']) for p in infeasible_p]
+            if infeasibles:
+                stype, sid = rng.choice(infeasibles)
+                why.append(f"Беспечно выбираю цель {stype} {sid}, не рассчитав запас на возврат.")
+                return {'reasoning': why[0], 'hypotheses': _hypotheses(state), 'subgoals': [{'type': stype, 'target': sid}]}
 
     budget = battery
     cands = _reachable(state.get('candidates'), budget)
@@ -85,6 +114,111 @@ def mock_plan(state):
     return {'reasoning': ' '.join(why)[:600], 'hypotheses': _hypotheses(state), 'subgoals': subgoals}
 
 
+def mock_critique(state, plan, temperament=None, rng=None):
+    """Имитация критика с учётом характера модели."""
+    rng = rng or random.Random(0)
+    battery = _num(state.get('battery'))
+    battery_start = _num(state.get('battery_start'), 50.0)
+    subgoals = plan.get('subgoals') or []
+    is_return = any(s.get('type') == 'return_base' for s in subgoals)
+
+    cands_by_id = {c['id']: c for c in state.get('candidates', [])}
+    pts_by_id = {p['id']: p for p in state.get('explore_points', [])}
+    has_infeasible = False
+    for sg in subgoals:
+        if sg.get('type') == 'investigate':
+            c = cands_by_id.get(sg.get('target'))
+            if c and not c.get('feasible', True):
+                has_infeasible = True
+        elif sg.get('type') == 'explore':
+            p = pts_by_id.get(sg.get('target'))
+            if p and not p.get('feasible', True):
+                has_infeasible = True
+
+    if temperament == 'timid':
+        if battery < 0.7 * battery_start:
+            if not is_return:
+                return {
+                    'verdict': 'revise',
+                    'issues': [f"Заряд {battery:.1f} ниже 70% от начального ({0.7 * battery_start:.1f}), оставаться на поле слишком рискованно"],
+                    'advice': "Немедленно возвращайся на базу (return_base)"
+                }
+            return {'verdict': 'accept', 'issues': [], 'advice': "Возврат на базу обоснован"}
+        if has_infeasible:
+            return {'verdict': 'revise', 'issues': ["Выбрана недостижимая цель"], 'advice': "Выбери выполнимого кандидата"}
+        return {'verdict': 'accept', 'issues': [], 'advice': "План безопасен"}
+
+    elif temperament == 'careless':
+        if rng.random() < 1/3:
+            return {'verdict': 'accept', 'issues': [], 'advice': "Всё в порядке, едем дальше!"}
+        if has_infeasible:
+            return {'verdict': 'revise', 'issues': ["Не хватает заряда на выбранную цель с возвратом"], 'advice': "Выбери достижимую цель или возврат"}
+        return {'verdict': 'accept', 'issues': [], 'advice': "План выглядит нормально"}
+
+    else:
+        if has_infeasible:
+            return {'verdict': 'revise', 'issues': ["Цель недостижима по заряду (feasible=false)"], 'advice': "Выбери цель с feasible=true"}
+        cands_feasible = [c for c in state.get('candidates', []) if c.get('feasible')]
+        if is_return and battery >= 0.7 * battery_start and cands_feasible:
+            return {
+                'verdict': 'revise',
+                'issues': ["Преждевременный возврат на базу при наличии доступных кандидатов и высоком заряде"],
+                'advice': f"Исследуй кандидата {cands_feasible[0]['id']} перед возвратом"
+            }
+        return {'verdict': 'accept', 'issues': [], 'advice': "План логичен и безопасен"}
+
+
+def mock_score_choice(state, candidates_cons, temperament=None, rng=None):
+    """Имитация выбора из таблицы с детерминированными последствиями."""
+    rng = rng or random.Random(0)
+    battery = _num(state.get('battery'))
+    battery_start = _num(state.get('battery_start'), 50.0)
+
+    n_opts = len(candidates_cons)
+    if n_opts == 0:
+        return {'choice': 1, 'reasoning': "Нет вариантов"}
+
+    feasible_indices = [i for i, c in enumerate(candidates_cons) if c.get('is_feasible')]
+
+    if temperament == 'timid':
+        # Тот же консервативный характер: таблица не выключает робость.
+        safest = max(range(n_opts), key=lambda i: candidates_cons[i].get('battery_left', -999))
+        return {'choice': safest + 1, 'reasoning': 'Выбираю максимальный остаток заряда на базе'}
+
+    elif temperament == 'careless':
+        if feasible_indices and rng.random() >= 1/3:
+            best_idx = max(feasible_indices, key=lambda i: candidates_cons[i].get('expected_samples', 0))
+            return {
+                'choice': best_idx + 1,
+                'reasoning': f"Выбираю вариант {best_idx + 1} с максимальным числом образцов ({candidates_cons[best_idx].get('expected_samples')})"
+            }
+        best_all = max(range(n_opts), key=lambda i: candidates_cons[i].get('expected_samples', 0))
+        return {
+            'choice': best_all + 1,
+            'reasoning': "Выбираю план с наибольшим количеством образцов"
+        }
+
+    elif temperament == 'random':
+        if feasible_indices:
+            idx = rng.choice(feasible_indices)
+        else:
+            idx = rng.choice(range(n_opts))
+        return {
+            'choice': idx + 1,
+            'reasoning': f"Случайный выбор варианта {idx + 1} из таблицы"
+        }
+
+    else:
+        if feasible_indices:
+            best_idx = max(feasible_indices, key=lambda i: (candidates_cons[i].get('expected_samples', 0), candidates_cons[i].get('battery_left', 0)))
+        else:
+            best_idx = max(range(n_opts), key=lambda i: candidates_cons[i].get('battery_left', -999))
+        return {
+            'choice': best_idx + 1,
+            'reasoning': f"Оптимальный баланс сбора ({candidates_cons[best_idx].get('expected_samples')} образцов) и безопасного остатка на базе"
+        }
+
+
 def find_state(messages):
     """Состояние из последнего сообщения пользователя, в котором оно есть; иначе {}."""
     for m in reversed(messages or []):
@@ -98,6 +232,27 @@ def find_state(messages):
     return {}
 
 
+def find_orchestration_query(messages):
+    """Распознаёт запрос критика, скорера или обычного плана из сообщений пользователя."""
+    for m in reversed(messages or []):
+        if isinstance(m, dict) and m.get('role') == 'user':
+            content = m.get('content', '')
+            try:
+                obj = extract_json(content)
+                if isinstance(obj, dict):
+                    if obj.get('role') == 'critic':
+                        return 'critic', obj.get('state') or {}, obj.get('plan') or {}
+                    if obj.get('role') == 'scorer':
+                        return 'scorer', obj.get('state') or {}, obj.get('candidates') or []
+            except LLMError:
+                pass
+            if 'критика плана' in content.lower():
+                return 'critic', find_state(messages), {}
+            if 'таблица вариантов' in content.lower():
+                return 'scorer', find_state(messages), []
+    return 'plan', find_state(messages), None
+
+
 class MockResponder:
     """Ответчик для LocalClient и HTTP-сервера. Сбои выпадают по вероятностям, детерминированно по seed.
 
@@ -106,9 +261,10 @@ class MockResponder:
     есть ответ модели) приходит корректный план: сбои содержимого на него не действуют.
     """
 
-    def __init__(self, seed=0, faults=None, script=None):
+    def __init__(self, seed=0, faults=None, script=None, temperament=None):
         self.faults = dict(faults or {})
         self.script = list(script or [])
+        self.temperament = temperament
         unknown = sorted((set(self.faults) | set(self.script)) - set(FAULTS) - {'ok'})
         if unknown:
             raise ValueError(f"неизвестные сбои: {', '.join(unknown)}; есть: {', '.join(FAULTS)}")
@@ -143,12 +299,20 @@ class MockResponder:
         task = find_task(messages)           # запрос роли расследования (автор, критик, вывод), а не плана
         if task is not None:
             return kind, mock_reply(kind, task, repair)
-        return kind, self._render(kind, find_state(messages))
+        q_type, state, extra = find_orchestration_query(messages)
+        return kind, self._render(kind, state, q_type=q_type, extra=extra)
 
-    def _render(self, kind, state):
+    def _render(self, kind, state, q_type='plan', extra=None):
         if kind == 'empty':
             return ''
-        plan = mock_plan(state)
+        if q_type == 'critic':
+            crit = mock_critique(state, extra or {}, temperament=self.temperament, rng=self.rng)
+            return json.dumps(crit, ensure_ascii=False)
+        elif q_type == 'scorer':
+            choice = mock_score_choice(state, extra or [], temperament=self.temperament, rng=self.rng)
+            return json.dumps(choice, ensure_ascii=False)
+
+        plan = mock_plan(state, temperament=self.temperament, rng=self.rng)
         if kind == 'invalid_target':
             plan['subgoals'][0] = {'type': 'investigate', 'target': 'C99'}
         elif kind == 'out_of_arena':

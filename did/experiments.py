@@ -51,7 +51,8 @@ def _job(args, knowledge=None):
     try:
         s = run_episode(level, seed, arm['agent'], experiment=spec_id, arm=folder,
                         scenario_args={**cond.get('scenario', {})},
-                        config=arm.get('config'), rules=cond.get('rules'), llm=arm.get('llm'),
+                        config=arm.get('config'), rules=cond.get('rules'),
+                        llm={**arm.get('llm', {}), **(cond.get('llm') or {}), **({'temperament': cond['temperament']} if 'temperament' in cond else {})} if arm.get('llm') else None,
                         sim=cond.get('sim'), knowledge=knowledge, study=arm.get('study'))
         s.pop('study', None)              # отчёт исследования лежит в записи прогона, в сводку идут только метрики
         s['arm'], s['condition'] = arm['id'], cond['id']

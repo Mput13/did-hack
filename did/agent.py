@@ -39,6 +39,7 @@ class AgentConfig:
     unknown_risk: float = 1.5         # насколько маршрут домой избегает пола, по которому робот ещё не ездил
     hazard_weight: float = 30.0       # во сколько раз дороже клетка, которая наверняка в опасной зоне
     planner: str = 'heuristic'        # heuristic | llm
+    llm_strategy: str = 'single'      # single | critic | vote | scored | scored_calc
     candidate_mass: float = 0.35      # с какой уверенности место считается кандидатом
     collect_confidence: float = 0.85  # с какой уверенности пробовать сбор
     max_dv: float = 1.0               # предел изменения линейной скорости за такт, м/с (1.0 — без сглаживания)
@@ -538,6 +539,7 @@ class Agent:
         subgoals = resolve_subgoals(plan['subgoals'], state)
         source = plan['source']
         note = ''
+        rule_goals = resolve_subgoals(HeuristicPlanner().plan(state)['subgoals'], state)
         if not subgoals:
             # План модели неисполним (цели исчезли или не по заряду) — решает правило.
             fallback = HeuristicPlanner().plan(state)
@@ -558,6 +560,8 @@ class Agent:
             self.journal.add(t, 'llm', f"Модель предполагает: {h['statement']}. Как проверить: {h.get('test', '—')}")
         if self.rec:
             self.rec.add_plan(t, source, trigger, reasoning, subgoals)
+            if plan.get('exchanges'):
+                self.rec.plans[-1]['rule_match'] = bool(subgoals and rule_goals and subgoals[0] == rule_goals[0])
             for ex in plan.get('exchanges') or []:
                 self.rec.add_llm(t, ex)
 

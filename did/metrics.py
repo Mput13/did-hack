@@ -37,6 +37,8 @@ METRICS = {
     'study_measurements': ('Учтённых замеров', 'шт.', 'lower'),
     'study_energy': ('Заряд на исследование', 'ед.', 'lower'),
     'study_time': ('Время исследования', 'с', 'lower'),
+    'llm_calls': ('Обращений к модели', 'вызовы', 'lower'),
+    'llm_failed': ('Ошибок модели', 'вызовы', 'lower'),
 }
 
 

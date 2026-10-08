@@ -1,0 +1,64 @@
+title: Способы оркестрации языковой модели
+kind: orchestration
+question: Меняет ли способ обращения к одной и той же модели (оркестрация) качество планов?
+hypothesis: >-
+  Схема «scored» (модель предлагает варианты, расчёт оценивает последствия, модель выбирает лучший)
+  даёт счёт выше, чем один запрос («single»), при той же модели; схемы «critic» и «vote» дают
+  промежуточный результат.
+method: >-
+  Шесть вариантов агента (правило, single, critic, vote, scored, scored_calc) на четырёх характерах имитатора
+  модели (нормальный, робкий, случайный, беспечный) на уровнях medium и hard.
+expect: Схема scored превосходит single по среднему счёту и возвратам, особенно на робком и беспечном характерах.
+refute: Ни одна схема оркестрации не даёт значимого преимущества над single при одинаковом характере модели.
+arms:
+  - id: rule
+    label: Базовое правило
+    agent: adaptive
+  - id: single
+    label: Одиночный запрос (single)
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_strategy: single}
+  - id: critic
+    label: Автор и критик (critic)
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_strategy: critic}
+  - id: vote
+    label: Голосование N=3 (vote)
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_strategy: vote}
+  - id: scored
+    label: Таблица последствий (scored)
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_strategy: scored}
+  - id: scored_calc
+    label: Расчёт выбирает из предложений модели
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_strategy: scored_calc}
+levels: [medium, hard]
+seeds: 20
+seed_start: 1001
+conditions:
+  - id: normal
+    label: Обычный характер
+    temperament: normal
+  - id: timid
+    label: Робкий характер
+    temperament: timid
+  - id: random
+    label: Случайный характер
+    temperament: random
+  - id: careless
+    label: Беспечный характер
+    temperament: careless
+metrics: [score, samples_share, returned, llm_calls]
+claims:
+  - {metric: score, a: scored, b: single, text: "Схема scored даёт счёт выше single", better: higher}
+  - {metric: score, a: critic, b: single, text: "Схема critic даёт счёт выше single", better: higher}
+  - {metric: score, a: vote, b: single, text: "Схема vote даёт счёт выше single", better: higher}
+
+  - {metric: score, a: scored_calc, b: single, text: "Расчёт выбирает против single", better: higher}

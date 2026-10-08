@@ -31,9 +31,12 @@ def make_planner(cfg, llm=None, seed=0):
     from .llm import load_system_prompt, make_client
     opts = dict(llm or {'kind': 'mock'})
     prompt = opts.pop('prompt', None)
+    strategy = getattr(cfg, 'llm_strategy', 'single') or 'single'
+    strategy = opts.pop('strategy', strategy)
     if opts.get('kind', 'mock') == 'mock':
         opts.setdefault('seed', seed)
-    return LLMPlanner(make_client(**opts), system_prompt=load_system_prompt(prompt) if prompt else None)
+    return LLMPlanner(make_client(**opts), system_prompt=load_system_prompt(prompt) if prompt else None,
+                      strategy=strategy)
 
 
 def make_agent(name, config=None):
