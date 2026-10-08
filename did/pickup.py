@@ -10,6 +10,10 @@ _do_investigate): уверенность `collect_confidence` в радиусе 
 двух промахов, не место недавнего промаха. Пути это не добавляет: робот уже стоит где нужно; цена — секунда
 простоя. Сам сбор и учёт его исхода — прежний `_try_collect`.
 
+По дороге на базу (правка по ревью P3) попутный сбор уступает возврату: у базы, где уже доступен финиш, робот
+финиширует, а не собирает; в пути собирает только при запасе заряда и времени сверх дороги домой. Запас — тот
+же, по которому агент решает, можно ли ещё стоять на месте (did/agent.py, _cannot_wait).
+
 Скрытой правды модуль не читает: только карта образцов агента и его поза.
 """
 import math
@@ -18,6 +22,9 @@ import math
 class Pickup:
 
     RETRY_S = 2.0          # с: не сошлось после остановки — столько не пробуем снова, едем дальше
+    FINISH_TOL = 0.08      # м: ближе к базе доступен финиш (допуск _do_return) — он важнее сбора
+    SPARE_BATTERY = 0.5    # ед. сверх дороги домой с reserve_margin: меньше — по дороге домой не останавливаюсь
+    SPARE_TIME_S = 20.0    # с сверх дороги домой на осторожной скорости ALERT_V
 
     def __init__(self, agent):
         self.a = agent
@@ -26,9 +33,11 @@ class Pickup:
         self._skip_until = -1e9
         self.count = 0             # сколько попутных сборов начато за прогон
 
-    def here(self, obs, io):
-        """Вызывается из разведки, пути и возврата. True — такт занят попутным сбором."""
+    def here(self, obs, io, homeward=False):
+        """Вызывается из разведки, пути и возврата (homeward). True — такт занят попутным сбором."""
         a, t = self.a, obs.t
+        if homeward and math.dist((obs.x, obs.y), a.base) <= self.FINISH_TOL:
+            return self._drop()                    # робот на базе: финиш важнее
         if self.cfg.search != 'belief' or t < a._no_collect_until or t < self._skip_until:
             return self._drop()
         here = a.belief.prob_within(obs.x, obs.y, self.cfg.collect_reach)
@@ -38,6 +47,8 @@ class Pickup:
             return self._drop()
         if any(t - mt < 30.0 and math.hypot(obs.x - mx, obs.y - my) < 0.35 for mt, mx, my in a._misses):
             return self._drop()                    # здесь только что был промах
+        if homeward and not self._spare(obs):
+            return self._drop()                    # запаса на остановку нет: домой
         if self._sg is None:
             self._sg = {'type': 'investigate', 'x': obs.x, 'y': obs.y, 'pickup': True}
             self.count += 1
@@ -53,6 +64,14 @@ class Pickup:
         else:
             self._sg = None
         return True
+
+    def _spare(self, obs):
+        """Есть ли по дороге домой запас на остановку — мерка та же, что в Agent._cannot_wait."""
+        a = self.a
+        home = a._home_cost(obs.x, obs.y)
+        if obs.battery <= home * self.cfg.reserve_margin + self.SPARE_BATTERY:
+            return False
+        return a.rules.time_limit_s - obs.t > home / a.rules.drain_per_m / a.ALERT_V + self.SPARE_TIME_S
 
     def _drop(self):
         self._sg = None

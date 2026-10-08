@@ -1186,8 +1186,8 @@ class Agent:
             self._end_subgoal(obs, io, 'subgoal_done')
 
     def _do_return(self, obs, io):
-        if self.pickup and self.pickup.here(obs, io):
-            return                                    # и по дороге домой тоже
+        if self.pickup and self.pickup.here(obs, io, homeward=True):
+            return                                    # и по дороге домой тоже: не у базы и при запасе (did/pickup.py)
         self.mode = 'return'
         if self._drive_to(obs, io, self.base, tol=0.08) and abs(obs.v) < 0.03:
             ok, msg = io.finish()

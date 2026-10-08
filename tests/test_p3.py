@@ -38,6 +38,10 @@ class FakeIO:
     def command(self, v, w):
         self.cmds.append((v, w))
 
+    def finish(self):
+        self.finished = True
+        return True, 'ok'
+
 
 def _obs(t, x, y, v=0.0, battery=30.0):
     return Observation(t=t, x=x, y=y, th=0.0, v=v, w=0.0, battery=battery, sensor=None, scan=None, events=[],
@@ -139,6 +143,46 @@ def test_pickup_gives_up_if_confidence_drops_while_braking(arena):
     bot.belief.p[:] = 1e-4
     bot._do_return(_obs(50.2, *HERE), io)
     assert io.collects == 0 and bot.mode == 'return' and bot.queue == [{'type': 'return_base'}]
+
+
+def _at_base(arena, name, t, battery=30.0):
+    """Робот стоит на базе, а карта ошибочно уверена, что образец под ним."""
+    bot, io = _bot(arena, name, sure=False), FakeIO(ok=False)
+    k = int(np.hypot(bot.belief.cx - bot.base[0], bot.belief.cy - bot.base[1]).argmin())
+    bot.belief.p[k] = 0.95
+    bot._do_return(_obs(t, *bot.base, battery=battery), io)
+    return bot, io
+
+
+def test_finish_at_the_time_limit_comes_before_pickup(arena):
+    """Находка ревью: за 0,1 с до лимита v4 собирал (промах) и оставлял прогон незавершённым."""
+    for t in (599.9, 300.0):                                   # финиш важнее сбора и без спешки
+        old, old_io = _at_base(arena, 'adaptive_v2', t)
+        new, new_io = _at_base(arena, 'adaptive_v4', t)
+        assert old.finished and getattr(old_io, 'finished', False)
+        assert new.finished and getattr(new_io, 'finished', False) and new_io.collects == 0
+        assert new.mode == old.mode == 'done'
+
+
+def test_pickup_on_the_way_home_needs_spare_battery_and_time(arena):
+    bot = _bot(arena)
+    home = bot._home_cost(*HERE)
+    assert home > 0.0
+    tight = home * bot.cfg.reserve_margin + bot.pickup.SPARE_BATTERY
+    io = FakeIO()
+    bot._do_return(_obs(50.0, *HERE, battery=tight - 0.01), io)        # заряда только на дорогу: домой
+    assert io.collects == 0 and bot.mode == 'return'
+    late = bot.rules.time_limit_s - home / bot.rules.drain_per_m / bot.ALERT_V - bot.pickup.SPARE_TIME_S
+    bot, io = _bot(arena), FakeIO()
+    bot._do_return(_obs(late + 0.1, *HERE), io)                        # времени только на дорогу: домой
+    assert io.collects == 0 and bot.mode == 'return'
+    bot, io = _bot(arena), FakeIO()
+    bot._do_return(_obs(late - 1.0, *HERE, battery=tight + 0.1), io)   # запас есть: собираю
+    assert io.collects == 1 and bot.collected == 1
+    bot, io = _bot(arena), FakeIO()                                    # на разведке запас считает планировщик
+    bot._returning, bot.queue = False, [{'type': 'explore', 'x': 1.0, 'y': 1.0}]
+    bot._do_goto(bot.queue[0], _obs(late + 0.1, *HERE, battery=tight - 0.01), io)
+    assert io.collects == 1
 
 
 def test_v4_collects_a_sample_it_passes_on_the_way_home():
