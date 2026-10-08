@@ -8,6 +8,7 @@
 открывается двойным щелчком, сеть и сервер ей не нужны.
 """
 import json
+import re
 import math
 import sys
 import time
@@ -196,7 +197,8 @@ def research():
         report = ROOT / 'research' / 'findings' / f"{st['id']}.md"
         if report.exists():
             text = report.read_text(encoding='utf-8')
-            m = re.search(r'^## Вывод\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M)
+            m = (re.search(r'^## Коротко\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M)      # короткий текст для страницы
+                 or re.search(r'^## Вывод\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M))
             st['conclusion'] = m.group(1).strip() if m else None
             lim = re.search(r'^## Ограничения\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M)
             st['limits'] = lim.group(1).strip() if lim else None
@@ -209,7 +211,8 @@ def research_runs():
     runs = errors = 0
     for p in sorted((ROOT / 'experiments').glob('E*.yaml')):
         path = RUNS / p.stem / 'summary.json'
-        if int(p.stem[1:]) > 14 and path.exists():
+        num = re.match(r'E(\d+)', p.stem)            # E19, E19r, E19s, E19_pilot — всё это опыт 19
+        if num and int(num.group(1)) > 14 and path.exists():
             s = json.loads(path.read_text(encoding='utf-8'))
             runs += len(s['runs'])
             errors += len(s['errors'])
@@ -284,7 +287,7 @@ def main():
         # Опыты E1–E14 показаны на странице графиками и встраиваются целиком; опыты исследовательского контура
         # (E15 и дальше) представлены выводами в журнале, от них нужен только счёт прогонов.
         'experiments': {p.stem: experiment(p.stem) for p in sorted((ROOT / 'experiments').glob('E*.yaml'))
-                        if int(p.stem[1:]) <= 14},
+                        if p.stem[1:].isdigit() and int(p.stem[1:]) <= 14},
         'research_runs': research_runs(),
         'science': science_story(),
         'inq_accuracy': inquiry_accuracy(),
