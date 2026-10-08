@@ -109,3 +109,16 @@ def test_hub_reports_clear_errors():
         assert state['active'] and state['backend'] == 'fastsim' and len(state['route']) == 1
     finally:
         assert hub.start({'backend': 'off'})[0] == 200
+
+
+def test_escape_side_is_counted_from_current_heading(arena):
+    """Ревью G2: пульт выбирает сторону отъезда от нынешнего курса, а не от курса в момент скана."""
+    import numpy as np
+    _, pilot = _pilot(arena)
+    scan = np.full(360, np.inf)
+    scan[170:191] = 0.15                                   # преграда вплотную позади — в момент скана
+    pilot._scan = (0.0, 0.0, 0.0, scan, None)
+    pilot.pose = (0.0, 0.0, 0.0)
+    assert pilot._escape_v(back=True) == 0.10              # назад нельзя: вперёд
+    pilot.pose = (0.0, 0.0, math.pi)                       # робот развернулся: преграда теперь спереди
+    assert pilot._escape_v(back=True) == -0.10
