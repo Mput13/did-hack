@@ -1,0 +1,24 @@
+title: Память между прогонами
+kind: science
+rules: science
+publish_knowledge: true
+question: Помогают ли знания, накопленные в прошлых прогонах, в следующих?
+hypothesis: >-
+  Исследователь с памятью начинает прогон с проверенных оценок (сколько стоят повороты и груз, какие
+  сбои следуют за штрафом и сколько длятся) и поэтому находит больше сбоев и реже остаётся с выводом
+  «недостаточно данных», чем такой же исследователь без памяти.
+method: >-
+  Два одинаковых исследователя проходят одни и те же сценарии по порядку. Первый каждый раз начинает
+  с нуля. Второй после каждого прогона записывает выясненное в память и следующий прогон начинает с неё.
+expect: Разница появляется после первых нескольких прогонов, когда в памяти набирается достаточно подтверждений.
+refute: Гипотеза опровергнута, если с памятью сбоев находится не больше и счёт не выше.
+arms:
+  - {id: scientist, label: Без памяти, agent: scientist}
+  - {id: scientist_mem, label: С памятью, agent: scientist, memory: true}
+levels: [hard]
+seeds: 60
+metrics: [faults_found, inq_correct, inq_insufficient, returned, score, inq_energy]
+claims:
+  - {metric: faults_found, a: scientist_mem, b: scientist, text: С памятью находится больше сбоев}
+  - {metric: score, a: scientist_mem, b: scientist, text: С памятью счёт не ниже, better: higher}
+  - {metric: returned, a: scientist_mem, b: scientist, text: С памятью возврат на базу не реже, better: higher}

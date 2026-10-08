@@ -48,6 +48,8 @@ class Investigator:
         self._cusum = 0.0
         self._checkup_at = None        # когда провести проверку после штрафа
         self._rest_ok_t = -1e9         # когда опыт «постоять» последний раз показал, что утечки нет
+        self._path = [0.0, 0.0]        # пройдено метров и накручено радиан: сколько поворотов приходится на метр
+        self._wait_from = None         # с какого времени робот стоит и ждёт, пока оживёт залипший датчик
         self._pre_penalty = 0.0        # среднее показание датчика перед штрафом
         self._quiet_until = 0.0
         self._penalty_t = -1e9
@@ -92,6 +94,8 @@ class Investigator:
     def _window(self, w, dt, obs):
         a, m = self.a, self.model
         ds, dth, n = w['ds'], w['dth'], w['n']
+        self._path[0] += ds
+        self._path[1] += dth
         mx, my = (w['x0'] + obs.x) / 2, (w['y0'] + obs.y) / 2
         spent = w['b0'] - obs.battery - self._leak_rate(obs.t) * dt
         moving = ds >= 0.05
@@ -189,7 +193,7 @@ class Investigator:
             return {k: v for k, v in kw.items() if k in ids}
 
         tests = [TestOption('rest', f'постоять {PAUSE_S:.0f} секунды и измерить расход на месте',
-                            cost=(per_s + 0.4 * rate) * PAUSE_S, duration_s=PAUSE_S, unit='ед/с',
+                            cost=per_s * PAUSE_S + 0.05, duration_s=PAUSE_S, unit='ед/с',
                             predictions=preds(leak=(per_s + rate, 0.35 * rate + 0.02), soil=(per_s, 0.012),
                                               turn=(per_s, 0.012)),
                             action={'kind': 'pause'}, sigma=BATTERY_NOISE / PAUSE_S)]
@@ -204,7 +208,7 @@ class Investigator:
                                     sigma=BATTERY_NOISE / (per_m * STRAIGHT_M)))
         if turn is not None:
             tests.append(TestOption('spin', 'развернуться на месте на 90° и измерить расход на поворот',
-                                    cost=max(turn, per_rad) * SPIN_RAD, duration_s=SPIN_RAD, unit='ед/рад',
+                                    cost=max(per_rad, 0.1) * SPIN_RAD + 0.05, duration_s=SPIN_RAD, unit='ед/рад',
                                     predictions=preds(turn=(turn, 0.3 * turn + 0.03), soil=(per_rad, 0.05),
                                                       leak=(per_rad + rate, 0.35 * rate + 0.04)),
                                     action={'kind': 'spin'}, sigma=BATTERY_NOISE / SPIN_RAD))
@@ -222,7 +226,7 @@ class Investigator:
         a = self.a
         home = a._home_cost(obs.x, obs.y)
         spare = obs.battery - home * a.cfg.reserve_margin - a.cfg.reserve_abs
-        return float(np.clip(spare - 1.0, 0.0, 2.5))
+        return float(np.clip(spare - 1.0, 0.3, 2.5))     # на стоячие опыты заряд есть всегда
 
     def _free_heading(self, obs):
         """Направление, в котором есть 45 см свободного пола: сначала текущий курс, потом соседние."""
@@ -232,6 +236,10 @@ class Investigator:
                    for d in (0.15, 0.3, 0.45)):
                 return th
         return None
+
+    def _in_danger(self, obs):
+        ix, iy = self.a.arena.w2g(obs.x, obs.y)
+        return bool(self.a._risk[iy, ix] > 0.05) or obs.t - self._penalty_t < 3.0
 
     def _qid(self):
         return f'Q{len(self.inquiries) + 1}'
@@ -253,12 +261,14 @@ class Investigator:
         """Если идёт расследование — занять робота опытом. Возвращает True, когда такт использован."""
         q, a = self.active, self.a
         if q is None and self._checkup_at is not None and obs.t >= self._checkup_at:
-            self._checkup_at = None
-            if self.sensor['mode'] == 'ok' and self.leak is None:
-                self._open_checkup(obs)
-                q = self.active
+            # Останавливаться можно только выехав из опасной зоны: внутри неё штраф повторяется.
+            if not self._in_danger(obs) or obs.t - self._checkup_at > 10.0:
+                self._checkup_at = None
+                if self.sensor['mode'] == 'ok' and self.leak is None and not self._in_danger(obs):
+                    self._open_checkup(obs)
+                    q = self.active
         if q is None:
-            return False
+            return self._wait_for_sensor(obs, io)
         if self.run is None:
             test = q.choose()
             if test is None or a._returning and test.action['kind'] != 'pause':
@@ -310,6 +320,23 @@ class Investigator:
             self._measure(r, dt, obs)
             self.run = None
             self._win = None
+        return True
+
+    def _wait_for_sensor(self, obs, io):
+        """Датчик залип: стоять почти бесплатно, а ехать и собирать вслепую — дорого. Ждём, но не дольше 35 с."""
+        a = self.a
+        if self.sensor['mode'] != 'stuck' or a._returning or self._in_danger(obs):
+            self._wait_from = None
+            return False
+        if self._wait_from is None:
+            self._wait_from = obs.t
+            a.journal.add(obs.t, 'decision', 'Датчик образцов залип: стою и жду, пока он оживёт — это дешевле, чем искать вслепую')
+        if obs.t - self._wait_from > 35.0:
+            self._recovered('stuck', obs.t, 'ждать дольше нет смысла, продолжаю без уверенности в датчике')
+            a.belief.relax(0.2)
+            return False
+        a.mode = 'wait'
+        a._command(io, 0.0, 0.0)
         return True
 
     def _measure(self, r, dt, obs):
@@ -410,6 +437,11 @@ class Investigator:
                                'запас на возврат возвращён к обычному', tag='leak_end')
             self.leak = None
 
+    def per_meter(self):
+        """Сколько заряда на самом деле стоит метр пути сейчас: с грузом и с обычной долей поворотов."""
+        turns = self._path[1] / self._path[0] if self._path[0] > 2.0 else 1.5      # радиан на метр пути
+        return self.model.per_meter(self.a.collected) + float(self.model.mean[2]) * min(turns, 4.0)
+
     def reserve(self, t):
         """Сколько заряда держать сверх обычного запаса на возврат."""
         extra = self.reserve_until[0] if t <= self.reserve_until[1] else 0.0
@@ -442,7 +474,7 @@ class Investigator:
                 Alternative(OTHER, 'причина не из этого списка', 0.1)]
         same = (nominal, 0.4 * nominal)
         tests = [TestOption('rest', f'постоять {PAUSE_S:.0f} секунды и измерить расход на месте',
-                            cost=(per_s + 0.05) * PAUSE_S, duration_s=PAUSE_S, unit='ед/с',
+                            cost=per_s * PAUSE_S + 0.05, duration_s=PAUSE_S, unit='ед/с',
                             predictions={'leak': (per_s + leak['value'], max(leak['sigma'], 0.03)), 'noise': (per_s, 0.012),
                                          'stuck': (per_s, 0.012), 'bias': (per_s, 0.012), 'none': (per_s, 0.012)},
                             action={'kind': 'pause'}, sigma=BATTERY_NOISE / PAUSE_S),

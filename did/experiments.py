@@ -19,6 +19,8 @@ import numpy as np
 import yaml
 
 from . import ROOT
+from .config import SCIENCE
+from .memory import KnowledgeBase
 from .metrics import METRICS, paired, summarize, verdict
 from .runner import RUNS, run_episode
 
@@ -43,15 +45,17 @@ def list_specs():
     return sorted(p.stem for p in SPECS.glob('*.yaml'))
 
 
-def _job(args):
+def _job(args, knowledge=None):
     spec_id, arm, cond, level, seed = args
     folder = arm['id'] if cond['id'] == 'base' else f"{arm['id']}@{cond['id']}"
     try:
         s = run_episode(level, seed, arm['agent'], experiment=spec_id, arm=folder,
                         scenario_args={**cond.get('scenario', {})},
                         config=arm.get('config'), rules=cond.get('rules'), llm=arm.get('llm'),
-                        sim=cond.get('sim'))
+                        sim=cond.get('sim'), knowledge=knowledge)
         s['arm'], s['condition'] = arm['id'], cond['id']
+        if knowledge is None:
+            s.pop('science', None)            # нужно только варианту с памятью, в сводку не идёт
         return s
     except Exception as exc:          # noqa: BLE001 — один упавший прогон не должен ронять серию
         import traceback
@@ -65,9 +69,13 @@ def run_experiment(exp_id, seeds=None, jobs=8, progress=None):
     out = RUNS / exp_id
     if out.exists():
         shutil.rmtree(out)
+    # Правила среды для всего опыта (например science) плюс поправки отдельных условий.
+    base_rules = dict(SCIENCE) if spec.get('rules') == 'science' else dict(spec.get('rules') or {})
+    conditions = [{**c, 'rules': {**base_rules, **c.get('rules', {})}} for c in spec['conditions']]
+    seeds_range = range(spec['seed_start'], spec['seed_start'] + n_seeds)
     tasks = [(exp_id, arm, cond, level, seed)
-             for arm in spec['arms'] for cond in spec['conditions']
-             for level in spec['levels'] for seed in range(spec['seed_start'], spec['seed_start'] + n_seeds)]
+             for arm in spec['arms'] if not arm.get('memory') for cond in conditions
+             for level in spec['levels'] for seed in seeds_range]
     t0 = time.perf_counter()
     results = []
     with ProcessPoolExecutor(max_workers=jobs) as pool:
@@ -75,6 +83,23 @@ def run_experiment(exp_id, seeds=None, jobs=8, progress=None):
             results.append(res)
             if progress and (i % 10 == 0 or i == len(tasks)):
                 progress(i, len(tasks))
+    # Варианты с памятью идут по одному, по порядку: каждый прогон начинает с того, что выяснили предыдущие.
+    for arm in (a for a in spec['arms'] if a.get('memory')):
+        for cond in conditions:
+            kb = KnowledgeBase(out / f"kb_{arm['id']}_{cond['id']}.json")
+            order = 0
+            for seed in seeds_range:
+                for level in spec['levels']:
+                    order += 1
+                    res = _job((exp_id, arm, cond, level, seed), knowledge=kb.priors())
+                    res['order'] = order
+                    kb.learn(res.pop('science', None), res.get('id'))
+                    results.append(res)
+            kb.save()
+            if spec.get('publish_knowledge'):          # эти знания видны на странице «Знания» и доступны новым прогонам
+                (RUNS / '_knowledge').mkdir(parents=True, exist_ok=True)
+                shutil.copy(kb.path, RUNS / '_knowledge' / 'kb_state.json')
+                shutil.copy(kb.path.parent / 'kb.json', RUNS / '_knowledge' / 'kb.json')
     summary = summarize_experiment(spec, results, n_seeds, time.perf_counter() - t0)
     out.mkdir(parents=True, exist_ok=True)
     (out / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')

@@ -155,7 +155,7 @@ def _plan_cost(plan, tests):
 # --- схемы -------------------------------------------------------------------------------------
 
 Id = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
-Line = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
+Line = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]   # просим до 300
 
 
 class _Result(BaseModel):
@@ -251,18 +251,47 @@ class Explanation(str):
         return self
 
 
-_STRINGS = {'type': 'array', 'items': {'type': 'string'}}
-PROPOSAL_SCHEMA = _obj(
-    consider=_STRINGS,
-    extra={'type': 'array', 'items': _obj(statement={'type': 'string'}, why={'type': 'string'})},
-    plan={'type': 'array', 'items': _obj(test={'type': 'string'}, distinguishes=_STRINGS,
-                                         refutes_if={'type': 'string'})},
-    rationale={'type': 'string'})
-CRITIQUE_SCHEMA = _obj(
-    verdict={'type': 'string', 'enum': ['accept', 'revise']},
-    issues={'type': 'array', 'items': _obj(kind={'type': 'string', 'enum': list(ISSUE_KINDS)},
-                                           target={'type': ['string', 'null']},
-                                           text={'type': 'string'}, fix={'type': 'string'})})
+def _one_of(ids):
+    """Строка из перечня: модель, которую клиент заставляет отвечать по схеме, не напишет чужой или
+    испорченный идентификатор (GPT в свободной строке дописывал к ним мусор)."""
+    return {'type': 'string', 'enum': list(ids)} if ids else {'type': 'string'}
+
+
+def proposal_schema(context=None):
+    """JSON-схема ответа автора под контекст: идентификаторы — только из списков объяснений и опытов.
+
+    Шаг плана — свой вариант на каждый опыт: в distinguishes попадают лишь объяснения, для которых
+    у этого опыта есть предсказание.
+    """
+    alts, tests = _items(context, 'alternatives'), _items(context, 'tests')
+
+    def step(test_ids, alt_ids):
+        return _obj(test=_one_of(test_ids), distinguishes={'type': 'array', 'items': _one_of(alt_ids)},
+                    refutes_if={'type': 'string'})
+
+    steps = [step([tid], ids) for tid, t in tests.items()
+             if len(ids := [a for a in alts if _prediction(t, a) is not None]) >= 2]
+    return _obj(
+        consider={'type': 'array', 'items': _one_of(alts)},
+        extra={'type': 'array', 'items': _obj(statement={'type': 'string'}, why={'type': 'string'})},
+        plan={'type': 'array', 'items': {'anyOf': steps} if steps else step(tests, alts)},
+        rationale={'type': 'string'})
+
+
+def critique_schema(context=None, proposal=None):
+    """JSON-схема ответа критика: target — id объяснения, опыта или объяснения автора не из списка."""
+    extra = [x.get('id') for x in _plain(proposal).get('extra') or [] if isinstance(x, dict) and x.get('id')]
+    ids = [*_items(context, 'alternatives'), *_items(context, 'tests'), *extra]
+    return _obj(
+        verdict={'type': 'string', 'enum': ['accept', 'revise']},
+        issues={'type': 'array', 'items': _obj(kind={'type': 'string', 'enum': list(ISSUE_KINDS)},
+                                               target={'anyOf': [_one_of(ids), {'type': 'null'}]},
+                                               text={'type': 'string'}, fix={'type': 'string'})})
+
+
+# Схемы под пример: показывают форму; в запросах берутся proposal_schema(context) и critique_schema(...).
+PROPOSAL_SCHEMA = proposal_schema(EXAMPLE_CONTEXT)
+CRITIQUE_SCHEMA = critique_schema(EXAMPLE_CONTEXT)
 EXPLANATION_SCHEMA = _obj(text={'type': 'string'})
 
 
@@ -340,7 +369,8 @@ def validate_proposal(proposal, context):
         errors.append(f'plan: опытов {len(proposal.plan)}, а budget.max_tests = {max_tests}')
     if cost > energy + 1e-9:
         errors.append(f'plan: опыты стоят {cost:g} ед., а budget.energy = {energy:g}; убери или замени самый дорогой')
-    if not proposal.plan and any(_num(t.get('cost')) <= energy and _pairs(t, proposal.consider) for t in tests.values()):
+    useful = [t for t in tests.values() if _num(t.get('cost')) <= energy and _pairs(t, proposal.consider)]
+    if not proposal.plan and useful:
         errors.append('plan: пусто, хотя в tests есть опыт, который различает объяснения и проходит по бюджету')
     texts = {'rationale': proposal.rationale}
     texts.update({f'plan[{i}].refutes_if': s.refutes_if for i, s in enumerate(proposal.plan)})
@@ -456,7 +486,8 @@ def validate_critique(critique, context, proposal):
                 errors.append(f'{where}: все объяснения из alternatives, у которых есть predictions, уже есть '
                               'в consider — замечание неверно')
             elif issue.target in alts and issue.target not in missing:
-                errors.append(f'{where}.target: "{issue.target}" уже есть в consider; не рассмотрены: {", ".join(missing)}')
+                errors.append(f'{where}.target: "{issue.target}" уже есть в consider; не рассмотрены: '
+                              + ', '.join(missing))
         elif issue.kind == 'over_budget':
             cost = _plan_cost(plan, tests)
             if cost <= energy + 1e-9 and len(plan) <= max_tests:
@@ -492,13 +523,14 @@ def rule_critique(context, proposal):
     cost = _plan_cost(plan, tests)
     if cost > energy + 1e-9 or len(plan) > max_tests:
         issues.append({'kind': 'over_budget', 'target': None,
-                       'text': f'Опытов {len(plan)} при пределе {max_tests}, они стоят {cost:g} ед. при бюджете {energy:g}.',
+                       'text': f'Опытов {len(plan)} при пределе {max_tests}, они стоят {cost:g} ед. при бюджете '
+                               f'{energy:g}.',
                        'fix': 'Убрать опыты с наименьшей пользой на единицу заряда, пока план не уложится в бюджет.'})
     for a in _testable(alts, tests):
         if a not in consider:
             issues.append({'kind': 'missing_alternative', 'target': a,
-                           'text': f"Не рассмотрено «{alts[a].get('statement') or a}» (prior {_num(alts[a].get('prior')):g}), "
-                                   'хотя оно есть в списке допустимых.',
+                           'text': f"Не рассмотрено «{alts[a].get('statement') or a}» (prior "
+                                   f"{_num(alts[a].get('prior')):g}), хотя оно есть в списке допустимых.",
                            'fix': f'Добавить {a} в consider.'})
     for hole in discrimination_holes(context, prop):
         test = tests[hole['test']]
@@ -563,10 +595,11 @@ def validate_explanation(text, inquiry):
         errors.append('text: не сказано, что ожидалось при разных объяснениях (числа mean из predictions)')
     low = text.lower()
     if conclusion.get('status') == 'insufficient' and not any(mark in low for mark in _INSUFFICIENT):
-        errors.append('text: conclusion.status = insufficient — скажи прямо, что данных не хватило и причина не установлена')
+        errors.append('text: conclusion.status = insufficient — скажи прямо, что данных не хватило и причина '
+                      'не установлена')
     if conclusion.get('status') == 'identified' and any(mark in low for mark in _DENIES):
         errors.append('text: conclusion.status = identified, а в тексте сказано, что причина не установлена')
-    ids = [i for i in list(alts) + list(tests) if i.isascii() and re.search(rf'(?<![\w-]){re.escape(i)}(?![\w-])', text)]
+    ids = [i for i in [*alts, *tests] if i.isascii() and re.search(rf'(?<![\w-]){re.escape(i)}(?![\w-])', text)]
     if ids:
         errors.append(f'text: идентификаторы ({", ".join(ids)}) читателю не понятны — пиши словами из statement и name')
     allowed = _known_probabilities(alts.values()) + [conclusion.get('confidence')]
@@ -607,7 +640,8 @@ def rule_explanation(inquiry):
     out.append(('Проверка: ' + ', '.join(parts) + '.') if parts else 'Поставить опыты не удалось.')
     confidence = _num(conclusion.get('confidence'), None)
     if conclusion.get('status') == 'identified' and best is not None:
-        out.append(f'По расчёту причина — «{name(best)}»' + (f' (вероятность {confidence:g}).' if confidence is not None else '.'))
+        out.append(f'По расчёту причина — «{name(best)}»'
+                   + (f' (вероятность {confidence:g}).' if confidence is not None else '.'))
     else:
         rest = sorted(alts, key=lambda a: -_num(alts[a].get('posterior')))[:2]
         out.append('Данных не хватило, причина не установлена'
@@ -661,7 +695,8 @@ def _call(client, prompt, task, ask, parse, schema, rule, max_repairs, role, nou
 
 def _author(client, task, context, max_repairs, **parts):
     out, *meta = _call(client, 'inquiry_author', task, 'Верни план расследования',
-                       lambda text: parse_proposal(text, context), PROPOSAL_SCHEMA, lambda: rule_proposal(context),
+                       lambda text: parse_proposal(text, context), proposal_schema(context),
+                       lambda: rule_proposal(context),
                        max_repairs, 'author', 'план расследования', context=context, **parts)
     return out._stamp(*meta)
 
@@ -679,7 +714,7 @@ def revise(client, context, proposal, critique, max_repairs=1):
 def criticize(client, context, proposal, max_repairs=1):
     """Критик: дыры в плане автора и вердикт accept | revise."""
     out, *meta = _call(client, 'inquiry_critic', 'criticize', 'Верни замечания к плану',
-                       lambda text: parse_critique(text, context, proposal), CRITIQUE_SCHEMA,
+                       lambda text: parse_critique(text, context, proposal), critique_schema(context, proposal),
                        lambda: rule_critique(context, proposal), max_repairs, 'critic', 'ответ критика',
                        context=context, proposal=_plain(proposal))
     return out._stamp(*meta)
@@ -774,11 +809,12 @@ def mock_reply(kind, payload, repair=False):
         naive = task == 'propose' and not repair and kind in ('ok', 'wrapped', 'malformed')
         data = _naive_proposal(context) if naive else rule_proposal(context).model_dump()
         if kind == 'invalid_target':
-            data['plan'] = [{'test': 'teleport', 'distinguishes': data['consider'][:2], 'refutes_if': 'робот окажется на базе'}]
+            data['plan'] = [{'test': 'teleport', 'distinguishes': data['consider'][:2],
+                             'refutes_if': 'робот окажется на базе'}]
         elif kind == 'out_of_arena':
             tests = _items(context, 'tests')
-            data['plan'] = [{'test': t, 'distinguishes': data['consider'][:2], 'refutes_if': 'результат разойдётся с прогнозом'}
-                            for t in list(tests) * 2]
+            data['plan'] = [{'test': t, 'distinguishes': data['consider'][:2],
+                             'refutes_if': 'результат разойдётся с прогнозом'} for t in list(tests) * 2]
             data['rationale'] += ' Уверенность в утечке 95%.'
     text = json.dumps(data, ensure_ascii=False)
     if kind == 'malformed':
@@ -826,11 +862,13 @@ def main(argv=None):
     print(f'\nне сошлось с числами в итоговом плане: {[i.model_dump() for i in result.open_issues] or "ничего"}')
     print(f'\nвывод ({text.source}):\n{text}')
     if args.save:
-        name = (args.name or args.model or getattr(client, 'model', '') or args.kind).replace(':', '-').replace('/', '-')
+        name = args.name or args.model or getattr(client, 'model', '') or args.kind
+        name = name.replace(':', '-').replace('/', '-')
         folder = Path(args.save)
         folder.mkdir(parents=True, exist_ok=True)
         for part, data in out.items():
-            (folder / f'{name}_{part}.json').write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+            dump = json.dumps(data, ensure_ascii=False, indent=1)
+            (folder / f'{name}_{part}.json').write_text(dump, encoding='utf-8')
         print(f'\nзаписано: {folder}/{name}_deliberate.json, {folder}/{name}_explain.json')
     return 0
 

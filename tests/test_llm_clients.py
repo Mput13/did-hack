@@ -359,6 +359,10 @@ def test_llm_stats_groups_requests():
     assert (stats['first_ok'], stats['repaired'], stats['failed'], stats['cached'], stats['quota']) == (2, 1, 2, 1, 0)
     assert stats['errors'] == {'цель не из списка': 2, 'точка вне арены': 2, 'ответ не JSON': 1, 'нет ответа модели': 1}
     assert stats['latency_ms'] == {'mean': 279, 'median': 200, 'max': 900, 'total': 1950}
+    assert stats['transport_retries'] == 0 and stats['tokens'] == {'prompt': 0, 'completion': 0}
+    usage = {'prompt_tokens': 17000, 'completion_tokens': 130}
+    stats = llm_stats([{**ok, 'usage': usage, 'http_attempts': 2}, {**ok, 'usage': {**usage, 'prompt_tokens': 16000}}, ok])
+    assert stats['transport_retries'] == 1 and stats['tokens'] == {'prompt': 16500, 'completion': 130}
     assert llm_stats([])['requests'] == 0 and llm_stats(None)['latency_ms']['mean'] == 0
     kinds = {'reasoning: нет обязательного поля': 'нарушена схема',
              'subgoals[0]: цель "C1" недостижима по заряду (feasible=false)': 'цель недостижима по заряду',

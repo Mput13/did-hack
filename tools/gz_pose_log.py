@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Журнал поз в Gazebo: что думает одометрия и где робот на самом деле.
 
-    pixi run python tools/gz_pose_log.py --out runs/gz_loc/pose-medium-1.csv     # писать, пока идёт прогон
+    pixi run gazebo-run --level medium --seed 1 --exp gz_loc --pose-log          # прогон сразу с журналом
+    pixi run python tools/gz_pose_log.py --out runs/gz_loc/pose-medium-1.csv     # или отдельно, пока идёт прогон
     pixi run python tools/gz_pose_log.py --report runs/gz_loc/pose-medium-1.csv  # разбор готового журнала
     ... --report pose.csv --trace runs/gz_loc/adaptive/medium-1.json.gz           # и ошибка позы агента
 
@@ -25,7 +26,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-COLUMNS = ('t', 'tj', 'ox', 'oy', 'oth', 'ov', 'ow', 'gx', 'gy', 'gth', 'gpitch', 'cv', 'cw', 'events')
+COLUMNS = ('t', 'tj', 'ox', 'oy', 'oth', 'ov', 'ow', 'gx', 'gy', 'gth', 'gpitch', 'cv', 'cw', 'tgap', 'events')
+# tgap — промежуток между соседними замерами истинной позы вокруг строки, с: большой — строке не верить
 GZ_POSES = '/did/gz/dynamic_pose'
 
 
@@ -142,7 +144,7 @@ def record(out, scans=None, max_s=900.0, period=0.1):
                 g = _at(self.truth, t)
                 self.csv.writerow([f'{t:.3f}', f'{tj:.3f}', f'{x:.4f}', f'{y:.4f}', f'{yaw:.4f}', f'{v:.3f}', f'{w:.3f}',
                                    f'{g[0]:.4f}', f'{g[1]:.4f}', f'{g[2]:.4f}', f'{g[3]:.4f}', f'{cv:.3f}', f'{cw:.3f}',
-                                   events])
+                                   f'{_gap(self.truth, t):.3f}', events])
                 self.rows += 1
                 if self.rows % 50 == 0:
                     self.file.flush()
@@ -183,6 +185,16 @@ def record(out, scans=None, max_s=900.0, period=0.1):
         rclpy.try_shutdown()
 
 
+def _gap(buf, t):
+    """Промежуток между соседними записями буфера вокруг момента t."""
+    newer = None
+    for item in reversed(buf):
+        if item[0] <= t:
+            return (newer[0] - item[0]) if newer else t - item[0]
+        newer = item
+    return 0.0
+
+
 def _at(buf, t):
     """Значение из буфера [(время, x, y, курс, ...)] на момент t: линейно между соседними записями."""
     prev = None
@@ -205,7 +217,7 @@ def _at(buf, t):
 def load(path):
     with open(path, newline='') as f:
         rows = list(csv.DictReader(f))
-    data = {k: np.array([float(r[k]) for r in rows]) for k in COLUMNS if k != 'events'}
+    data = {k: np.array([float(r.get(k) or 0.0) for r in rows]) for k in COLUMNS if k != 'events'}
     data['events'] = [r['events'] for r in rows]
     known = np.isfinite(data['tj'])          # первые строки пишутся раньше, чем узнаём время судьи
     if known.any():
@@ -263,6 +275,13 @@ def report(path, trace=None, out=sys.stdout):
     err = np.hypot(d['ox'] - d['gx'], d['oy'] - d['gy'])
     eth = _wrap(d['oth'] - d['gth'])
     p(f'журнал {path}: {n} строк, {t[0]:.1f}–{t[-1]:.1f} с')
+    # Если машина занята и узел не успевал, истинная поза получала чужое время: строки рядом с
+    # пропуском в записи для максимумов не годятся.
+    gap = (np.diff(d['t'], prepend=d['t'][0]) > 0.25) | (d['tgap'] > 0.08)
+    shaky = np.convolve(gap, np.ones(21), 'same') > 0
+    if shaky.any():
+        p(f'запись прерывалась {int(gap.sum())} раз: {int(shaky.sum())} строк рядом с пропусками в итоги по позе не идут')
+        run = run & ~shaky
     p(f'одометрия против истины: положение — медиана {np.median(err) * 100:.1f} см, максимум {err.max() * 100:.1f} см; '
       f'курс — медиана {np.median(np.abs(eth)):.3f} рад, максимум {np.abs(eth).max():.3f} рад')
     p('\nпо времени (ошибка положения, см / ошибка курса, рад):')

@@ -11,10 +11,11 @@ import pytest
 from did.llm import LLMError, LocalClient, llm_stats, load_system_prompt, make_client
 from did.llm_mock import FAULTS, MockResponder
 from did.llm_roles import (CRITIQUE_SCHEMA, EXAMPLE_CONTEXT, EXAMPLE_INQUIRY, EXPLANATION_SCHEMA, ISSUE_KINDS,
-                           PROPOSAL_SCHEMA, Critique, Deliberation, Explanation, Proposal, criticize, deliberate,
-                           discrimination_holes, explain, find_task, parse_critique, parse_explanation, parse_proposal,
-                           probability_claims, propose, revise, rule_critique, rule_explanation, rule_proposal,
-                           separated, separation, validate_critique, validate_explanation, validate_proposal)
+                           PROPOSAL_SCHEMA, Critique, Deliberation, Explanation, Proposal, criticize, critique_schema,
+                           deliberate, discrimination_holes, explain, find_task, parse_critique, parse_explanation,
+                           parse_proposal, probability_claims, propose, proposal_schema, revise, rule_critique,
+                           rule_explanation, rule_proposal, separated, separation, validate_critique,
+                           validate_explanation, validate_proposal)
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTS = {t['id']: t for t in EXAMPLE_CONTEXT['tests']}
@@ -157,6 +158,39 @@ def test_json_schemas_are_strict_and_match_models():
     assert tuple(kinds) == ISSUE_KINDS
     for name in ('probability', 'confidence', 'posterior', 'best'):                  # вероятности — не дело модели
         assert name not in json.dumps([PROPOSAL_SCHEMA, CRITIQUE_SCHEMA, EXPLANATION_SCHEMA])
+
+
+def test_json_schemas_list_ids_from_context():
+    """Клиент, который заставляет модель отвечать по схеме, получает перечни допустимых идентификаторов."""
+    schema = proposal_schema(EXAMPLE_CONTEXT)
+    assert schema['properties']['consider']['items']['enum'] == ['soil', 'leak', 'turn', 'other']
+    steps = [v['properties'] for v in schema['properties']['plan']['items']['anyOf']]      # вариант на каждый опыт
+    assert [v['test']['enum'] for v in steps] == [['rest'], ['straight'], ['spin']]
+    assert all(v['distinguishes']['items']['enum'] == ['soil', 'leak', 'turn'] for v in steps)   # у other предсказаний нет
+    lonely = context(tests=[{**TESTS['rest'], 'predictions': {'leak': {'mean': 0.15, 'sigma': 0.03}}}])
+    assert proposal_schema(lonely)['properties']['plan']['items']['properties']['test'] == {'type': 'string', 'enum': ['rest']}
+    target = critique_schema(EXAMPLE_CONTEXT, Proposal.model_validate(GOOD))['properties']['issues']['items']['properties']['target']
+    assert target == {'anyOf': [{'type': 'string', 'enum': ['soil', 'leak', 'turn', 'other', 'rest', 'straight', 'spin', 'X1']},
+                                {'type': 'null'}]}
+    for garbage in (None, {}, 'строка', {'alternatives': 5}):
+        assert strict(proposal_schema(garbage)) and strict(critique_schema(garbage, garbage))
+        assert proposal_schema(garbage)['properties']['consider']['items'] == {'type': 'string'}
+
+    class Strict:                                                                    # клиент со схемой, как Codex
+        use_schema = True
+
+        def __init__(self):
+            self.schemas = []
+
+        def chat(self, messages, temperature=0.2, max_tokens=800, schema=None):
+            self.schemas.append(schema)
+            return LocalClient(MockResponder()).chat(messages)
+
+    client = Strict()
+    deliberate(client, EXAMPLE_CONTEXT)
+    explain(client, EXAMPLE_INQUIRY)
+    assert client.schemas[0] == client.schemas[2] == proposal_schema(EXAMPLE_CONTEXT)
+    assert client.schemas[1]['properties']['verdict']['enum'] == ['accept', 'revise'] and client.schemas[3] == EXPLANATION_SCHEMA
 
 
 # --- промпты -----------------------------------------------------------------------------------
@@ -621,6 +655,35 @@ def test_200_inquiries_under_faults(capsys):
         print(f"\n  расследования, 30% каждого сбоя: итоговый план от модели {sources['llm']}, по правилу "
               f"{sources['fallback']}, исправлялся {revised}; ответы {dict(responder.stats)}")
     assert sources['llm'] > 40 and sources['fallback'] > 40 and revised >= 10
+
+
+# --- стык с расчётом ---------------------------------------------------------------------------
+
+def test_roles_fit_science_inquiry():
+    """Контекст и запись расследования из did.science подходят ролям без переделки."""
+    science = pytest.importorskip('did.science')
+    alts = [science.Alternative('leak', 'батарея теряет около 0.12 ед/с сама по себе (сбой)', 0.5),
+            science.Alternative('soil', 'здесь дорогой грунт, примерно ×2.6', 0.6),
+            science.Alternative('turn', 'повороты стоят около 0.50 ед/рад, а не 0.12', 0.06),
+            science.Alternative(science.OTHER, 'причина не из этого списка', 0.1)]
+    tests = [science.TestOption('rest', 'постоять 2 секунды', cost=0.1, duration_s=2.0, unit='ед/с', sigma=0.02,
+                                predictions={'leak': (0.13, 0.06), 'soil': (0.01, 0.012), 'turn': (0.01, 0.012)}),
+             science.TestOption('spin', 'развернуться на месте на 90°', cost=0.6, duration_s=1.6, unit='ед/рад', sigma=0.03,
+                                predictions={'turn': (0.5, 0.18), 'soil': (0.12, 0.05), 'leak': (0.24, 0.08)})]
+    q = science.Inquiry('Q1', 41.2, 'energy', dict(EXAMPLE_CONTEXT['anomaly']), alts, tests, energy_budget=2.0)
+    ctx = q.context(EXAMPLE_CONTEXT['state'])
+    client, _ = mock()
+    result = deliberate(client, ctx)
+    assert result.revised and result.proposal.source == 'llm' and validate_proposal(result.proposal, ctx) == []
+    assert set(result.proposal.consider) == {'leak', 'soil', 'turn', 'other'} and result.open_issues == []
+    q.restrict(consider=result.proposal.consider, order=[s.test for s in result.proposal.plan])
+    test = q.choose()
+    q.record(test.id, 0.12, test.sigma, 43.4)
+    q.close(46.0, 'заложить утечку в запас на возврат')
+    record = q.to_dict()                                                # измерение здесь — {'value', 'sigma', 't'}
+    text = explain(client, record)
+    assert text.source == 'llm' and validate_explanation(text, record) == [] and '0.12 ед/с' in text
+    assert f"вероятность {record['conclusion']['confidence']:g}" in text
 
 
 # --- настоящие модели --------------------------------------------------------------------------

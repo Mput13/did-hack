@@ -351,7 +351,11 @@ class Agent:
         """Оценка заряда на дорогу до базы по текущей карте стоимостей."""
         if self._base_dist is None:
             self._base_dist, self._base_pred = self.home_graph.field(*self.base)
-        return self.home_graph.energy(self._base_dist, self._base_pred, x, y) * self.rules.drain_per_m
+        return self.home_graph.energy(self._base_dist, self._base_pred, x, y) * self._per_m()
+
+    def _per_m(self):
+        """Заряд на метр пути: номинал из правил либо то, что исследователь выяснил сам (груз, повороты)."""
+        return self.inv.per_meter() if self.inv else self.rules.drain_per_m
 
     def _affordable(self, battery, cost_to, cost_back):
         if self.cfg.dynamic_reserve:
@@ -408,7 +412,7 @@ class Agent:
         battery = obs.battery
 
         def costs(p):
-            to = self.graph.energy(dist, pred, p['x'], p['y']) * self.rules.drain_per_m
+            to = self.graph.energy(dist, pred, p['x'], p['y']) * self._per_m()
             back = self._home_cost(p['x'], p['y'])
             ix, iy = self.arena.w2g(p['x'], p['y'])
             safe = self._risk[iy, ix] < 0.5

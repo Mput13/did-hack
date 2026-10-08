@@ -325,7 +325,7 @@ class ChatClient:
         if r.status_code != 200:
             raise LLMError(self._safe(f'HTTP {r.status_code}: {r.text}'))
         try:
-            return [str(m['id']) for m in r.json()['data']]
+            return [str(m['id']) for m in r.json()['data'] or []]     # у Ollama без моделей data — null
         except (ValueError, KeyError, TypeError):
             raise LLMError(self._safe(f'ответ /models не похож на OpenAI: {r.text}')) from None
 
@@ -770,7 +770,9 @@ def llm_stats(exchanges):
 
     Запрос — это первый ответ и его исправления. first_ok — принят сразу, repaired — после
     исправления, failed — не принят вовсе (решение ушло запасному правилу); из них quota — модель
-    не спрашивали, потому что кончилась квота вызовов. Время — по обменам, где модель отвечала.
+    не спрашивали, потому что кончилась квота вызовов. Время — по обменам, где модель отвечала;
+    transport_retries — сколько раз транспорт повторял запрос (таймаут, обрыв, 5xx); tokens — средний
+    размер запроса и ответа в токенах, если сервер их сообщает.
     """
     requests = []
     for ex in exchanges or []:
@@ -783,12 +785,21 @@ def llm_stats(exchanges):
     for ex in exchanges or []:
         for kind in {error_kind(str(e)) for e in ex.get('errors') or []}:
             errors[kind] = errors.get(kind, 0) + 1
-    blocked = lambda ex: any(error_kind(str(e)) == 'квота вызовов исчерпана' for e in ex.get('errors') or [])   # noqa: E731
+    def blocked(ex):
+        return any(error_kind(str(e)) == 'квота вызовов исчерпана' for e in ex.get('errors') or [])
+
     ms = sorted(int(ex.get('latency_ms') or 0) for ex in exchanges or [] if not blocked(ex))
     n = len(requests)
+    usage = [ex['usage'] for ex in exchanges or [] if (ex.get('usage') or {}).get('prompt_tokens')]
+
+    def tokens(key):
+        return round(sum(u.get(key) or 0 for u in usage) / len(usage)) if usage else 0
+
     return {'requests': n, 'exchanges': len(exchanges or []), 'first_ok': first, 'repaired': repaired,
             'failed': n - first - repaired, 'quota': sum(1 for r in requests if blocked(r[-1])),
             'cached': sum(1 for ex in exchanges or [] if ex.get('cached')),
+            'transport_retries': sum(max(0, int(ex.get('http_attempts') or 0) - 1) for ex in exchanges or []),
+            'tokens': {'prompt': tokens('prompt_tokens'), 'completion': tokens('completion_tokens')},
             'errors': dict(sorted(errors.items(), key=lambda kv: -kv[1])),
             'latency_ms': {'mean': round(sum(ms) / len(ms)) if ms else 0, 'median': ms[len(ms) // 2] if ms else 0,
                            'max': ms[-1] if ms else 0, 'total': sum(ms)}}

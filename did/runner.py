@@ -77,7 +77,11 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     metrics = run_metrics(score, rules, bot.journal, judge.world_log, rec.plans, rec.llm)
     science = bot.inv.export() if getattr(bot, 'inv', None) else {}
     if science:
-        metrics['inquiries'] = score_inquiries(science['inquiries'], scenario, judge.world_log)
+        iq = metrics['inquiries'] = score_inquiries(science['inquiries'], scenario, judge.world_log)
+        metrics.update(inq_total=iq['total'], inq_tests=iq['tests'], inq_energy=iq['energy'],
+                       inq_correct=iq['correct'] / iq['identified'] if iq['identified'] else None,
+                       inq_wrong=iq['wrong'], inq_insufficient=iq['insufficient'],
+                       faults_found=iq['faults_found'] / iq['faults'] if iq['faults'] else None)
     if rec.llm:                            # доля годных ответов модели и фактическое время её ответов
         from .llm import llm_stats
         metrics['llm_stats'] = llm_stats(rec.llm)
@@ -94,6 +98,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
         summary['file'] = str(path.relative_to(RUNS))
     if not quiet:
         print(json.dumps(summary, ensure_ascii=False, indent=1))
+    if knowledge is not None:
+        summary['science'] = science          # для памяти между прогонами (did/memory.py)
     return summary
 
 

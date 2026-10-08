@@ -37,11 +37,11 @@ from .runner import RUNS, make_planner
 from .scenario import generate
 
 TICK_S = 0.1
-# После появления в мире Burger ещё 32 с времени симуляции качается на задней опоре: колёса на доли
-# миллиметра отрываются от пола, и любая смена их скорости в это время проходит мимо корпуса —
+# После появления в мире Burger ещё около 30 с времени симуляции качается на задней опоре: колёса на
+# доли миллиметра отрываются от пола, и любая смена их скорости в это время проходит мимо корпуса —
 # одометрия засчитывает поворот, которого не было (до нескольких радиан за манёвр). По /odom этого
-# не видно, поэтому ехать начинаем не раньше этого времени симуляции.
-SETTLE_UNTIL_S = 34.0
+# не видно, поэтому ехать начинаем не раньше этого времени судьи (он считает от появления робота).
+SETTLE_UNTIL_S = 35.0
 LIVE = RUNS / '_live' / 'state.json'
 
 
@@ -225,7 +225,7 @@ def run(level, seed, agent, experiment, arm=None, llm=None, wait_s=120.0, settle
             pose, now = io.odom[:3], io.sim_time
             if last is not None and max(abs(a - b) for a, b in zip(pose, last)) < 1e-4:
                 settled_since = settled_since if settled_since is not None else now
-                if now - settled_since >= settle_s and now >= SETTLE_UNTIL_S:
+                if now - settled_since >= settle_s and io.now() >= SETTLE_UNTIL_S:
                     break
             else:
                 settled_since = None
