@@ -1,0 +1,24 @@
+title: Насколько тесен запас заряда
+kind: sensitivity
+question: При каком запасе заряда адаптация начинает иметь значение?
+hypothesis: >-
+  Чем дороже движение, тем больше выигрыш адаптивного агента: при дешёвом движении оба агента
+  успевают всё, при дорогом фиксированный план перестаёт укладываться в батарею.
+method: >-
+  Уровень medium, меняется одно правило судьи — расход заряда на метр обычного пола: от 1,0 до 3,5
+  единицы. Батарея всегда 60.
+expect: Разница в собранных образцах растёт вместе с расходом.
+refute: Гипотеза опровергнута, если разница не зависит от расхода или убывает.
+arms:
+  - {id: fixed, label: Фиксированный план, agent: fixed}
+  - {id: adaptive, label: С адаптацией, agent: adaptive}
+levels: [medium]
+seeds: 30
+conditions:
+  - {id: d10, label: 1,0 ед/м, rules: {drain_per_m: 1.0}}
+  - {id: d18, label: 1,75 ед/м, rules: {drain_per_m: 1.75}}
+  - {id: d25, label: 2,5 ед/м, rules: {drain_per_m: 2.5}}
+  - {id: d35, label: 3,5 ед/м, rules: {drain_per_m: 3.5}}
+metrics: [samples_share, returned, battery_used, score]
+claims:
+  - {metric: samples_share, a: adaptive, b: fixed, text: Адаптивный собирает больше образцов при любом расходе}

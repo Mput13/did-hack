@@ -1,0 +1,24 @@
+title: Перенос в Gazebo
+kind: transfer
+manual: "pixi run gazebo-run --level hard --seed 3"
+question: Ведёт ли себя агент в Gazebo так же, как в быстром симуляторе, на котором считаются серии?
+hypothesis: >-
+  Быстрый симулятор достаточно похож на Gazebo: один и тот же агент на одном и том же сценарии
+  собирает столько же образцов (с точностью до одного) и тратит заряд с отличием не более 15%.
+method: >-
+  Один и тот же агент и один и тот же сценарий запускаются дважды: в Gazebo с настоящей физикой и
+  лидаром и в быстром симуляторе. Сравниваем итог и смотрим оба прогона рядом.
+expect: Траектории похожи, но не совпадают — в Gazebo робот разгоняется и поворачивает иначе.
+refute: >-
+  Если расхождение больше, выводы серий из быстрого симулятора нельзя переносить на Gazebo без
+  поправки, и модель робота в быстром симуляторе нужно уточнять.
+arms:
+  - {id: fastsim, label: Быстрый симулятор, agent: adaptive}
+  - {id: gazebo, label: Gazebo, agent: adaptive}
+levels: [easy, medium, hard]
+seeds: 1
+seed_start: 1
+metrics: [samples_share, battery_used, distance, time, score, penalties]
+claims:
+  - {metric: samples_share, a: gazebo, b: fastsim, text: В Gazebo собрано не меньше образцов, better: higher}
+  - {metric: battery_used, a: gazebo, b: fastsim, text: Расход заряда в Gazebo не выше, better: lower}

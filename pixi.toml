@@ -1,0 +1,47 @@
+[workspace]
+name = "did-hack"
+description = "Автономный ИИ-исследователь на TurtleBot3: ROS 2 Jazzy + Gazebo Sim (Harmonic)"
+channels = ["https://prefix.dev/robostack-jazzy", "https://prefix.dev/conda-forge"]
+platforms = ["linux-64", "osx-arm64"]
+
+[dependencies]
+ros-jazzy-ros-base = "*"
+ros-jazzy-turtlebot3-gazebo = "*"
+ros-jazzy-turtlebot3-navigation2 = "*"
+ros-jazzy-turtlebot3-teleop = "*"
+ros-jazzy-rviz2 = "*"
+colcon-common-extensions = "*"
+numpy = "*"
+scipy = "*"
+pyyaml = "*"
+pydantic = ">=2"
+httpx = "*"
+pytest = "*"
+
+[activation]
+scripts = ["env/activate.sh"]
+
+[tasks]
+build = { cmd = "colcon build --symlink-install", cwd = "ws" }
+# Воркспейс собирается перед запуском и подключается явно: после первой сборки он ещё не в окружении.
+sim = { cmd = "bash -c 'source ws/install/setup.bash && ros2 launch did_bringup sim.launch.py gui:=false'", depends-on = ["build"] }
+sim-gui = { cmd = "bash -c 'source ws/install/setup.bash && ros2 launch did_bringup sim.launch.py gui:=true'", depends-on = ["build"] }
+# Стенд = симуляция + судья (/did/*). Аргументы launch дописываются в конец:
+#   pixi run stand level:=hard seed:=3        pixi run stand-gui show_truth:=false
+stand = { cmd = "bash -c 'source ws/install/setup.bash && ros2 launch did_bringup stand.launch.py gui:=false \"$@\"' stand", depends-on = ["build"] }
+stand-gui = { cmd = "bash -c 'source ws/install/setup.bash && ros2 launch did_bringup stand.launch.py gui:=true \"$@\"' stand", depends-on = ["build"] }
+stand-rviz = { cmd = "bash -c 'source ws/install/setup.bash && ros2 launch did_bringup stand.launch.py gui:=false rviz:=true \"$@\"' stand", depends-on = ["build"] }
+smoke-judge = "python tools/smoke_judge.py"
+teleop = "ros2 run turtlebot3_teleop teleop_keyboard"
+topics = "ros2 topic list -t"
+smoke = "python tools/smoke_sim.py"
+# Лаборатория: интерфейс с опытами и проигрыванием прогонов, серии в быстром симуляторе.
+lab = "python -m did.lab.server"
+exp = "python -m did.experiments"
+run = "python -m did.runner"
+check = "pytest tests -q"
+explain = "python tools/build_explainer.py"
+# Агент в Gazebo: при запущенном стенде (agent-ros) или всё одной командой (gazebo-run).
+agent-ros = "python -m did.ros_agent"
+gazebo-run = { cmd = "python tools/gazebo_run.py", depends-on = ["build"] }
+test = { cmd = "colcon test --event-handlers console_direct+ && colcon test-result --verbose", cwd = "ws" }

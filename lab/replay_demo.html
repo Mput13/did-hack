@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проигрыватель прогона — проверка</title>
+<link rel="stylesheet" href="base.css" onerror="this.remove()">
+<link rel="stylesheet" href="replay.css">
+<style>
+  /* Только для этой проверочной страницы. */
+  html, body { margin: 0; }
+  body { background: var(--bg, #f5f6f7); color: var(--ink, #14181c); font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  .demo-wrap { max-width: 1760px; margin: 0 auto; padding: 14px 18px 28px; }
+  .demo-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 12px; font-size: 13px; }
+  .demo-head h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  .demo-head a { color: #2a78d6; }
+  .demo-head code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .demo-msg { padding: 18px; border-radius: 10px; background: #fff; border: 1px solid #e3e6e9; }
+  .demo-narrow { max-width: 560px; }
+</style>
+</head>
+<body>
+<div class="demo-wrap">
+  <div class="demo-head">
+    <h1>Проигрыватель прогона</h1>
+    <span id="what"></span>
+    <span>
+      <a href="?file=E1/adaptive/hard-1018.json.gz">адаптивный, трудный</a> ·
+      <a href="?file=E1/fixed/hard-1018.json.gz">фиксированный, трудный</a> ·
+      <a href="?file=E3/adaptive@sensor/hard-1005.json.gz">сбой датчика</a> ·
+      <a href="?file=dev_gz/adaptive/easy-1.json.gz">Gazebo</a> ·
+      <a href="?file=E1/adaptive/hard-1018.json.gz&b=E1/fixed/hard-1018.json.gz">сравнение</a> ·
+      <a href="?file=E1/adaptive/hard-1018.json.gz&compact=1">компактный</a> ·
+      <a href="?file=E1/adaptive/hard-1018.json.gz&follow=1">живой прогон (имитация)</a>
+    </span>
+  </div>
+  <div id="host"><div class="demo-msg">Загрузка…</div></div>
+</div>
+<script type="module">
+  import { mountReplay, mountCompare } from './replay.js';
+
+  const q = new URLSearchParams(location.search);
+  const file = q.get('file') || 'E1/adaptive/hard-1018.json.gz';
+  const fileB = q.get('b');
+  const host = document.getElementById('host');
+  const what = document.getElementById('what');
+
+  async function getJson(url, tries = 4) {
+    for (let i = 0; ; i++) {
+      const r = await fetch(url, { cache: 'no-store' });
+      if (r.ok) return r.json();
+      if (i >= tries) throw new Error(`${url}: ${r.status}`);
+      await new Promise((res) => setTimeout(res, 600));       // записи иногда пересчитываются
+    }
+  }
+  const trace = (f) => getJson(`/api/trace?file=${encodeURIComponent(f)}`);
+  function label(...parts) {
+    what.textContent = '';
+    parts.forEach((p, i) => {
+      if (i % 2) { const c = document.createElement('code'); c.textContent = p; what.appendChild(c); }
+      else what.appendChild(document.createTextNode(p));
+    });
+  }
+
+  /** Обрезать запись до момента t — имитация живого прогона для проверки follow и update(). */
+  function cut(tr, t) {
+    const n = tr.track.t.findIndex((x) => x > t);
+    const k = n < 0 ? tr.track.t.length : n;
+    const upTo = (arr, key = 't') => (arr || []).filter((x) => x[key] <= t);
+    const track = {};
+    for (const key of Object.keys(tr.track)) track[key] = tr.track[key].slice(0, k);
+    const done = k >= tr.track.t.length;
+    return Object.assign({}, tr, {
+      // у идущего прогона судья отдаёт текущий счёт с finished: false — как в /api/live
+      track, result: done ? tr.result : { level: tr.result.level, t, battery: track.battery[k - 1], samples_collected: upTo(tr.events).filter((e) => e.type === 'sample_collected').length, samples_total: tr.result.samples_total, finished: false, reason: null, returned: false },
+      events: upTo(tr.events), world: upTo(tr.world), journal: upTo(tr.journal), plans: upTo(tr.plans),
+      paths: upTo(tr.paths), scans: upTo(tr.scans), hazards: upTo(tr.hazards), llm: upTo(tr.llm),
+      hypotheses: upTo(tr.hypotheses, 't_open').map((hp) => (hp.t_close != null && hp.t_close > t
+        ? Object.assign({}, hp, { status: 'open', t_close: null, verdict: null }) : hp)),
+      belief: tr.belief && Object.assign({}, tr.belief, { snaps: upTo(tr.belief.snaps) }),
+      soil: tr.soil && Object.assign({}, tr.soil, { snaps: upTo(tr.soil.snaps) }),
+    });
+  }
+
+  try {
+    const arena = await getJson('/api/arena');
+    if (q.get('narrow')) host.classList.add('demo-narrow');
+    if (fileB) {
+      const [a, b] = await Promise.all([trace(file), trace(fileB)]);
+      host.textContent = '';
+      const name = (t) => ({ fixed: 'Фиксированный план', adaptive: 'Адаптивный агент' }[t.agent && t.agent.name] || t.arm || t.id);
+      label('сравнение: ', file, ' и ', fileB);
+      window.rp = mountCompare(host, { traces: [a, b], labels: [name(a), name(b)], arena });
+    } else if (q.get('follow')) {
+      const full = await trace(file);
+      host.textContent = '';
+      label('живой прогон (имитация по записи): ', file);
+      let t = full.track.t[0] + 8;
+      window.rp = mountReplay(host, { trace: cut(full, t), arena, follow: true });
+      const end = full.track.t[full.track.t.length - 1];
+      const timer = setInterval(() => {
+        t += 1.5;
+        window.rp.update(cut(full, t), t >= end ? { follow: false } : undefined);
+        if (t >= end) clearInterval(timer);
+      }, 500);
+    } else {
+      const tr = await trace(file);
+      host.textContent = '';
+      label('', file);
+      window.rp = mountReplay(host, { trace: tr, arena, compact: !!q.get('compact'), view: q.get('view') || undefined });
+      window.rpTrace = tr;
+    }
+    if (q.get('t')) window.rp.seek(+q.get('t'));
+    if (q.get('play')) { window.rp.setSpeed(+q.get('play') || 1); window.rp.play(); }
+  } catch (e) {
+    console.error(e);
+    host.innerHTML = '';
+    const msg = document.createElement('div');
+    msg.className = 'demo-msg';
+    msg.textContent = `Не получилось показать прогон: ${e.message}`;
+    host.appendChild(msg);
+  }
+</script>
+</body>
+</html>

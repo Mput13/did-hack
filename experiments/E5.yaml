@@ -1,0 +1,24 @@
+title: Насколько шумен датчик образцов
+kind: sensitivity
+question: До какого шума датчика поиск образцов остаётся работоспособным?
+hypothesis: >-
+  Поиск по карте вероятностей деградирует плавно: с ростом шума датчика агент тратит больше пути на
+  образец, но ложных сборов почти не делает.
+method: >-
+  Уровень medium, меняется одно правило судьи — шум датчика образцов: от 0,02 до 0,20 (при шкале
+  показаний от 0 до 1). Агенту номинальный шум известен.
+expect: До шума 0,10 доля собранных образцов почти не падает.
+refute: Гипотеза опровергнута, если при шуме 0,10 агент собирает меньше половины образцов или делает больше одного ложного сбора за прогон.
+arms:
+  - {id: fixed, label: Фиксированный план, agent: fixed}
+  - {id: adaptive, label: С адаптацией, agent: adaptive}
+levels: [medium]
+seeds: 30
+conditions:
+  - {id: s02, label: шум 0,02, rules: {sensor_sigma: 0.02}}
+  - {id: s05, label: шум 0,05, rules: {sensor_sigma: 0.05}}
+  - {id: s10, label: шум 0,10, rules: {sensor_sigma: 0.10}}
+  - {id: s20, label: шум 0,20, rules: {sensor_sigma: 0.20}}
+metrics: [samples_share, false_collects, distance, battery_used, score]
+claims:
+  - {metric: samples_share, a: adaptive, b: fixed, text: Адаптивный собирает больше образцов при любом шуме}

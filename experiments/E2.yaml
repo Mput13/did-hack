@@ -1,0 +1,29 @@
+title: Что именно даёт выигрыш
+kind: ablation
+question: Какой из механизмов адаптации реально влияет на результат?
+hypothesis: >-
+  Каждый механизм адаптации полезен: если выключить любой из них, агент на уровне hard наберёт
+  меньше очков, чем полный.
+method: >-
+  Берём полного агента и выключаем по одному механизму: обучение стоимости грунтов, обнаружение
+  изменений, память об опасных зонах, контроль исправности датчика, расчёт запаса на возврат.
+  Отдельно — агент, у которого осталась только карта вероятностей образцов.
+expect: Сильнее всего ударит отключение того механизма, который отвечает за самое частое событие.
+refute: Механизм бесполезен, если без него счёт не ниже. Тогда его нужно доработать или убрать.
+arms:
+  - {id: adaptive, label: Полный агент, agent: adaptive}
+  - {id: no_soil, label: Без обучения грунтам, agent: no_soil}
+  - {id: no_change, label: Без обнаружения изменений, agent: no_change}
+  - {id: no_hazard, label: Без памяти об опасных зонах, agent: no_hazard}
+  - {id: no_sensor_health, label: Без контроля датчика, agent: no_sensor_health}
+  - {id: static_reserve, label: Возврат по жёсткому порогу, agent: static_reserve}
+  - {id: belief_only, label: Только карта образцов, agent: belief_only}
+levels: [hard]
+seeds: 60
+metrics: [score, samples_share, returned, battery_used, penalties]
+claims:
+  - {metric: score, a: adaptive, b: no_soil, text: Обучение грунтам повышает счёт}
+  - {metric: score, a: adaptive, b: no_change, text: Обнаружение изменений повышает счёт}
+  - {metric: score, a: adaptive, b: no_hazard, text: Память об опасных зонах повышает счёт}
+  - {metric: score, a: adaptive, b: no_sensor_health, text: Контроль датчика повышает счёт}
+  - {metric: score, a: adaptive, b: static_reserve, text: Расчётный запас на возврат повышает счёт}

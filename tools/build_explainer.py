@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""Собирает explain.html — одну самодостаточную страницу с объяснением проекта и результатами.
+
+    pixi run explain
+
+Текст и рисунки лежат в docs/explainer/ (page.html, style.css, explain.js). Сюда подставляются
+живые данные: геометрия арены, записи нескольких прогонов и сводки серий из runs/. Страница
+открывается двойным щелчком, сеть и сервер ей не нужны.
+"""
+import json
+import math
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from did.arena import load_arena                     # noqa: E402
+from did.config import BASE, LEVELS, Rules           # noqa: E402
+from did.nav import CostGraph, path_length           # noqa: E402
+from did.recorder import load_trace                  # noqa: E402
+from did.route import survey_route                   # noqa: E402
+from did.runner import RUNS, run_episode             # noqa: E402
+
+SRC = ROOT / 'docs' / 'explainer'
+STORIES = [('typical', 1026, 'Типичный трудный сценарий'), ('failure', 1032, 'Сценарий, где адаптивный агент проиграл')]
+KEEP_METRICS = ('score', 'samples_share', 'returned', 'battery_used', 'penalties', 'false_collects',
+                'hazard_hits', 'distance', 'time')
+
+
+def thin(tr):
+    """Запись прогона для встраивания: реже точки пути и снимки, без служебного."""
+    out = {k: tr[k] for k in ('id', 'arm', 'backend', 'scenario', 'rules', 'result', 'modes', 'events', 'world',
+                              'journal', 'hypotheses', 'plans', 'hazards')}
+    out['agent'] = tr['agent']['name']
+    out['track'] = {k: v[::2] for k, v in tr['track'].items()}
+    out['paths'] = tr['paths']
+    for key in ('belief', 'soil'):
+        g = tr.get(key)
+        out[key] = {**g, 'snaps': g['snaps'][::2]} if g else None
+    out['scans'] = [{**s, 'r': s['r'][::2]} for s in tr['scans'][::2]]
+    return out
+
+
+def experiment(exp_id):
+    path = RUNS / exp_id / 'summary.json'
+    if not path.exists():
+        return None
+    s = json.loads(path.read_text(encoding='utf-8'))
+    spec = {k: s['spec'].get(k) for k in ('id', 'title', 'kind', 'question', 'hypothesis', 'method', 'expect',
+                                         'refute', 'arms', 'levels', 'conditions', 'metrics', 'seeds',
+                                         'seed_start', 'manual')}
+    groups = [{'arm': g['arm'], 'condition': g['condition'], 'level': g['level'], 'n': g['n'],
+               'stats': {m: (g['stats'][m] and {k: g['stats'][m][k] for k in ('mean', 'median', 'ci', 'n')})
+                         for m in KEEP_METRICS}} for g in s['groups']]
+    runs = [{'arm': r['arm'], 'condition': r['condition'], 'level': r['level'], 'seed': r['seed'],
+             'backend': r.get('backend'), **{m: r['metrics'].get(m) for m in KEEP_METRICS},
+             'detect': r['metrics'].get('detect'), 'hyp': r['metrics'].get('hypotheses'),
+             'llm_calls': r['metrics'].get('llm_calls'), 'llm_failed': r['metrics'].get('llm_failed'),
+             'plans': r['metrics'].get('plans'), 'collected': r['metrics'].get('samples_collected'),
+             'total': r['metrics'].get('samples_total'), 'reason': r['metrics'].get('reason'),
+             'wall_s': r.get('wall_s')} for r in s['runs']]
+    return {'spec': spec, 'status': s['status'], 'groups': groups, 'claims': s['claims'], 'runs': runs,
+            'errors': len(s['errors']), 'generated': s['generated'], 'metrics': s['metrics']}
+
+
+def soil_demo(arena):
+    """Короткий путь через дорогой участок и путь в объезд — для разных множителей расхода."""
+    per_m = Rules().drain_per_m
+    start, goal = BASE, (1.7, -0.45)
+    zone = {'x': -0.55, 'y': -0.5, 'w': 0.9, 'h': 1.0}
+    X, Y = arena.cell_centers()
+    inside = (np.abs(X - zone['x']) <= zone['w'] / 2) & (np.abs(Y - zone['y']) <= zone['h'] / 2)
+    plain = CostGraph(arena)
+    straight, _ = plain.plan(start, goal)
+    out = {'start': list(start), 'goal': list(goal), 'zone': zone, 'cases': []}
+    for mult in (1.0, 1.5, 2.0, 3.0, 4.0):
+        grid = np.where(inside, mult, 1.0)
+        g = CostGraph(arena)
+        g.set_cost(grid)
+        smart, smart_cost = g.plan(start, goal)
+        dist, pred = g.field(*start)
+        # тот же короткий путь, но оплаченный по настоящей цене грунта
+        blind = sum(math.dist(a, b) * (mult if inside[arena.w2g(*a)[1], arena.w2g(*a)[0]] else 1.0)
+                    for a, b in zip(straight, straight[1:]))
+        out['cases'].append({'mult': mult,
+                             'blind': {'pts': [[round(x, 2), round(y, 2)] for x, y in straight[::2]],
+                                       'len': round(path_length(straight), 2), 'energy': round(blind * per_m, 1)},
+                             'smart': {'pts': [[round(x, 2), round(y, 2)] for x, y in smart[::2]],
+                                       'len': round(path_length(smart), 2),
+                                       'energy': round(smart_cost * per_m, 1)}})
+    return out
+
+
+def fixed_route(arena):
+    pts = survey_route(arena)
+    g = CostGraph(arena)
+    chain, line = [BASE] + pts + [BASE], []
+    for a, b in zip(chain, chain[1:]):
+        seg, _ = g.plan(a, b)
+        line += [[round(x, 2), round(y, 2)] for x, y in seg[::2]]
+    return {'points': [list(p) for p in pts], 'line': line, 'length': round(path_length([tuple(p) for p in line]), 1)}
+
+
+def llm_example():
+    """Один настоящий обмен агента с планировщиком-моделью (здесь — с имитатором)."""
+    from did.agent import Agent, make_config
+    from did.fastsim import FastSim
+    from did.llm import LocalClient
+    from did.llm_mock import MockResponder
+    from did.planner import LLMPlanner
+    from did.scenario import generate
+
+    arena = load_arena()
+    scenario = generate('hard', 1026, arena)
+    world = FastSim(arena, scenario, seed=1026)
+    seen = []
+
+    class Capture(LLMPlanner):
+        def plan(self, state):
+            out = super().plan(state)
+            seen.append((state, out))
+            return out
+
+    bot = Agent(arena, make_config('adaptive_llm'), n_samples=len(scenario.samples),
+                planner=Capture(LocalClient(MockResponder(seed=1026))))
+    while not world.done:
+        bot.tick(world.observe(), world)
+        world.advance()
+    for state, out in seen:
+        if out['source'] == 'llm' and state['candidates'] and len(state['explore_points']) >= 2 and out['exchanges']:
+            return {'state': state, 'response': out['exchanges'][-1].get('response'), 'calls': len(seen)}
+    return {'error': 'подходящий обмен не найден'}
+
+
+def main():
+    arena = load_arena()
+    stories = []
+    for key, seed, title in STORIES:
+        item = {'key': key, 'seed': seed, 'title': title}
+        for arm in ('fixed', 'adaptive'):
+            item[arm] = thin(load_trace(RUNS / 'E1' / arm / f'hard-{seed}.json.gz'))
+        stories.append(item)
+
+    gazebo = []
+    for level in LEVELS:
+        pair = {}
+        for arm in ('gazebo', 'fastsim'):
+            path = RUNS / 'E7' / arm / f'{level}-1.json.gz'
+            if path.exists():
+                pair[arm] = thin(load_trace(path))
+        if len(pair) == 2:
+            gazebo.append({'level': level, **pair})
+
+    data = {
+        'built': time.strftime('%d.%m.%Y %H:%M'),
+        'arena': arena.to_dict(),
+        'rules': Rules().to_dict(),
+        'levels': LEVELS,
+        'stories': stories,
+        'gazebo': gazebo,
+        'experiments': {e: experiment(e) for e in ('E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7')},
+        'soil_demo': soil_demo(arena),
+        'route': fixed_route(arena),
+        'llm': llm_example(),
+    }
+    payload = json.dumps(data, ensure_ascii=False, separators=(',', ':'), default=lambda o: o.item())
+    page = (SRC / 'page.html').read_text(encoding='utf-8')
+    page = page.replace('/*STYLE*/', (SRC / 'style.css').read_text(encoding='utf-8'))
+    page = page.replace('/*SCRIPT*/', (SRC / 'explain.js').read_text(encoding='utf-8'))
+    page = page.replace('"__DATA__"', payload.replace('</', '<\\/'))
+    for target in (ROOT / 'explain.html', ROOT / 'lab' / 'explain.html'):
+        target.write_text(page, encoding='utf-8')
+    print(f'explain.html: {len(page) / 1e6:.2f} МБ, прогонов встроено {2 * len(stories) + 2 * len(gazebo)}, '
+          f'пар Gazebo {len(gazebo)}')
+
+
+if __name__ == '__main__':
+    main()

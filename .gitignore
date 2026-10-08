@@ -1,0 +1,13 @@
+*.pyc
+.DS_Store
+.env
+.pixi/
+.pytest_cache/
+/tmp/
+__pycache__/
+lab/explain.html
+node_modules/
+runs/
+ws/build/
+ws/install/
+ws/log/

@@ -1,0 +1,25 @@
+title: Неожиданности по одной
+kind: adaptation
+question: Как быстро агент замечает каждое изменение среды и чего оно стоит тому, кто его не замечает?
+hypothesis: >-
+  Адаптивный агент замечает смену грунтов, новую опасную зону и сбой датчика за считаные секунды и
+  теряет от них меньше, чем агент с фиксированным планом.
+method: >-
+  Сценарии уровня hard, но событие в прогоне одно: только смена грунтов, только новая опасная зона
+  или только сбой датчика. Для сравнения — те же сценарии без событий.
+expect: Сбой датчика даст фиксированному агенту ложные сборы, новая опасная зона — повторные штрафы.
+refute: Гипотеза опровергнута, если при событии адаптивный агент теряет не меньше фиксированного.
+arms:
+  - {id: fixed, label: Фиксированный план, agent: fixed}
+  - {id: adaptive, label: С адаптацией, agent: adaptive}
+levels: [hard]
+seeds: 40
+conditions:
+  - {id: none, label: Без событий, scenario: {events: []}}
+  - {id: soil, label: Смена грунтов, scenario: {events: [soil_change]}}
+  - {id: hazard, label: Новая опасная зона, scenario: {events: [new_hazard]}}
+  - {id: sensor, label: Сбой датчика, scenario: {events: [sensor_fault]}}
+metrics: [score, samples_share, returned, penalties, false_collects, hazard_hits, battery_used]
+claims:
+  - {metric: score, a: adaptive, b: fixed, text: При событии адаптивный набирает больше очков}
+  - {metric: penalties, a: adaptive, b: fixed, text: При событии адаптивный получает меньше штрафов}
