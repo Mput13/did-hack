@@ -24,16 +24,20 @@ def make_planner(cfg, llm=None, seed=0):
     """llm: None | {'kind': 'mock' | 'http' | 'ollama' | 'codex', ...опции did.llm.make_client}.
 
     Для mock — faults; http берёт адрес и ключ из окружения; 'prompt' — имя другого системного
-    промпта из did/prompts (без .md), чтобы сравнивать версии.
+    промпта из did/prompts (без .md), чтобы сравнивать версии; 'client' — готовый клиент с chat() вместо
+    make_client (свой кэш, проверка повтора).
     """
     if cfg.planner != 'llm':
         return HeuristicPlanner()
     from .llm import load_system_prompt, make_client
     opts = dict(llm or {'kind': 'mock'})
     prompt = opts.pop('prompt', None)
-    if opts.get('kind', 'mock') == 'mock':
-        opts.setdefault('seed', seed)
-    return LLMPlanner(make_client(**opts), system_prompt=load_system_prompt(prompt) if prompt else None,
+    client = opts.pop('client', None)
+    if client is None:
+        if opts.get('kind', 'mock') == 'mock':
+            opts.setdefault('seed', seed)
+        client = make_client(**opts)
+    return LLMPlanner(client, system_prompt=load_system_prompt(prompt) if prompt else None,
                       mission=getattr(cfg, 'mission', None))
 
 
@@ -51,12 +55,13 @@ def make_agent(name, config=None):
 
 def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, scenario=None,
                 scenario_args=None, config=None, rules=None, agent_rules=None, llm=None, sim=None, save=True, quiet=True,
-                knowledge=None, study=None):
+                knowledge=None, study=None, truth=False):
     """Прогон целиком. Возвращает сводку: идентификаторы, метрики, путь к записи.
 
     study — задание исследования (словарь did.study.StudySpec) для агента 'study'.
     rules — правила мира; agent_rules=None — те же правила у агента (прежнее поведение),
     agent_rules={} — агент верит в Rules() независимо от правил мира.
+    truth=True — писать в запись истинную позу робота на каждом шаге симулятора (поле truth).
     """
     arena = load_arena()
     if rules == 'science':                 # набор правил с несколькими причинами расхода и сбоями
@@ -91,9 +96,13 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     bot = cls(arena, cfg, n_samples=len(scenario.samples), rules=bot_rules, planner=planner, recorder=rec, **extra)
 
     wall = time.perf_counter()
+    if truth:
+        rec.add_truth(world.dt, world.x, world.y)
     while not world.done:
         bot.tick(world.observe(), world)
         world.advance()
+        if truth:
+            rec.add_truth(world.dt, world.x, world.y)
     bot.tick(world.observe(), world)       # последнее наблюдение: итоговые события попадают в запись
     wall = time.perf_counter() - wall
 

@@ -71,6 +71,14 @@ class LLMError(Exception):
         self.attempts = attempts     # сколько запросов ушло на сервер до отказа
 
 
+class CacheMiss(LLMError):
+    """Строгий режим «только кэш»: сохранённого ответа на запрос нет.
+
+    Это не сбой модели: request_json пропускает ошибку наверх, и прогон останавливается, а не продолжается
+    по запасному правилу другой дорогой.
+    """
+
+
 # --- окружение ---------------------------------------------------------------------------------
 
 _QUOTED = re.compile(r'''^(["'])(.*?)\1\s*(?:#.*)?$''')
@@ -692,7 +700,7 @@ def request_json(client, messages, parse, schema=None, max_repairs=1, role='user
     """Общий цикл планировщика и ролей: запрос → разбор и проверка → исправление моделью.
 
     parse(text) -> (объект или None, список ошибок). Возвращает (объект или None, ошибка или None,
-    обмены, время в мс) и исключений не бросает. Запись обмена:
+    обмены, время в мс) и исключений не бросает (кроме CacheMiss в строгом режиме кэша). Запись обмена:
     {attempt, role, request, response, ok, errors, latency_ms, cached, http_attempts, usage}.
     latency_ms — фактическое время ответа модели; у ответа из кэша это время исходного вызова.
     schema уходит клиенту, только если он умеет заставить модель отвечать по схеме (use_schema).
@@ -711,6 +719,8 @@ def request_json(client, messages, parse, schema=None, max_repairs=1, role='user
             t1 = time.monotonic()
             try:
                 reply = client.chat(messages, **extra)
+            except CacheMiss:
+                raise
             except Exception as e:           # транспорт уже сделал свои повторы — исправлять нечего
                 ex.update(latency_ms=_ms(t1), errors=[_brief(e)], http_attempts=getattr(e, 'attempts', 0))
                 return None, f'модель недоступна: {_brief(e)}', exchanges, _ms(t0) + saved
@@ -729,6 +739,8 @@ def request_json(client, messages, parse, schema=None, max_repairs=1, role='user
                 {'role': 'assistant', 'content': strip_think(reply.text)[:2000] or '(пустой ответ)'},
                 {'role': 'user', 'content': repair_message(errors, noun)}]
         return None, f'{noun} не принят после {tries} попыток: ' + '; '.join(errors), exchanges, _ms(t0) + saved
+    except CacheMiss:
+        raise
     except Exception as e:
         return None, f'внутренняя ошибка: {type(e).__name__}: {_brief(e)}', exchanges, _ms(t0) + saved
 
@@ -826,6 +838,8 @@ def make_client(kind='mock', **opts):
              cache_dir, max_calls (см. did.llm_codex.CodexCliClient); ответы всегда кэшируются на диск.
     openrouter — Jev Router через OpenRouter (did.llm_openrouter): только эта модель, учёт расходов и потолок.
     Для http, ollama и openrouter cache=True кладёт ответы в тот же кэш (повторяемость прогонов).
+    cache='only' (http и ollama) — строгий повтор: ответы только из кэша, клиент сети не создаётся, настройки
+    и ключ не нужны; запрос, которого в кэше нет, — CacheMiss. Нужна модель: opts['model'] или окружение.
     Ошибка настроек — LLMError.
     """
     opts = dict(opts)
@@ -839,6 +853,18 @@ def make_client(kind='mock', **opts):
     if kind not in CLIENT_KINDS:
         raise LLMError(f"неизвестный вид клиента «{kind}»; есть: {', '.join(CLIENT_KINDS)}")
     cache = opts.pop('cache', False)
+    if cache == 'only' and kind in ('http', 'ollama'):
+        from .llm_cache import CachedClient, OfflineClient
+        if kind == 'ollama':
+            model = opts.get('model') or os.environ.get('DID_OLLAMA_MODEL') or OLLAMA_MODEL
+            use_schema = opts.get('use_schema', True)
+        else:
+            model = opts.get('model') or os.environ.get('DID_LLM_MODEL', '').strip()
+            use_schema = opts.get('use_schema', os.environ.get('DID_LLM_JSON_SCHEMA', '0').strip().lower()
+                                  not in ('0', 'false', 'no', 'off', ''))
+        if not model:
+            raise LLMError('режим «только кэш»: не задана модель (model или DID_LLM_MODEL)')
+        return CachedClient(OfflineClient(model, use_schema), strict=True)
     if kind == 'openrouter':               # Jev Router: единственная платная модель, с потолком расходов
         from .llm_openrouter import JevClient
         client = JevClient(**opts)
