@@ -34,6 +34,7 @@ class Rules:
     sensor_range_m: float = 2.0       # датчик образцов: 1 вплотную, 0 дальше этой дистанции
     sensor_sigma: float = 0.05
     sensor_hz: float = 5.0
+    sensor_law: str = 'linear'        # форма закона датчика: linear, quadratic, sqrt
     collect_radius_m: float = 0.30
     base_radius_m: float = 0.30
     time_limit_s: float = 600.0
@@ -56,6 +57,10 @@ class Rules:
     pts_false_collect: float = -3.0
     pts_hazard_hit: float = -5.0
     pts_battery_left: float = 0.1     # за единицу остатка, только если робот вернулся
+
+    def __post_init__(self):
+        if self.sensor_law not in ('linear', 'quadratic', 'sqrt'):
+            raise ValueError(f'Unknown sensor_law: {self.sensor_law}')
 
     def to_dict(self):
         return asdict(self)
