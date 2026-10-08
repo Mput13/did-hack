@@ -1,0 +1,57 @@
+title: Результативность — агент v2 после ревью, свои и «чужие» правила судьи
+kind: main
+question: Сохраняется ли выигрыш от пережидания сбоя датчика на новых сценариях и не становится ли робот хуже прежнего, если правила судьи отличаются от наших допущений?
+hypothesis: >-
+  Агент второй версии ждёт датчик, только пока это дешевле езды вслепую, — по собственным замерам цены простоя,
+  с общим бюджетом ожидания на прогон и с приоритетом возврата на базу. Поэтому на трудном уровне он набирает
+  больше прежнего при наших правилах, а при правилах, где ожидание невыгодно или сбоев нет, не уступает прежнему
+  ни по счёту, ни по возврату.
+method: >-
+  Четыре агента (adaptive, adaptive_v2, scientist, scientist_v2) проходят одни и те же сценарии 8001–8040 уровней
+  medium и hard при семи условиях: базовые правила, «научные» правила и пять условий, которых при отладке сторож
+  «не ждал»: простой в 5 и в 10 раз дороже, сбой датчика 90–120 с вместо 25–40, сбоев датчика нет вовсе, датчик
+  2 показания в секунду вместо 5. Отладка шла на сценариях 1–80; сценарии 5001–5040 использованы опытом E22.
+  Сценарии 8001–8040 до этого опыта не запускались; код и настройки заморожены до запуска, запуск один.
+  Сравниваются парные разности «вторая версия − прежняя» по счёту и возврату.
+expect: >-
+  Базовые и научные правила, hard: прибавка счёта adaptive_v2 не меньше 5 очков, интервал выше нуля. Medium:
+  потери больше 0,5 очка нет. Чужие условия: возвратов не меньше, чем у прежнего агента, счёт ниже не больше
+  чем на 1 очко.
+refute: >-
+  Гипотеза опровергнута, если на hard при базовых или научных правилах парная разность счёта adaptive_v2
+  меньше 5 очков или её интервал включает ноль; если на medium потеря больше 0,5 очка; если хотя бы в одном
+  чужом условии adaptive_v2 возвращается реже прежнего или набирает меньше больше чем на 1 очко.
+arms:
+  - {id: adaptive, label: Адаптивный (прежний), agent: adaptive}
+  - {id: adaptive_v2, label: Адаптивный v2, agent: adaptive_v2}
+  - {id: scientist, label: Исследователь (прежний), agent: scientist}
+  - {id: scientist_v2, label: Исследователь v2, agent: scientist_v2}
+levels: [medium, hard]
+seeds: 40
+seed_start: 8001
+conditions:
+  - {id: base, label: Базовые правила}
+  - id: science
+    label: Научные правила
+    rules: {drain_per_rad: 0.12, load_drain: 0.05, battery_sigma: 0.02, faults: true, hazard_battery_hit: 0.0}
+  - {id: idle5, label: Простой в 5 раз дороже, rules: {drain_idle_per_s: 0.05}}
+  - {id: idle10, label: Простой в 10 раз дороже, rules: {drain_idle_per_s: 0.10}}
+  - {id: long_fault, label: Сбой датчика 90–120 с, scenario: {fault_duration: [90.0, 120.0]}}
+  - {id: no_fault, label: Сбоев датчика нет, scenario: {events: [soil_change, new_hazard]}}
+  - {id: hz2, label: Датчик 2 показания в секунду, rules: {sensor_hz: 2.0}}
+metrics: [score, samples_share, returned, penalties, hazard_hits, false_collects, time, distance, battery_used]
+claims:
+  - {metric: score, a: adaptive_v2, b: adaptive, focus: hard, conditions: [base, science],
+     text: Адаптивный v2 набирает больше очков при наших правилах}
+  - {metric: returned, a: adaptive_v2, b: adaptive, focus: hard, better: higher, kind: noninferiority, margin: 0.05,
+     conditions: [base, science], text: Адаптивный v2 возвращается не реже при наших правилах}
+  - {metric: score, a: adaptive_v2, b: adaptive, focus: hard, kind: noninferiority, margin: 1.0,
+     conditions: [idle5, idle10, long_fault, no_fault, hz2], text: Адаптивный v2 не теряет очков при чужих правилах}
+  - {metric: returned, a: adaptive_v2, b: adaptive, focus: hard, better: higher, kind: noninferiority, margin: 0.05,
+     conditions: [idle5, idle10, long_fault, no_fault, hz2], text: Адаптивный v2 возвращается не реже при чужих правилах}
+  - {metric: score, a: adaptive_v2, b: adaptive, focus: medium, kind: noninferiority, margin: 0.5,
+     text: Адаптивный v2 не теряет очков на среднем уровне}
+  - {metric: score, a: scientist_v2, b: scientist, focus: hard, conditions: [base, science],
+     text: Исследователь v2 набирает больше очков при наших правилах}
+  - {metric: returned, a: scientist_v2, b: scientist, focus: hard, better: higher, kind: noninferiority, margin: 0.05,
+     conditions: [base, science], text: Исследователь v2 возвращается не реже при наших правилах}

@@ -130,7 +130,7 @@ const uid = (p) => `${p}${++uidCounter}`;
 const MODE_RU = {
   start: 'старт', explore: 'разведка', travel: 'в пути', approach: 'подход к образцу', collect: 'сбор',
   return: 'возврат', think: 'думает', escape: 'отъезд назад', done: 'финиш',
-  experiment: 'ставит опыт', probe: 'ставит опыт', wait: 'ждёт',
+  experiment: 'ставит опыт', probe: 'ставит опыт', wait: 'ждёт', lost: 'потерял положение, стоит',
 };
 const KIND_RU = {
   observe: 'наблюдение', hypothesis: 'гипотеза', verdict: 'вердикт', decision: 'решение',

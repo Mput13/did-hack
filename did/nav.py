@@ -10,7 +10,13 @@ from scipy import ndimage
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 
-from .config import V_MAX
+from .config import ROBOT_RADIUS, V_MAX
+
+LIDAR_OFFSET = -0.032  # м: лидар Burger стоит позади центра робота
+ESCAPE_V = 0.10       # м/с: скорость отъезда после столкновения
+ESCAPE_ROOM = 0.30    # м от центра робота: столько свободного пути нужно, чтобы отъезжать в эту сторону
+ESCAPE_STOP = 0.20    # м: отъезд прекращается, когда до преграды осталось меньше
+FRONT_STOP = 0.02     # м: если корпусу до преграды прямо по курсу осталось меньше, вперёд не едем
 
 INFLATE = 0.17        # м: ближе к стене центр робота не планируется (радиус 0,105 + запас)
 WALL_SOFT = 0.30      # м: до этой дистанции клетки чуть дороже, чтобы путь не жался к стенам
@@ -102,6 +108,20 @@ class CostGraph:
             node = prev
         return total
 
+    def span(self, dist, pred, x, y):
+        """То же, что energy, и длина этого пути в метрах: (расход в метрах обычного пола, метры)."""
+        node = self.node(x, y)
+        if not math.isfinite(dist[node]):
+            return math.inf, math.inf
+        total = meters = 0.0
+        while pred[node] >= 0:
+            prev = pred[node]
+            step = math.hypot(self.xs[node] - self.xs[prev], self.ys[node] - self.ys[prev])
+            total += step * 0.5 * (self.mult[node] + self.mult[prev])
+            meters += step
+            node = prev
+        return total, meters
+
     def trace(self, pred, x, y):
         """Путь из источника поля в (x, y): список точек, включая конечную."""
         node = self.node(x, y)
@@ -123,6 +143,84 @@ class CostGraph:
         out = np.full(self.arena.free.shape, fill, dtype=float)
         out[self.iy, self.ix] = values
         return out
+
+
+def moved_since(scan_pose, pose):
+    """Сдвиг робота после скана: (dx, dy, dth) текущей позы в системе робота на момент скана."""
+    sx, sy, sth = scan_pose
+    dx, dy = pose[0] - sx, pose[1] - sy
+    c, s = math.cos(sth), math.sin(sth)
+    return c * dx + s * dy, c * dy - s * dx, _wrap(pose[2] - sth)
+
+
+def _echoes(scan, step=None, moved=None):
+    """Отражения лидара в системе робота. moved — сдвиг робота после скана (moved_since): скан приходит
+    с задержкой и живёт до следующего, а робот за это время едет и поворачивается."""
+    scan = np.asarray(scan, dtype=float)
+    ang = np.arange(len(scan)) * (step or 2 * math.pi / len(scan))
+    seen = np.isfinite(scan)
+    px, py = LIDAR_OFFSET + scan[seen] * np.cos(ang[seen]), scan[seen] * np.sin(ang[seen])
+    if moved is not None:
+        px, py = px - moved[0], py - moved[1]
+        c, s = math.cos(moved[2]), math.sin(moved[2])
+        px, py = px * c + py * s, py * c - px * s
+    return px, py
+
+
+def corridor_room(scan, step=None, back=False, heading=0.0, half_width=ROBOT_RADIUS + 0.035, moved=None):
+    """Свободный путь по лидару в заданную сторону (heading — угол от курса, back — назад), м от центра робота.
+
+    Смотрит не сектор, а полосу шириной с робота: столб сбоку-сзади в узкий сектор не попадает, а
+    корпус его заденет. Лучи без отражения не учитываются; ничего не видно — inf.
+
+    Преграда сбоку от корпуса (в запасе полосы, но не впереди корпуса) прямому ходу не мешает: робот
+    проедет вдоль неё. Считать её помехой нельзя — тогда у столба вплотную сбоку «тесно» и вперёд, и
+    назад, робот разворачивается на месте, задевает столб и раскачивается (Gazebo, hard-7).
+    """
+    px, py = _echoes(scan, step, moved)
+    c, s = math.cos(heading + (math.pi if back else 0.0)), math.sin(heading + (math.pi if back else 0.0))
+    along, across = px * c + py * s, py * c - px * s
+    beside = (np.abs(across) >= ROBOT_RADIUS) & (along < ROBOT_RADIUS)
+    hit = along[(along > 0.0) & (np.abs(across) < half_width) & ~beside]
+    return float(hit.min()) if len(hit) else math.inf
+
+
+def free_ahead(scan, step=None, heading=0.0, radius=ROBOT_RADIUS, moved=None):
+    """Сколько робот (круг) может проехать прямо, пока не коснётся ближайшего отражения лидара, м."""
+    px, py = _echoes(scan, step, moved)
+    c, s = math.cos(heading), math.sin(heading)
+    along, across = px * c + py * s, py * c - px * s
+    near = (along > 0.0) & (np.abs(across) < radius)
+    if not near.any():
+        return math.inf
+    return float((along[near] - np.sqrt(radius ** 2 - across[near] ** 2)).min())
+
+
+def freest_turn(scan, step=None, moved=None, ahead=True):
+    """Куда повернуться, чтобы впереди было больше всего места: (угол от курса, свободный путь).
+
+    ahead=False — нынешний курс не предлагать: робот должен именно повернуться и посмотреть иначе.
+    """
+    turns = [k * math.pi / 6 for k in range(-5, 7) if ahead or k]
+    room = [min(corridor_room(scan, step, heading=h, moved=moved), 1.0) for h in turns]   # дальше метра — одинаково хорошо
+    best = max(range(len(turns)), key=lambda k: (room[k], -abs(turns[k])))
+    return turns[best], room[best]
+
+
+def escape_plan(scan, step=None, back=True, moved=None):
+    """Как отъехать после столкновения: (скорость, на сколько сначала повернуться).
+
+    В желаемую сторону (назад или вперёд), если там свободно; иначе в другую; иначе — развернуться
+    туда, где места больше всего, и ехать вперёд; а если тесно всюду — стоять. Стороны считаются от
+    нынешнего курса робота: moved — его сдвиг после скана.
+    """
+    if scan is None:
+        return (-ESCAPE_V if back else ESCAPE_V), 0.0
+    for way in (back, not back):
+        if corridor_room(scan, step, back=way, moved=moved) >= ESCAPE_ROOM:
+            return (-ESCAPE_V if way else ESCAPE_V), 0.0
+    turn, room = freest_turn(scan, step, moved)
+    return (ESCAPE_V, turn) if room >= ESCAPE_ROOM else (0.0, 0.0)
 
 
 def path_length(pts):
@@ -180,3 +278,79 @@ class Follower:
 
 def _wrap(a):
     return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+def _crossed_cells(arena, a, b):
+    """Клетки, которых касается отрезок a–b, и длина отрезка в каждой: (iy, ix, метры).
+
+    Обход точный, а не по точкам с шагом: отрезок делится линиями сетки, каждый кусок лежит в одной клетке.
+    Клетки, которых отрезок касается только углом или стороной, тоже входят — с нулевой длиной.
+    """
+    res = arena.res
+    ax, ay = (a[0] - arena.x0) / res, (a[1] - arena.y0) / res
+    bx, by = (b[0] - arena.x0) / res, (b[1] - arena.y0) / res
+    ts = [np.array([0.0, 1.0])]
+    for p, q in ((ax, bx), (ay, by)):
+        if abs(q - p) > 1e-12:
+            lines = np.arange(math.ceil(min(p, q)), math.floor(max(p, q)) + 1)
+            ts.append((lines - p) / (q - p))
+    t = np.unique(np.clip(np.concatenate(ts), 0.0, 1.0))
+    mid = 0.5 * (t[1:] + t[:-1])
+    iy = [np.floor(ay + mid * (by - ay))]
+    ix = [np.floor(ax + mid * (bx - ax))]
+    length = [np.diff(t) * math.hypot(bx - ax, by - ay) * res]
+    px, py = ax + t * (bx - ax), ay + t * (by - ay)
+    for dx in (-1e-7, 1e-7):                 # вокруг каждой точки на линии сетки — до четырёх клеток
+        for dy in (-1e-7, 1e-7):
+            ix.append(np.floor(px + dx))
+            iy.append(np.floor(py + dy))
+            length.append(np.zeros(len(t)))
+    iy = np.clip(np.concatenate(iy).astype(int), 0, arena.h - 1)
+    ix = np.clip(np.concatenate(ix).astype(int), 0, arena.w - 1)
+    return iy, ix, np.concatenate(length)
+
+
+def straighten(graph, pts, spacing=0.05):
+    """Спрямить путь по клеткам: кусок заменяется прямой, если она проходима и по стоимости не дороже.
+
+    Кратчайший путь на сетке с восемью направлениями идёт «коленом» и бывает длиннее прямой до 8%.
+    Прямая проверяется по всем клеткам, которых она касается (_crossed_cells): ни одна не может быть
+    запрещённой, даже задетая углом. Стоимость прямой считается по той же карте стоимостей клеток, поэтому
+    дорогой грунт, стены и опасные зоны она не срезает. Точки результата идут с шагом spacing, как у
+    исходного пути. В пресеты агента спрямление не включено (research/findings/P1.md).
+    """
+    if len(pts) < 3:
+        return pts
+    arena = graph.arena
+    cost = graph.grid(graph.cost, fill=np.inf)
+    p = np.asarray(pts, dtype=float)
+    ix = ((p[:, 0] - arena.x0) / arena.res).astype(int)
+    iy = ((p[:, 1] - arena.y0) / arena.res).astype(int)
+    c = cost[iy, ix]
+    seg = np.hypot(*np.diff(p, axis=0).T) * 0.5 * (c[1:] + c[:-1])
+    along = np.concatenate(([0.0], np.cumsum(seg)))           # стоимость пути по клеткам до каждой точки
+
+    def line(i, j):
+        cy, cx, length = _crossed_cells(arena, pts[i], pts[j])
+        cells = cost[cy, cx]
+        if not np.isfinite(cells).all():
+            return math.inf
+        return float((cells * length).sum())
+    keep, i = [0], 0
+    while i < len(pts) - 1:
+        j = best = i + 1
+        while j < len(pts) - 1:
+            j = min(len(pts) - 1, j + 2)
+            if line(i, j) <= (along[j] - along[i]) * (1.0 + 1e-6):
+                best = j
+            elif j - best > 12:                               # прямая давно не проходит: дальше не ищем
+                break
+        keep.append(best)
+        i = best
+    out = [pts[0]]
+    for a, b in zip(keep, keep[1:]):
+        d = math.dist(pts[a], pts[b])
+        n = max(1, int(round(d / spacing)))
+        out += [(pts[a][0] + (pts[b][0] - pts[a][0]) * k / n, pts[a][1] + (pts[b][1] - pts[a][1]) * k / n)
+                for k in range(1, n + 1)]
+    return out
