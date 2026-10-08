@@ -19,13 +19,17 @@ from .inquiry import Investigator
 from .journal import Journal
 from .localize import PoseTracker
 from .nav import CostGraph, Follower
-from .planner import HeuristicPlanner, resolve_subgoals
+from .planner import MISSION, HeuristicPlanner, resolve_subgoals
 from .route import survey_route
 
 
 @dataclass(frozen=True)
 class AgentConfig:
     name: str = 'adaptive'
+    mission: str = MISSION            # текст миссии для планировщика; правило его не читает
+    mission_triggers: bool = False    # R13: спрашивать планировщик ещё и после столкновения и на пороге заряда
+    mission_battery_floor: float = 30.0   # порог заряда на базе для этого повода (к нему прибавляется дорога домой)
+    state_penalties: bool = False     # R13: сообщать планировщику число полученных штрафов (поле penalties в сводке)
     search: str = 'belief'            # belief — цели из карты вероятностей; route — фиксированный объезд
     explore: str = 'mass'             # точка разведки: mass — сколько вероятности вокруг; infogain — ожидаемая польза
     learn_soil: bool = True           # оценивать стоимость грунта по расходу батареи и объезжать дорогое
@@ -158,6 +162,8 @@ class Agent:
         self._no_collect_until = -1e9
         self.inv = Investigator(self, knowledge, roles) if config.science else None
         self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
+        self._battery_threshold_triggered = False
+        self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
 
     # ======================================================================================
     # один такт цикла
@@ -178,6 +184,8 @@ class Agent:
             self._slow_t = obs.t
             self._soil_hypotheses(obs.t)
             self._check_return(obs)
+            if self.cfg.mission_triggers:
+                self._ask_at_battery_floor(obs)
         if self._trigger and obs.t >= self._wait_until:
             self._deliberate(obs)
         self._act(obs, io)
@@ -213,6 +221,8 @@ class Agent:
 
     def _on_event(self, ev, obs):
         kind = ev.get('type')
+        if kind in self._penalties:
+            self._penalties[kind] += 1
         if kind == 'hazard_hit':
             self._skip_soil_until = obs.t + 0.6
             self._anchor = (obs.x, obs.y, obs.battery, obs.t)   # разовая потеря заряда — не свойство грунта
@@ -240,6 +250,8 @@ class Agent:
         elif kind == 'collision':
             self.journal.add(obs.t, 'alarm', f'Штраф: столкновение в ({obs.x:.2f}; {obs.y:.2f})', tag='collision')
             self._escape = {'until': obs.t + 1.5, 'v': 0.10 if self._last_cmd[0] < 0 else -0.10}
+            if self.cfg.mission_triggers:
+                self._request_plan('collision')
 
     def _sync_hazards(self, t, new=False):
         """Пересчитать карту риска и сводку по зонам после нового штрафа или уточнения."""
@@ -405,6 +417,20 @@ class Agent:
         if reason:
             self._go_home(obs.t, reason)
 
+    def _ask_at_battery_floor(self, obs):
+        """Один раз за прогон спросить планировщик, когда заряда осталось «порог миссии + дорога домой».
+
+        Сам агент домой по этому порогу не едет: решение остаётся за планировщиком. Повод придерживается,
+        пока модель нельзя спросить (llm_min_interval_s), иначе на него ответило бы правило.
+        """
+        if self._battery_threshold_triggered or self._returning or self._trigger:
+            return
+        if self.cfg.planner == 'llm' and obs.t - self._last_llm_t < self.cfg.llm_min_interval_s:
+            return
+        if obs.battery <= self.cfg.mission_battery_floor + self._home_cost(obs.x, obs.y) * self.cfg.reserve_margin:
+            self._battery_threshold_triggered = True
+            self._request_plan('battery_threshold')
+
     def _go_home(self, t, reason):
         self._returning = True
         self.queue = [{'type': 'return_base'}]
@@ -474,8 +500,12 @@ class Agent:
                   'status': 'confirmed' if z['evidence_m'] >= 0.3 else 'suspected'}
                  for i, z in enumerate(self.soil.zones())] if self.cfg.learn_soil else []
         alarms = [e['text'] for e in self.journal.entries[-12:] if e['kind'] == 'alarm' and obs.t - e['t'] <= 30.0]
+        penalties = {'penalties': {'total': sum(self._penalties.values()), **self._penalties}} \
+            if self.cfg.state_penalties else {}
         return {
+            'mission': self.cfg.mission,
             'trigger': trigger,
+            **penalties,
             'time_s': round(obs.t, 1), 'time_limit_s': self.rules.time_limit_s,
             'battery': round(battery, 1), 'battery_start': self.rules.battery_start,
             'pose': {'x': round(obs.x, 2), 'y': round(obs.y, 2)},
