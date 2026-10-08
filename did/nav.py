@@ -10,7 +10,13 @@ from scipy import ndimage
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 
-from .config import V_MAX
+from .config import ROBOT_RADIUS, V_MAX
+
+LIDAR_OFFSET = -0.032  # м: лидар Burger стоит позади центра робота
+ESCAPE_V = 0.10       # м/с: скорость отъезда после столкновения
+ESCAPE_ROOM = 0.30    # м от центра робота: столько свободного пути нужно, чтобы отъезжать в эту сторону
+ESCAPE_STOP = 0.20    # м: отъезд прекращается, когда до преграды осталось меньше
+FRONT_STOP = 0.02     # м: если корпусу до преграды прямо по курсу осталось меньше, вперёд не едем
 
 INFLATE = 0.17        # м: ближе к стене центр робота не планируется (радиус 0,105 + запас)
 WALL_SOFT = 0.30      # м: до этой дистанции клетки чуть дороже, чтобы путь не жался к стенам
@@ -137,6 +143,84 @@ class CostGraph:
         out = np.full(self.arena.free.shape, fill, dtype=float)
         out[self.iy, self.ix] = values
         return out
+
+
+def moved_since(scan_pose, pose):
+    """Сдвиг робота после скана: (dx, dy, dth) текущей позы в системе робота на момент скана."""
+    sx, sy, sth = scan_pose
+    dx, dy = pose[0] - sx, pose[1] - sy
+    c, s = math.cos(sth), math.sin(sth)
+    return c * dx + s * dy, c * dy - s * dx, _wrap(pose[2] - sth)
+
+
+def _echoes(scan, step=None, moved=None):
+    """Отражения лидара в системе робота. moved — сдвиг робота после скана (moved_since): скан приходит
+    с задержкой и живёт до следующего, а робот за это время едет и поворачивается."""
+    scan = np.asarray(scan, dtype=float)
+    ang = np.arange(len(scan)) * (step or 2 * math.pi / len(scan))
+    seen = np.isfinite(scan)
+    px, py = LIDAR_OFFSET + scan[seen] * np.cos(ang[seen]), scan[seen] * np.sin(ang[seen])
+    if moved is not None:
+        px, py = px - moved[0], py - moved[1]
+        c, s = math.cos(moved[2]), math.sin(moved[2])
+        px, py = px * c + py * s, py * c - px * s
+    return px, py
+
+
+def corridor_room(scan, step=None, back=False, heading=0.0, half_width=ROBOT_RADIUS + 0.035, moved=None):
+    """Свободный путь по лидару в заданную сторону (heading — угол от курса, back — назад), м от центра робота.
+
+    Смотрит не сектор, а полосу шириной с робота: столб сбоку-сзади в узкий сектор не попадает, а
+    корпус его заденет. Лучи без отражения не учитываются; ничего не видно — inf.
+
+    Преграда сбоку от корпуса (в запасе полосы, но не впереди корпуса) прямому ходу не мешает: робот
+    проедет вдоль неё. Считать её помехой нельзя — тогда у столба вплотную сбоку «тесно» и вперёд, и
+    назад, робот разворачивается на месте, задевает столб и раскачивается (Gazebo, hard-7).
+    """
+    px, py = _echoes(scan, step, moved)
+    c, s = math.cos(heading + (math.pi if back else 0.0)), math.sin(heading + (math.pi if back else 0.0))
+    along, across = px * c + py * s, py * c - px * s
+    beside = (np.abs(across) >= ROBOT_RADIUS) & (along < ROBOT_RADIUS)
+    hit = along[(along > 0.0) & (np.abs(across) < half_width) & ~beside]
+    return float(hit.min()) if len(hit) else math.inf
+
+
+def free_ahead(scan, step=None, heading=0.0, radius=ROBOT_RADIUS, moved=None):
+    """Сколько робот (круг) может проехать прямо, пока не коснётся ближайшего отражения лидара, м."""
+    px, py = _echoes(scan, step, moved)
+    c, s = math.cos(heading), math.sin(heading)
+    along, across = px * c + py * s, py * c - px * s
+    near = (along > 0.0) & (np.abs(across) < radius)
+    if not near.any():
+        return math.inf
+    return float((along[near] - np.sqrt(radius ** 2 - across[near] ** 2)).min())
+
+
+def freest_turn(scan, step=None, moved=None, ahead=True):
+    """Куда повернуться, чтобы впереди было больше всего места: (угол от курса, свободный путь).
+
+    ahead=False — нынешний курс не предлагать: робот должен именно повернуться и посмотреть иначе.
+    """
+    turns = [k * math.pi / 6 for k in range(-5, 7) if ahead or k]
+    room = [min(corridor_room(scan, step, heading=h, moved=moved), 1.0) for h in turns]   # дальше метра — одинаково хорошо
+    best = max(range(len(turns)), key=lambda k: (room[k], -abs(turns[k])))
+    return turns[best], room[best]
+
+
+def escape_plan(scan, step=None, back=True, moved=None):
+    """Как отъехать после столкновения: (скорость, на сколько сначала повернуться).
+
+    В желаемую сторону (назад или вперёд), если там свободно; иначе в другую; иначе — развернуться
+    туда, где места больше всего, и ехать вперёд; а если тесно всюду — стоять. Стороны считаются от
+    нынешнего курса робота: moved — его сдвиг после скана.
+    """
+    if scan is None:
+        return (-ESCAPE_V if back else ESCAPE_V), 0.0
+    for way in (back, not back):
+        if corridor_room(scan, step, back=way, moved=moved) >= ESCAPE_ROOM:
+            return (-ESCAPE_V if way else ESCAPE_V), 0.0
+    turn, room = freest_turn(scan, step, moved)
+    return (ESCAPE_V, turn) if room >= ESCAPE_ROOM else (0.0, 0.0)
 
 
 def path_length(pts):
