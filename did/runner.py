@@ -34,6 +34,10 @@ def make_planner(cfg, llm=None, seed=0):
     промпта из did/prompts (без .md), чтобы сравнивать версии; 'client' — готовый клиент с chat() вместо
     make_client (свой кэш, проверка повтора).
     """
+    if getattr(cfg, 'mission_guard', ''):          # J1: правило под присмотром сторожа миссии
+        from .mission_guard import make_guarded
+        big = {k: v for k, v in (llm or {}).items() if k != 'jev'} or None
+        return make_guarded(cfg, llm, lambda: make_planner(replace(cfg, mission_guard='', planner='llm'), big, seed))
     if cfg.planner != 'llm':
         return HeuristicPlanner()
     from .llm import load_system_prompt, make_client
@@ -115,6 +119,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     elif isinstance(scenario, dict):
         scenario = Scenario.from_dict(scenario)
     cls, cfg = make_agent(agent, config)
+    if getattr(cfg, 'inquiry_choice', 'gain') != 'gain':      # R12: случайный выбор опыта воспроизводим по сценарию
+        cfg = replace(cfg, inquiry_seed=int(scenario.seed))
     arm = arm or cfg.name
     world = FastSim(arena, scenario, rules, seed=seed, **(sim or {}))
     rec = Recorder()

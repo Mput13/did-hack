@@ -33,6 +33,8 @@ class AgentConfig:
     mission_triggers: bool = False    # R13: спрашивать планировщик ещё и после столкновения и на пороге заряда
     mission_battery_floor: float = 30.0   # порог заряда на базе для этого повода (к нему прибавляется дорога домой)
     state_penalties: bool = False     # R13: сообщать планировщику число полученных штрафов (поле penalties в сводке)
+    mission_guard: str = ''           # J1: сторож миссии на модели решений Jev: '' — нет, 'jev', 'jev_llm' (did/mission_guard.py)
+    guard_wait: bool = False          # J1: быстрый симулятор — робот стоит столько, сколько сторож ждал ответов моделей
     search: str = 'belief'            # belief — цели из карты вероятностей; route — фиксированный объезд
     explore: str = 'mass'             # точка разведки: mass — сколько вероятности вокруг; infogain — ожидаемая польза
     learn_soil: bool = True           # оценивать стоимость грунта по расходу батареи и объезжать дорогое
@@ -82,6 +84,9 @@ class AgentConfig:
     fault_wait_s: float = 120.0       # бюджет ожидания датчика на весь прогон, с
     fault_wait_charge: float = 3.0    # и по заряду, ед. (по показаниям батареи)
     straight_paths: bool = False      # спрямлять путь по клеткам там, где прямая проходима и не дороже
+    # --- абляция R12 (research/findings/R12.md): как исследователь выбирает опыт; gain — прежнее поведение
+    inquiry_choice: str = 'gain'      # gain | bits | random | cheapest | fixed | worst | blind (did.science.CHOICES)
+    inquiry_seed: int = 0             # зерно случайного выбора; прогон подставляет номер сценария (did/runner.py)
 
     def to_dict(self):
         return asdict(self)
@@ -680,7 +685,7 @@ class Agent:
                  for i, z in enumerate(self.soil.zones())] if self.cfg.learn_soil else []
         alarms = [e['text'] for e in self.journal.entries[-12:] if e['kind'] == 'alarm' and obs.t - e['t'] <= 30.0]
         penalties = {'penalties': {'total': sum(self._penalties.values()), **self._penalties}} \
-            if self.cfg.state_penalties else {}
+            if self.cfg.state_penalties or self.cfg.mission_guard else {}
         return {
             'mission': self.cfg.mission,
             'trigger': trigger,
@@ -745,6 +750,8 @@ class Agent:
             plan = ahead or planner.plan(state)
             if use_llm and (self.cfg.llm_wait_s or self.cfg.llm_wait_measured):
                 self._wait_until = obs.t + answer_delay(self.cfg, plan)
+            if self.cfg.guard_wait and plan.get('wait_s'):
+                self._wait_until = obs.t + plan['wait_s']
         else:
             if not self._future.done():
                 return
@@ -777,6 +784,8 @@ class Agent:
             self.journal.add(t, 'llm', f"Модель предполагает: {h['statement']}. Как проверить: {h.get('test', '—')}")
         if self.rec:
             self.rec.add_plan(t, source, trigger, reasoning, subgoals)
+            if plan.get('guard'):                # J1: что ответил сторож миссии и сколько ждал
+                self.rec.plans[-1].update(guard=plan['guard'], wait_s=round(plan.get('wait_s') or 0.0, 3))
             if plan.get('exchanges'):
                 # Решение с участием модели: что выбрало бы правило на том же состоянии и итоги шагов способа.
                 rule = resolve_subgoals(HeuristicPlanner().plan(state)['subgoals'], state)
