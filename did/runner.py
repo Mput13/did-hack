@@ -19,6 +19,7 @@ from .oracle import ORACLES, make_truth
 from .planner import HeuristicPlanner, LLMPlanner
 from .recorder import Recorder, save_trace
 from .scenario import Scenario, generate
+from .waiting import wait_metrics
 
 RUNS = ROOT / 'runs'
 # Мерило, а не участник: агент no_change, которому быстрый симулятор сообщает настоящую карту грунтов.
@@ -33,6 +34,10 @@ def make_planner(cfg, llm=None, seed=0):
     промпта из did/prompts (без .md), чтобы сравнивать версии; 'client' — готовый клиент с chat() вместо
     make_client (свой кэш, проверка повтора).
     """
+    if getattr(cfg, 'mission_guard', ''):          # J1: правило под присмотром сторожа миссии
+        from .mission_guard import make_guarded
+        big = {k: v for k, v in (llm or {}).items() if k != 'jev'} or None
+        return make_guarded(cfg, llm, lambda: make_planner(replace(cfg, mission_guard='', planner='llm'), big, seed))
     if cfg.planner != 'llm':
         return HeuristicPlanner()
     from .llm import load_system_prompt, make_client
@@ -85,14 +90,19 @@ def _soil_truth(judge, arena):
 
 def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, scenario=None,
                 scenario_args=None, config=None, rules=None, agent_rules=None, llm=None, sim=None, save=True, quiet=True,
-                knowledge=None, study=None, truth=False, soil_probe=False):
+                knowledge=None, study=None, truth=False, soil_probe=False, roles=None):
     """Прогон целиком. Возвращает сводку: идентификаторы, метрики, путь к записи.
 
     study — задание исследования (словарь did.study.StudySpec) для агента 'study'.
     rules — правила мира; agent_rules=None — те же правила у агента (прежнее поведение),
     agent_rules={} — агент верит в Rules() независимо от правил мира.
+    Вариантам с самокалибровкой (calibrate) при agent_rules=None то, что они калибруют, не сообщается:
+    см. did.calibrate.assumed_rules.
     truth=True — писать в запись истинную позу робота на каждом шаге симулятора (поле truth).
     soil_probe — добавить в метрики разбор смены грунта по скрытой правде (did.metrics.SoilProbe).
+    roles — модель в ролях автора, критика и рассказчика расследований отдельно от планировщика:
+    опции did.llm.make_client или {'client': готовый клиент}. None — как раньше: роли ведёт модель
+    планировщика, если он llm, иначе расследования идут без модели.
     """
     arena = load_arena()
     if rules == 'science':                 # набор правил с несколькими причинами расхода и сбоями
@@ -114,6 +124,13 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     elif isinstance(scenario, dict):
         scenario = Scenario.from_dict(scenario)
     cls, cfg = make_agent(agent, config)
+    if getattr(cfg, 'inquiry_choice', 'gain') != 'gain':      # R12: случайный выбор опыта воспроизводим по сценарию
+        cfg = replace(cfg, inquiry_seed=int(scenario.seed))
+    if agent_rules is None and getattr(cfg, 'calibrate', False):
+        # Калибрующийся агент сам проверяет дальность, закон датчика и расход: правды о них он не получает
+        # и стартует с допущений команды. Истину знает только явно названный ориентир (law_known).
+        from .calibrate import assumed_rules
+        bot_rules = assumed_rules(rules)
     arm = arm or cfg.name
     world = FastSim(arena, scenario, rules, seed=seed, **(sim or {}))
     rec = Recorder()
@@ -124,6 +141,9 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
         extra['study'] = prepare(study, arena, bot_rules, scenario)
     if extra and cfg.planner == 'llm':              # та же модель — автор и критик расследований
         extra['roles'] = planner.client
+    if roles is not None and getattr(cfg, 'science', False):
+        from .llm import make_client
+        extra['roles'] = roles['client'] if 'client' in roles else make_client(**roles)
     if agent == ORACLE:
         extra['soil_truth'] = _soil_truth(world.judge, arena)
     if agent in ORACLES:
@@ -150,6 +170,7 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     judge = world.judge
     score = judge.score()
     metrics = run_metrics(score, rules, bot.journal, judge.world_log, rec.plans, rec.llm)
+    metrics.update(wait_metrics(rec, bot))
     if probe:
         metrics.update(probe.metrics(bot.journal))
     sh = score_hypotheses(bot.journal.hypotheses, scenario, judge.world_log, events=rec.events)

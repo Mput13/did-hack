@@ -94,6 +94,7 @@ export async function render(root, ctx) {
   const undo = btn('Убрать точку', () => send('route', { points: pending().slice(0, -1) }));
   const clearZones = btn('Убрать зоны', () => send('zones', { zones: [] }));
   const battery = h('strong', null, '—'), distance = h('strong', null, '—'), batterySub = h('span'), distanceSub = h('span');
+  const scoreBox = h('strong', null, '—'), scoreSub = h('span');      // счёт судьи: виден весь прогон, не только в итоге
   const result = h('section', { class: 'lb-card dm-result', hidden: true });
   const cycle = h('section', { class: 'lb-card dm-cycle', hidden: true });
   const llm = createLLMPanel();
@@ -132,7 +133,8 @@ export async function render(root, ctx) {
       h('div', { class: 'dm-small-actions' }, home, reset, explore), status, noticeBox),
     h('section', { class: 'dm-metrics' },
       h('div', null, h('span', null, 'Заряд'), battery, batterySub),
-      h('div', null, h('span', null, 'Пройдено'), distance, distanceSub)), result, cycle, llm.el,
+      h('div', null, h('span', null, 'Пройдено'), distance, distanceSub),
+      h('div', null, h('span', null, 'Счёт судьи'), scoreBox, scoreSub)), result, cycle, llm.el,
     h('section', { class: 'lb-card dm-card dm-comparison-card' },
       h('h2', { class: 'pl-h' }, 'Что добавляет LLM'),
       h('p', { class: 'dm-caption' }, 'Два пути на одинаковой карте. Можно проследить решения и открыть каждый прогон отдельно.'), compare,
@@ -170,7 +172,10 @@ export async function render(root, ctx) {
       slamCheck.querySelector('input').checked = true; refCheck.querySelector('input').checked = false;
     }
     const akey = (s?.agents || []).map((a) => a.id).join(',');
-    if (akey && akey !== agentsKey) { agentsKey = akey; fill(agentSel, s.agents.map((a) => h('option', { value: a.id }, a.label))); }
+    if (akey && akey !== agentsKey) {
+      agentsKey = akey; fill(agentSel, s.agents.map((a) => h('option', { value: a.id }, a.label)));
+      if (s.agents.some((a) => a.id === ctx.query.agent)) agentSel.value = ctx.query.agent;      // показ: агент из адреса страницы
+    }
     agentRow.hidden = task !== 'mission' || !akey;
     agentSel.disabled = mutation || moving;
     source.textContent = active ? `${s.backend === 'gazebo' ? 'Gazebo' : 'Быстрый симулятор'} · №${s.seed}${slamNav ? ' · карта SLAM, готовой нет' : ''}` : 'Робот не подключён';
@@ -208,6 +213,9 @@ export async function render(root, ctx) {
     if (told) { noticeBox.textContent = told.text; noticeBox.dataset.bad = String(told.bad); }
     battery.textContent = active ? num(s.battery, 1) : '—'; batterySub.textContent = active ? `из ${num(s.battery_start, 0)}` : '';
     distance.textContent = active ? `${num(s.distance, 1)} м` : '—'; distanceSub.textContent = active ? `${num(s.t, 0)} с` : '';
+    const sc = active ? s.score : null;
+    scoreBox.textContent = sc && sc.score != null ? num(sc.score, 1) : '—';
+    scoreSub.textContent = sc && sc.samples_total != null ? `образцов ${sc.samples_collected ?? 0} из ${sc.samples_total}` : '';
     const done = active && !moving && (m?.result || s.route?.length && s.route.every((p) => p.done));
     const step = !active ? 0 : done ? 4 : moving && !['wait', 'settle'].includes(s.mode) ? 3 : todo.length || task === 'mission' ? 2 : 1;
     Array.from(steps.children).forEach((el, i) => { el.dataset.done = String(active && i < step); el.setAttribute('aria-current', i === step ? 'step' : 'false'); });
@@ -223,7 +231,8 @@ export async function render(root, ctx) {
           m.trace_file ? btn('Посмотреть этот прогон', () => openRecording(m.trace_file)) : null);
       } else if (done) fill(result, h('h2', { class: 'pl-h' }, 'Результат'), h('strong', { class: 'dm-result-title' }, 'Маршрут выполнен'));
     }
-    const entries = (m?.journal || []).filter((e) => ['alarm', 'hypothesis', 'verdict', 'decision'].includes(e.kind)).slice(-3);
+    // Вместе с решениями и гипотезами — расследования агента-исследователя («вопрос — опыт — вывод», kind = inquiry).
+    const entries = (m?.journal || []).filter((e) => ['alarm', 'hypothesis', 'verdict', 'decision', 'inquiry'].includes(e.kind)).slice(-5);
     cycle.hidden = !entries.length;
     fill(cycle, h('h2', { class: 'pl-h' }, 'Последние решения агента'), entries.map((e) => h('p', { class: 'dm-caption' }, `${num(e.t, 0)} с · ${e.text}`)));
   }

@@ -1,0 +1,3840 @@
+{
+ "L3a": {
+  "generated": "2026-10-08T18:57:10",
+  "arms": {
+   "code": {
+    "runs": 30,
+    "score": 65.01,
+    "inquiries": 125,
+    "identified": {
+     "k": 114,
+     "n": 125,
+     "share": 0.912,
+     "ci": [
+      0.849,
+      0.95
+     ]
+    },
+    "correct_of_identified": {
+     "k": 112,
+     "n": 113,
+     "share": 0.991,
+     "ci": [
+      0.952,
+      0.998
+     ]
+    },
+    "correct_of_all": {
+     "k": 112,
+     "n": 125,
+     "share": 0.896,
+     "ci": [
+      0.83,
+      0.938
+     ]
+    },
+    "wrong": 1,
+    "insufficient": 11,
+    "tests_per_inquiry": 0.87,
+    "energy_per_inquiry": 0.11,
+    "by_topic": {
+     "energy": {
+      "n": 84,
+      "right": 78,
+      "wrong": 0,
+      "insufficient": 5
+     },
+     "fault": {
+      "n": 14,
+      "right": 14,
+      "wrong": 0,
+      "insufficient": 0
+     },
+     "sensor": {
+      "n": 27,
+      "right": 20,
+      "wrong": 1,
+      "insufficient": 6
+     }
+    },
+    "returned": 30,
+    "collected_share": 0.742,
+    "missing": []
+   },
+   "roles@qwen3.8-flash-next": {
+    "runs": 30,
+    "score": 65.01,
+    "inquiries": 125,
+    "identified": {
+     "k": 114,
+     "n": 125,
+     "share": 0.912,
+     "ci": [
+      0.849,
+      0.95
+     ]
+    },
+    "correct_of_identified": {
+     "k": 112,
+     "n": 113,
+     "share": 0.991,
+     "ci": [
+      0.952,
+      0.998
+     ]
+    },
+    "correct_of_all": {
+     "k": 112,
+     "n": 125,
+     "share": 0.896,
+     "ci": [
+      0.83,
+      0.938
+     ]
+    },
+    "wrong": 1,
+    "insufficient": 11,
+    "tests_per_inquiry": 0.87,
+    "energy_per_inquiry": 0.11,
+    "by_topic": {
+     "energy": {
+      "n": 84,
+      "right": 78,
+      "wrong": 0,
+      "insufficient": 5
+     },
+     "fault": {
+      "n": 14,
+      "right": 14,
+      "wrong": 0,
+      "insufficient": 0
+     },
+     "sensor": {
+      "n": 27,
+      "right": 20,
+      "wrong": 1,
+      "insufficient": 6
+     }
+    },
+    "llm": {
+     "deliberations": 119,
+     "author_by_model": {
+      "k": 119,
+      "n": 119,
+      "share": 1.0,
+      "ci": [
+       0.969,
+       1.0
+      ]
+     },
+     "critic_by_model": {
+      "k": 103,
+      "n": 119,
+      "share": 0.866,
+      "ci": [
+       0.793,
+       0.916
+      ]
+     },
+     "critic_revise": {
+      "k": 3,
+      "n": 119,
+      "share": 0.025,
+      "ci": [
+       0.009,
+       0.072
+      ]
+     },
+     "critic_issue_kinds": {
+      "missing_alternative": 3
+     },
+     "plan_changed_by_critic": {
+      "k": 3,
+      "n": 119,
+      "share": 0.025,
+      "ci": [
+       0.009,
+       0.072
+      ]
+     },
+     "dropped_alternative": {
+      "k": 2,
+      "n": 119,
+      "share": 0.017,
+      "ci": [
+       0.005,
+       0.059
+      ]
+     },
+     "dropped_truth": 0,
+     "dropped_kinds": {
+      "stuck": 2
+     },
+     "first_test_same_as_code": {
+      "k": 46,
+      "n": 49,
+      "share": 0.939,
+      "ci": [
+       0.835,
+       0.979
+      ]
+     },
+     "first_test_pairs": {
+      "listen_std→onset": 3
+     },
+     "with_extra": {
+      "k": 37,
+      "n": 119,
+      "share": 0.311,
+      "ci": [
+       0.235,
+       0.399
+      ]
+     },
+     "open_issues_after": 2,
+     "latency_per_deliberation_s": 69.8,
+     "explain_by_model": {
+      "k": 118,
+      "n": 125,
+      "share": 0.944,
+      "ci": [
+       0.889,
+       0.973
+      ]
+     },
+     "exchanges": {
+      "requests": 366,
+      "exchanges": 424,
+      "first_ok": 308,
+      "repaired": 35,
+      "failed": 23,
+      "no_answer": 0,
+      "first_ok_share": 0.842,
+      "failed_share": 0.063,
+      "errors": {
+       "ответ обрезан": 41,
+       "нарушена схема": 41,
+       "ответ не JSON": 40
+      },
+      "tokens": {
+       "prompt": 1821,
+       "completion": 1400
+      },
+      "retried": 36,
+      "latency_s": {
+       "median": 25.8,
+       "mean": 29.0,
+       "max": 88.8,
+       "n": 348
+      }
+     },
+     "by_role": {
+      "author": {
+       "requests": 122,
+       "exchanges": 128,
+       "first_ok": 116,
+       "repaired": 6,
+       "failed": 0,
+       "no_answer": 0,
+       "first_ok_share": 0.951,
+       "failed_share": 0.0,
+       "errors": {
+        "ответ обрезан": 6,
+        "ответ не JSON": 5,
+        "нарушена схема": 1
+       },
+       "tokens": {
+        "prompt": 1977,
+        "completion": 1679
+       },
+       "retried": 2,
+       "latency_s": {
+        "median": 30.8,
+        "mean": 33.6,
+        "max": 85.2,
+        "n": 122
+       }
+      },
+      "critic": {
+       "requests": 119,
+       "exchanges": 149,
+       "first_ok": 89,
+       "repaired": 14,
+       "failed": 16,
+       "no_answer": 0,
+       "first_ok_share": 0.748,
+       "failed_share": 0.134,
+       "errors": {
+        "ответ не JSON": 35,
+        "ответ обрезан": 35,
+        "нарушена схема": 11
+       },
+       "tokens": {
+        "prompt": 1902,
+        "completion": 1715
+       },
+       "retried": 1,
+       "latency_s": {
+        "median": 26.3,
+        "mean": 28.7,
+        "max": 83.7,
+        "n": 112
+       }
+      },
+      "explainer": {
+       "requests": 125,
+       "exchanges": 147,
+       "first_ok": 103,
+       "repaired": 15,
+       "failed": 7,
+       "no_answer": 0,
+       "first_ok_share": 0.824,
+       "failed_share": 0.056,
+       "errors": {
+        "нарушена схема": 29
+       },
+       "tokens": {
+        "prompt": 1602,
+        "completion": 838
+       },
+       "retried": 33,
+       "latency_s": {
+        "median": 16.2,
+        "mean": 24.2,
+        "max": 88.8,
+        "n": 114
+       }
+      }
+     }
+    },
+    "returned": 30,
+    "collected_share": 0.742,
+    "missing": [],
+    "score_minus_code": {
+     "n": 30,
+     "mean": 0.0,
+     "ci": [
+      0.0,
+      0.0
+     ],
+     "a_higher": 0,
+     "b_higher": 0,
+     "ties": 30
+    },
+    "correct_minus_code": {
+     "diff": 0.0,
+     "ci": [
+      -0.04,
+      0.04
+     ]
+    },
+    "correct_of_all_minus_code": {
+     "diff": 0.0,
+     "ci": [
+      -0.078,
+      0.078
+     ]
+    }
+   },
+   "plan@qwen3.8-flash-next": {
+    "runs": 30,
+    "score": 64.84,
+    "inquiries": 128,
+    "identified": {
+     "k": 116,
+     "n": 128,
+     "share": 0.906,
+     "ci": [
+      0.843,
+      0.946
+     ]
+    },
+    "correct_of_identified": {
+     "k": 115,
+     "n": 115,
+     "share": 1.0,
+     "ci": [
+      0.968,
+      1.0
+     ]
+    },
+    "correct_of_all": {
+     "k": 115,
+     "n": 128,
+     "share": 0.898,
+     "ci": [
+      0.834,
+      0.94
+     ]
+    },
+    "wrong": 0,
+    "insufficient": 12,
+    "tests_per_inquiry": 0.82,
+    "energy_per_inquiry": 0.07,
+    "by_topic": {
+     "energy": {
+      "n": 87,
+      "right": 79,
+      "wrong": 0,
+      "insufficient": 7
+     },
+     "fault": {
+      "n": 15,
+      "right": 15,
+      "wrong": 0,
+      "insufficient": 0
+     },
+     "sensor": {
+      "n": 26,
+      "right": 21,
+      "wrong": 0,
+      "insufficient": 5
+     }
+    },
+    "llm": {
+     "deliberations": 124,
+     "author_by_model": {
+      "k": 124,
+      "n": 124,
+      "share": 1.0,
+      "ci": [
+       0.97,
+       1.0
+      ]
+     },
+     "critic_by_model": {
+      "k": 107,
+      "n": 124,
+      "share": 0.863,
+      "ci": [
+       0.791,
+       0.913
+      ]
+     },
+     "critic_revise": {
+      "k": 3,
+      "n": 124,
+      "share": 0.024,
+      "ci": [
+       0.008,
+       0.069
+      ]
+     },
+     "critic_issue_kinds": {
+      "missing_alternative": 3
+     },
+     "plan_changed_by_critic": {
+      "k": 3,
+      "n": 124,
+      "share": 0.024,
+      "ci": [
+       0.008,
+       0.069
+      ]
+     },
+     "dropped_alternative": {
+      "k": 3,
+      "n": 124,
+      "share": 0.024,
+      "ci": [
+       0.008,
+       0.069
+      ]
+     },
+     "dropped_truth": 0,
+     "dropped_kinds": {
+      "stuck": 3
+     },
+     "first_test_same_as_code": {
+      "k": 47,
+      "n": 50,
+      "share": 0.94,
+      "ci": [
+       0.838,
+       0.979
+      ]
+     },
+     "first_test_pairs": {
+      "listen_std→onset": 3
+     },
+     "with_extra": {
+      "k": 40,
+      "n": 124,
+      "share": 0.323,
+      "ci": [
+       0.247,
+       0.409
+      ]
+     },
+     "open_issues_after": 3,
+     "latency_per_deliberation_s": 75.8,
+     "explain_by_model": {
+      "k": 121,
+      "n": 128,
+      "share": 0.945,
+      "ci": [
+       0.891,
+       0.973
+      ]
+     },
+     "exchanges": {
+      "requests": 379,
+      "exchanges": 440,
+      "first_ok": 318,
+      "repaired": 37,
+      "failed": 24,
+      "no_answer": 0,
+      "first_ok_share": 0.839,
+      "failed_share": 0.063,
+      "errors": {
+       "ответ обрезан": 43,
+       "нарушена схема": 43,
+       "ответ не JSON": 42
+      },
+      "tokens": {
+       "prompt": 1826,
+       "completion": 1405
+      },
+      "retried": 38,
+      "latency_s": {
+       "median": 26.2,
+       "mean": 29.4,
+       "max": 88.8,
+       "n": 359
+      }
+     },
+     "by_role": {
+      "author": {
+       "requests": 127,
+       "exchanges": 135,
+       "first_ok": 119,
+       "repaired": 8,
+       "failed": 0,
+       "no_answer": 0,
+       "first_ok_share": 0.937,
+       "failed_share": 0.0,
+       "errors": {
+        "ответ обрезан": 8,
+        "ответ не JSON": 7,
+        "нарушена схема": 1
+       },
+       "tokens": {
+        "prompt": 1979,
+        "completion": 1703
+       },
+       "retried": 4,
+       "latency_s": {
+        "median": 30.8,
+        "mean": 33.7,
+        "max": 85.2,
+        "n": 124
+       }
+      },
+      "critic": {
+       "requests": 124,
+       "exchanges": 155,
+       "first_ok": 93,
+       "repaired": 14,
+       "failed": 17,
+       "no_answer": 0,
+       "first_ok_share": 0.75,
+       "failed_share": 0.137,
+       "errors": {
+        "ответ не JSON": 35,
+        "ответ обрезан": 35,
+        "нарушена схема": 13
+       },
+       "tokens": {
+        "prompt": 1907,
+        "completion": 1718
+       },
+       "retried": 2,
+       "latency_s": {
+        "median": 26.3,
+        "mean": 29.5,
+        "max": 83.7,
+        "n": 117
+       }
+      },
+      "explainer": {
+       "requests": 128,
+       "exchanges": 150,
+       "first_ok": 106,
+       "repaired": 15,
+       "failed": 7,
+       "no_answer": 0,
+       "first_ok_share": 0.828,
+       "failed_share": 0.055,
+       "errors": {
+        "нарушена схема": 29
+       },
+       "tokens": {
+        "prompt": 1603,
+        "completion": 814
+       },
+       "retried": 32,
+       "latency_s": {
+        "median": 17.0,
+        "mean": 24.6,
+        "max": 88.8,
+        "n": 118
+       }
+      }
+     }
+    },
+    "returned": 30,
+    "collected_share": 0.742,
+    "missing": [],
+    "score_minus_code": {
+     "n": 30,
+     "mean": -0.17,
+     "ci": [
+      -0.472,
+      0.0
+     ],
+     "a_higher": 0,
+     "b_higher": 3,
+     "ties": 27
+    },
+    "correct_minus_code": {
+     "diff": 0.009,
+     "ci": [
+      -0.024,
+      0.048
+     ]
+    },
+    "correct_of_all_minus_code": {
+     "diff": 0.002,
+     "ci": [
+      -0.075,
+      0.08
+     ]
+    }
+   },
+   "plan@DeepSeek-V4-Flash": {
+    "runs": 30,
+    "score": 64.84,
+    "inquiries": 128,
+    "identified": {
+     "k": 116,
+     "n": 128,
+     "share": 0.906,
+     "ci": [
+      0.843,
+      0.946
+     ]
+    },
+    "correct_of_identified": {
+     "k": 115,
+     "n": 115,
+     "share": 1.0,
+     "ci": [
+      0.968,
+      1.0
+     ]
+    },
+    "correct_of_all": {
+     "k": 115,
+     "n": 128,
+     "share": 0.898,
+     "ci": [
+      0.834,
+      0.94
+     ]
+    },
+    "wrong": 0,
+    "insufficient": 12,
+    "tests_per_inquiry": 0.82,
+    "energy_per_inquiry": 0.07,
+    "by_topic": {
+     "energy": {
+      "n": 87,
+      "right": 79,
+      "wrong": 0,
+      "insufficient": 7
+     },
+     "fault": {
+      "n": 15,
+      "right": 15,
+      "wrong": 0,
+      "insufficient": 0
+     },
+     "sensor": {
+      "n": 26,
+      "right": 21,
+      "wrong": 0,
+      "insufficient": 5
+     }
+    },
+    "llm": {
+     "deliberations": 124,
+     "author_by_model": {
+      "k": 122,
+      "n": 124,
+      "share": 0.984,
+      "ci": [
+       0.943,
+       0.996
+      ]
+     },
+     "critic_by_model": {
+      "k": 100,
+      "n": 124,
+      "share": 0.806,
+      "ci": [
+       0.728,
+       0.866
+      ]
+     },
+     "critic_revise": {
+      "k": 7,
+      "n": 124,
+      "share": 0.056,
+      "ci": [
+       0.028,
+       0.112
+      ]
+     },
+     "critic_issue_kinds": {
+      "missing_alternative": 9,
+      "non_discriminating": 1,
+      "no_refutation": 1
+     },
+     "plan_changed_by_critic": {
+      "k": 5,
+      "n": 124,
+      "share": 0.04,
+      "ci": [
+       0.017,
+       0.091
+      ]
+     },
+     "dropped_alternative": {
+      "k": 2,
+      "n": 124,
+      "share": 0.016,
+      "ci": [
+       0.004,
+       0.057
+      ]
+     },
+     "dropped_truth": 0,
+     "dropped_kinds": {
+      "stuck": 2
+     },
+     "first_test_same_as_code": {
+      "k": 46,
+      "n": 50,
+      "share": 0.92,
+      "ci": [
+       0.812,
+       0.968
+      ]
+     },
+     "first_test_pairs": {
+      "listen_std→onset": 4
+     },
+     "with_extra": {
+      "k": 76,
+      "n": 124,
+      "share": 0.613,
+      "ci": [
+       0.525,
+       0.694
+      ]
+     },
+     "open_issues_after": 2,
+     "latency_per_deliberation_s": 114.1,
+     "explain_by_model": {
+      "k": 121,
+      "n": 128,
+      "share": 0.945,
+      "ci": [
+       0.891,
+       0.973
+      ]
+     },
+     "exchanges": {
+      "requests": 382,
+      "exchanges": 475,
+      "first_ok": 288,
+      "repaired": 62,
+      "failed": 32,
+      "no_answer": 1,
+      "first_ok_share": 0.754,
+      "failed_share": 0.084,
+      "errors": {
+       "ответ обрезан": 79,
+       "ответ не JSON": 75,
+       "нарушена схема": 49,
+       "нет ответа модели": 1
+      },
+      "tokens": {
+       "prompt": 1934,
+       "completion": 1327
+      },
+      "retried": 14,
+      "latency_s": {
+       "median": 17.4,
+       "mean": 23.5,
+       "max": 84.3,
+       "n": 389
+      }
+     },
+     "by_role": {
+      "author": {
+       "requests": 131,
+       "exchanges": 166,
+       "first_ok": 95,
+       "repaired": 34,
+       "failed": 2,
+       "no_answer": 1,
+       "first_ok_share": 0.725,
+       "failed_share": 0.015,
+       "errors": {
+        "ответ обрезан": 36,
+        "ответ не JSON": 33,
+        "нарушена схема": 3,
+        "нет ответа модели": 1
+       },
+       "tokens": {
+        "prompt": 2087,
+        "completion": 1726
+       },
+       "retried": 6,
+       "latency_s": {
+        "median": 29.6,
+        "mean": 34.5,
+        "max": 84.0,
+        "n": 130
+       }
+      },
+      "critic": {
+       "requests": 123,
+       "exchanges": 163,
+       "first_ok": 83,
+       "repaired": 17,
+       "failed": 23,
+       "no_answer": 0,
+       "first_ok_share": 0.675,
+       "failed_share": 0.187,
+       "errors": {
+        "ответ обрезан": 43,
+        "ответ не JSON": 42,
+        "нарушена схема": 21
+       },
+       "tokens": {
+        "prompt": 2036,
+        "completion": 1506
+       },
+       "retried": 8,
+       "latency_s": {
+        "median": 18.5,
+        "mean": 22.5,
+        "max": 84.3,
+        "n": 113
+       }
+      },
+      "explainer": {
+       "requests": 128,
+       "exchanges": 146,
+       "first_ok": 110,
+       "repaired": 11,
+       "failed": 7,
+       "no_answer": 0,
+       "first_ok_share": 0.859,
+       "failed_share": 0.055,
+       "errors": {
+        "нарушена схема": 25
+       },
+       "tokens": {
+        "prompt": 1648,
+        "completion": 674
+       },
+       "retried": 0,
+       "latency_s": {
+        "median": 10.8,
+        "mean": 14.5,
+        "max": 83.9,
+        "n": 146
+       }
+      }
+     }
+    },
+    "returned": 30,
+    "collected_share": 0.742,
+    "missing": [],
+    "score_minus_code": {
+     "n": 30,
+     "mean": -0.17,
+     "ci": [
+      -0.472,
+      0.0
+     ],
+     "a_higher": 0,
+     "b_higher": 3,
+     "ties": 27
+    },
+    "correct_minus_code": {
+     "diff": 0.009,
+     "ci": [
+      -0.024,
+      0.048
+     ]
+    },
+    "correct_of_all_minus_code": {
+     "diff": 0.002,
+     "ci": [
+      -0.075,
+      0.08
+     ]
+    }
+   },
+   "plan@qwen3.6-35b-a3b": {
+    "runs": 30,
+    "score": 64.84,
+    "inquiries": 128,
+    "identified": {
+     "k": 116,
+     "n": 128,
+     "share": 0.906,
+     "ci": [
+      0.843,
+      0.946
+     ]
+    },
+    "correct_of_identified": {
+     "k": 115,
+     "n": 115,
+     "share": 1.0,
+     "ci": [
+      0.968,
+      1.0
+     ]
+    },
+    "correct_of_all": {
+     "k": 115,
+     "n": 128,
+     "share": 0.898,
+     "ci": [
+      0.834,
+      0.94
+     ]
+    },
+    "wrong": 0,
+    "insufficient": 12,
+    "tests_per_inquiry": 0.82,
+    "energy_per_inquiry": 0.07,
+    "by_topic": {
+     "energy": {
+      "n": 87,
+      "right": 79,
+      "wrong": 0,
+      "insufficient": 7
+     },
+     "fault": {
+      "n": 15,
+      "right": 15,
+      "wrong": 0,
+      "insufficient": 0
+     },
+     "sensor": {
+      "n": 26,
+      "right": 21,
+      "wrong": 0,
+      "insufficient": 5
+     }
+    },
+    "llm": {
+     "deliberations": 124,
+     "author_by_model": {
+      "k": 124,
+      "n": 124,
+      "share": 1.0,
+      "ci": [
+       0.97,
+       1.0
+      ]
+     },
+     "critic_by_model": {
+      "k": 103,
+      "n": 124,
+      "share": 0.831,
+      "ci": [
+       0.755,
+       0.886
+      ]
+     },
+     "critic_revise": {
+      "k": 3,
+      "n": 124,
+      "share": 0.024,
+      "ci": [
+       0.008,
+       0.069
+      ]
+     },
+     "critic_issue_kinds": {
+      "non_discriminating": 1,
+      "missing_alternative": 2
+     },
+     "plan_changed_by_critic": {
+      "k": 2,
+      "n": 124,
+      "share": 0.016,
+      "ci": [
+       0.004,
+       0.057
+      ]
+     },
+     "dropped_alternative": {
+      "k": 3,
+      "n": 124,
+      "share": 0.024,
+      "ci": [
+       0.008,
+       0.069
+      ]
+     },
+     "dropped_truth": 0,
+     "dropped_kinds": {
+      "stuck": 3
+     },
+     "first_test_same_as_code": {
+      "k": 47,
+      "n": 50,
+      "share": 0.94,
+      "ci": [
+       0.838,
+       0.979
+      ]
+     },
+     "first_test_pairs": {
+      "listen_std→onset": 3
+     },
+     "with_extra": {
+      "k": 40,
+      "n": 124,
+      "share": 0.323,
+      "ci": [
+       0.247,
+       0.409
+      ]
+     },
+     "open_issues_after": 3,
+     "latency_per_deliberation_s": 85.2,
+     "explain_by_model": {
+      "k": 121,
+      "n": 128,
+      "share": 0.945,
+      "ci": [
+       0.891,
+       0.973
+      ]
+     },
+     "exchanges": {
+      "requests": 379,
+      "exchanges": 445,
+      "first_ok": 313,
+      "repaired": 38,
+      "failed": 28,
+      "no_answer": 0,
+      "first_ok_share": 0.826,
+      "failed_share": 0.074,
+      "errors": {
+       "ответ обрезан": 51,
+       "ответ не JSON": 48,
+       "нарушена схема": 46
+      },
+      "tokens": {
+       "prompt": 1831,
+       "completion": 1422
+      },
+      "retried": 25,
+      "latency_s": {
+       "median": 25.0,
+       "mean": 29.7,
+       "max": 89.7,
+       "n": 373
+      }
+     },
+     "by_role": {
+      "author": {
+       "requests": 127,
+       "exchanges": 139,
+       "first_ok": 115,
+       "repaired": 12,
+       "failed": 0,
+       "no_answer": 0,
+       "first_ok_share": 0.906,
+       "failed_share": 0.0,
+       "errors": {
+        "ответ обрезан": 11,
+        "ответ не JSON": 8,
+        "нарушена схема": 4
+       },
+       "tokens": {
+        "prompt": 2003,
+        "completion": 1697
+       },
+       "retried": 0,
+       "latency_s": {
+        "median": 31.8,
+        "mean": 35.5,
+        "max": 88.8,
+        "n": 132
+       }
+      },
+      "critic": {
+       "requests": 124,
+       "exchanges": 159,
+       "first_ok": 89,
+       "repaired": 14,
+       "failed": 21,
+       "no_answer": 0,
+       "first_ok_share": 0.718,
+       "failed_share": 0.169,
+       "errors": {
+        "ответ не JSON": 40,
+        "ответ обрезан": 40,
+        "нарушена схема": 16
+       },
+       "tokens": {
+        "prompt": 1903,
+        "completion": 1738
+       },
+       "retried": 0,
+       "latency_s": {
+        "median": 26.1,
+        "mean": 28.7,
+        "max": 62.4,
+        "n": 119
+       }
+      },
+      "explainer": {
+       "requests": 128,
+       "exchanges": 147,
+       "first_ok": 109,
+       "repaired": 12,
+       "failed": 7,
+       "no_answer": 0,
+       "first_ok_share": 0.852,
+       "failed_share": 0.055,
+       "errors": {
+        "нарушена схема": 26
+       },
+       "tokens": {
+        "prompt": 1592,
+        "completion": 821
+       },
+       "retried": 25,
+       "latency_s": {
+        "median": 16.0,
+        "mean": 24.2,
+        "max": 89.7,
+        "n": 122
+       }
+      }
+     }
+    },
+    "returned": 30,
+    "collected_share": 0.742,
+    "missing": [],
+    "score_minus_code": {
+     "n": 30,
+     "mean": -0.17,
+     "ci": [
+      -0.472,
+      0.0
+     ],
+     "a_higher": 0,
+     "b_higher": 3,
+     "ties": 27
+    },
+    "correct_minus_code": {
+     "diff": 0.009,
+     "ci": [
+      -0.024,
+      0.048
+     ]
+    },
+    "correct_of_all_minus_code": {
+     "diff": 0.002,
+     "ci": [
+      -0.075,
+      0.08
+     ]
+    }
+   }
+  }
+ },
+ "L3b": {
+  "generated": "2026-10-08T18:32:56",
+  "arms": {
+   "qwen3.8-flash-next": {
+    "cases": 125,
+    "done": 125,
+    "answered": {
+     "k": 125,
+     "n": 125,
+     "share": 1.0,
+     "ci": [
+      0.97,
+      1.0
+     ]
+    },
+    "hypotheses_per_case": 4.72,
+    "truth_among_hypotheses": {
+     "k": 121,
+     "n": 124,
+     "share": 0.976,
+     "ci": [
+      0.931,
+      0.992
+     ]
+    },
+    "truth_first": {
+     "k": 94,
+     "n": 124,
+     "share": 0.758,
+     "ci": [
+      0.676,
+      0.825
+     ]
+    },
+    "labels": {
+     "load": 58,
+     "soil": 129,
+     "turn": 37,
+     "other": 33,
+     "model": 86,
+     "leak": 61,
+     "stuck": 15,
+     "ok": 43,
+     "mech": 70,
+     "none": 12,
+     "bias": 28,
+     "noise": 18
+    },
+    "not_in_code_list": {
+     "k": 252,
+     "n": 590,
+     "share": 0.427,
+     "ci": [
+      0.388,
+      0.467
+     ]
+    },
+    "first_test_same_as_code": {
+     "k": 12,
+     "n": 55,
+     "share": 0.218,
+     "ci": [
+      0.129,
+      0.344
+     ]
+    },
+    "verdict_right": {
+     "k": 32,
+     "n": 83,
+     "share": 0.386,
+     "ci": [
+      0.288,
+      0.493
+     ]
+    },
+    "verdict_outcomes": {
+     "insufficient": 43,
+     "right": 32,
+     "wrong": 8
+    },
+    "code_right_same_cases": {
+     "k": 71,
+     "n": 83,
+     "share": 0.855,
+     "ci": [
+      0.764,
+      0.915
+     ]
+    },
+    "code_minus_model": {
+     "n": 83,
+     "a": {
+      "k": 71,
+      "n": 83,
+      "share": 0.855,
+      "ci": [
+       0.764,
+       0.915
+      ]
+     },
+     "b": {
+      "k": 32,
+      "n": 83,
+      "share": 0.386,
+      "ci": [
+       0.288,
+       0.493
+      ]
+     },
+     "diff": 0.47,
+     "ci": [
+      0.361,
+      0.578
+     ],
+     "only_a": 40,
+     "only_b": 1,
+     "sign_p": 0.0
+    },
+    "by_topic": {
+     "energy": {
+      "n": 84,
+      "truth_among_hypotheses": {
+       "k": 83,
+       "n": 83,
+       "share": 1.0,
+       "ci": [
+        0.956,
+        1.0
+       ]
+      },
+      "verdict_right": {
+       "k": 8,
+       "n": 42,
+       "share": 0.19,
+       "ci": [
+        0.1,
+        0.333
+       ]
+      },
+      "code_right": {
+       "k": 37,
+       "n": 42,
+       "share": 0.881,
+       "ci": [
+        0.75,
+        0.948
+       ]
+      }
+     },
+     "fault": {
+      "n": 14,
+      "truth_among_hypotheses": {
+       "k": 12,
+       "n": 14,
+       "share": 0.857,
+       "ci": [
+        0.601,
+        0.96
+       ]
+      },
+      "verdict_right": {
+       "k": 11,
+       "n": 14,
+       "share": 0.786,
+       "ci": [
+        0.524,
+        0.924
+       ]
+      },
+      "code_right": {
+       "k": 14,
+       "n": 14,
+       "share": 1.0,
+       "ci": [
+        0.785,
+        1.0
+       ]
+      }
+     },
+     "sensor": {
+      "n": 27,
+      "truth_among_hypotheses": {
+       "k": 26,
+       "n": 27,
+       "share": 0.963,
+       "ci": [
+        0.817,
+        0.993
+       ]
+      },
+      "verdict_right": {
+       "k": 13,
+       "n": 27,
+       "share": 0.481,
+       "ci": [
+        0.307,
+        0.66
+       ]
+      },
+      "code_right": {
+       "k": 20,
+       "n": 27,
+       "share": 0.741,
+       "ci": [
+        0.553,
+        0.868
+       ]
+      }
+     }
+    },
+    "by_truth": {
+     "—": {
+      "n": 1,
+      "recall": 0,
+      "verdict_cases": 0,
+      "model_right": 0,
+      "code_right": 0
+     },
+     "soil": {
+      "n": 77,
+      "recall": 77,
+      "verdict_cases": 36,
+      "model_right": 3,
+      "code_right": 32
+     },
+     "stuck": {
+      "n": 6,
+      "recall": 6,
+      "verdict_cases": 6,
+      "model_right": 5,
+      "code_right": 6
+     },
+     "leak": {
+      "n": 4,
+      "recall": 4,
+      "verdict_cases": 4,
+      "model_right": 4,
+      "code_right": 4
+     },
+     "ok": {
+      "n": 8,
+      "recall": 8,
+      "verdict_cases": 8,
+      "model_right": 1,
+      "code_right": 3
+     },
+     "leak+soil": {
+      "n": 6,
+      "recall": 6,
+      "verdict_cases": 6,
+      "model_right": 5,
+      "code_right": 5
+     },
+     "bias+noise": {
+      "n": 3,
+      "recall": 3,
+      "verdict_cases": 3,
+      "model_right": 1,
+      "code_right": 2
+     },
+     "none": {
+      "n": 10,
+      "recall": 8,
+      "verdict_cases": 10,
+      "model_right": 7,
+      "code_right": 10
+     },
+     "noise+stuck": {
+      "n": 1,
+      "recall": 1,
+      "verdict_cases": 1,
+      "model_right": 1,
+      "code_right": 1
+     },
+     "noise": {
+      "n": 5,
+      "recall": 4,
+      "verdict_cases": 5,
+      "model_right": 3,
+      "code_right": 5
+     },
+     "bias": {
+      "n": 4,
+      "recall": 4,
+      "verdict_cases": 4,
+      "model_right": 2,
+      "code_right": 3
+     }
+    },
+    "llm": {
+     "requests": 209,
+     "exchanges": 217,
+     "first_ok": 201,
+     "repaired": 8,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.962,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ не JSON": 8,
+      "ответ обрезан": 1
+     },
+     "tokens": {
+      "prompt": 1149,
+      "completion": 1499
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": 32.0,
+      "mean": 34.2,
+      "max": 77.0,
+      "n": 209
+     }
+    },
+    "judge": {
+     "requests": 125,
+     "exchanges": 126,
+     "first_ok": 124,
+     "repaired": 1,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.992,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ не JSON": 1
+     },
+     "tokens": {
+      "prompt": 550,
+      "completion": 1085
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": 20.6,
+      "mean": 23.6,
+      "max": 70.0,
+      "n": 125
+     }
+    }
+   },
+   "DeepSeek-V4-Flash": {
+    "cases": 125,
+    "done": 125,
+    "answered": {
+     "k": 125,
+     "n": 125,
+     "share": 1.0,
+     "ci": [
+      0.97,
+      1.0
+     ]
+    },
+    "hypotheses_per_case": 4.61,
+    "truth_among_hypotheses": {
+     "k": 115,
+     "n": 124,
+     "share": 0.927,
+     "ci": [
+      0.868,
+      0.961
+     ]
+    },
+    "truth_first": {
+     "k": 75,
+     "n": 124,
+     "share": 0.605,
+     "ci": [
+      0.517,
+      0.686
+     ]
+    },
+    "labels": {
+     "soil": 115,
+     "load": 88,
+     "turn": 47,
+     "mech": 80,
+     "leak": 28,
+     "model": 86,
+     "stuck": 10,
+     "ok": 38,
+     "other": 41,
+     "none": 9,
+     "bias": 14,
+     "noise": 20
+    },
+    "not_in_code_list": {
+     "k": 304,
+     "n": 576,
+     "share": 0.528,
+     "ci": [
+      0.487,
+      0.568
+     ]
+    },
+    "first_test_same_as_code": {
+     "k": 10,
+     "n": 55,
+     "share": 0.182,
+     "ci": [
+      0.102,
+      0.303
+     ]
+    },
+    "verdict_right": {
+     "k": 20,
+     "n": 83,
+     "share": 0.241,
+     "ci": [
+      0.162,
+      0.343
+     ]
+    },
+    "verdict_outcomes": {
+     "right": 20,
+     "insufficient": 51,
+     "wrong": 12
+    },
+    "code_right_same_cases": {
+     "k": 71,
+     "n": 83,
+     "share": 0.855,
+     "ci": [
+      0.764,
+      0.915
+     ]
+    },
+    "code_minus_model": {
+     "n": 83,
+     "a": {
+      "k": 71,
+      "n": 83,
+      "share": 0.855,
+      "ci": [
+       0.764,
+       0.915
+      ]
+     },
+     "b": {
+      "k": 20,
+      "n": 83,
+      "share": 0.241,
+      "ci": [
+       0.162,
+       0.343
+      ]
+     },
+     "diff": 0.614,
+     "ci": [
+      0.494,
+      0.723
+     ],
+     "only_a": 53,
+     "only_b": 2,
+     "sign_p": 0.0
+    },
+    "by_topic": {
+     "energy": {
+      "n": 84,
+      "truth_among_hypotheses": {
+       "k": 83,
+       "n": 83,
+       "share": 1.0,
+       "ci": [
+        0.956,
+        1.0
+       ]
+      },
+      "verdict_right": {
+       "k": 3,
+       "n": 42,
+       "share": 0.071,
+       "ci": [
+        0.025,
+        0.19
+       ]
+      },
+      "code_right": {
+       "k": 37,
+       "n": 42,
+       "share": 0.881,
+       "ci": [
+        0.75,
+        0.948
+       ]
+      }
+     },
+     "fault": {
+      "n": 14,
+      "truth_among_hypotheses": {
+       "k": 8,
+       "n": 14,
+       "share": 0.571,
+       "ci": [
+        0.326,
+        0.786
+       ]
+      },
+      "verdict_right": {
+       "k": 6,
+       "n": 14,
+       "share": 0.429,
+       "ci": [
+        0.214,
+        0.674
+       ]
+      },
+      "code_right": {
+       "k": 14,
+       "n": 14,
+       "share": 1.0,
+       "ci": [
+        0.785,
+        1.0
+       ]
+      }
+     },
+     "sensor": {
+      "n": 27,
+      "truth_among_hypotheses": {
+       "k": 24,
+       "n": 27,
+       "share": 0.889,
+       "ci": [
+        0.719,
+        0.961
+       ]
+      },
+      "verdict_right": {
+       "k": 11,
+       "n": 27,
+       "share": 0.407,
+       "ci": [
+        0.245,
+        0.593
+       ]
+      },
+      "code_right": {
+       "k": 20,
+       "n": 27,
+       "share": 0.741,
+       "ci": [
+        0.553,
+        0.868
+       ]
+      }
+     }
+    },
+    "by_truth": {
+     "—": {
+      "n": 1,
+      "recall": 0,
+      "verdict_cases": 0,
+      "model_right": 0,
+      "code_right": 0
+     },
+     "soil": {
+      "n": 77,
+      "recall": 77,
+      "verdict_cases": 36,
+      "model_right": 0,
+      "code_right": 32
+     },
+     "stuck": {
+      "n": 6,
+      "recall": 6,
+      "verdict_cases": 6,
+      "model_right": 6,
+      "code_right": 6
+     },
+     "leak": {
+      "n": 4,
+      "recall": 3,
+      "verdict_cases": 4,
+      "model_right": 4,
+      "code_right": 4
+     },
+     "ok": {
+      "n": 8,
+      "recall": 7,
+      "verdict_cases": 8,
+      "model_right": 2,
+      "code_right": 3
+     },
+     "leak+soil": {
+      "n": 6,
+      "recall": 6,
+      "verdict_cases": 6,
+      "model_right": 3,
+      "code_right": 5
+     },
+     "bias+noise": {
+      "n": 3,
+      "recall": 2,
+      "verdict_cases": 3,
+      "model_right": 0,
+      "code_right": 2
+     },
+     "none": {
+      "n": 10,
+      "recall": 5,
+      "verdict_cases": 10,
+      "model_right": 2,
+      "code_right": 10
+     },
+     "noise+stuck": {
+      "n": 1,
+      "recall": 1,
+      "verdict_cases": 1,
+      "model_right": 0,
+      "code_right": 1
+     },
+     "noise": {
+      "n": 5,
+      "recall": 4,
+      "verdict_cases": 5,
+      "model_right": 1,
+      "code_right": 5
+     },
+     "bias": {
+      "n": 4,
+      "recall": 4,
+      "verdict_cases": 4,
+      "model_right": 2,
+      "code_right": 3
+     }
+    },
+    "llm": {
+     "requests": 209,
+     "exchanges": 264,
+     "first_ok": 154,
+     "repaired": 55,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.737,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ обрезан": 55,
+      "ответ не JSON": 45,
+      "нарушена схема": 10
+     },
+     "tokens": {
+      "prompt": 1192,
+      "completion": 1611
+     },
+     "retried": 4,
+     "latency_s": {
+      "median": 19.8,
+      "mean": 25.6,
+      "max": 88.7,
+      "n": 217
+     }
+    },
+    "judge": {
+     "requests": 125,
+     "exchanges": 126,
+     "first_ok": 124,
+     "repaired": 1,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.992,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ не JSON": 1,
+      "ответ обрезан": 1
+     },
+     "tokens": {
+      "prompt": 527,
+      "completion": 1031
+     },
+     "retried": 2,
+     "latency_s": {
+      "median": 23.1,
+      "mean": 27.4,
+      "max": 89.9,
+      "n": 122
+     }
+    },
+    "verdict_minus_main": {
+     "n": 83,
+     "a": {
+      "k": 20,
+      "n": 83,
+      "share": 0.241,
+      "ci": [
+       0.162,
+       0.343
+      ]
+     },
+     "b": {
+      "k": 32,
+      "n": 83,
+      "share": 0.386,
+      "ci": [
+       0.288,
+       0.493
+      ]
+     },
+     "diff": -0.145,
+     "ci": [
+      -0.241,
+      -0.048
+     ],
+     "only_a": 3,
+     "only_b": 15,
+     "sign_p": 0.0075
+    }
+   },
+   "qwen3.6-35b-a3b": {
+    "cases": 125,
+    "done": 125,
+    "answered": {
+     "k": 125,
+     "n": 125,
+     "share": 1.0,
+     "ci": [
+      0.97,
+      1.0
+     ]
+    },
+    "hypotheses_per_case": 4.58,
+    "truth_among_hypotheses": {
+     "k": 118,
+     "n": 124,
+     "share": 0.952,
+     "ci": [
+      0.898,
+      0.978
+     ]
+    },
+    "truth_first": {
+     "k": 84,
+     "n": 124,
+     "share": 0.677,
+     "ci": [
+      0.591,
+      0.753
+     ]
+    },
+    "labels": {
+     "load": 60,
+     "soil": 130,
+     "turn": 32,
+     "model": 88,
+     "stuck": 12,
+     "ok": 48,
+     "other": 32,
+     "leak": 55,
+     "mech": 71,
+     "none": 8,
+     "bias": 20,
+     "noise": 17
+    },
+    "not_in_code_list": {
+     "k": 256,
+     "n": 573,
+     "share": 0.447,
+     "ci": [
+      0.407,
+      0.488
+     ]
+    },
+    "first_test_same_as_code": {
+     "k": 15,
+     "n": 55,
+     "share": 0.273,
+     "ci": [
+      0.173,
+      0.402
+     ]
+    },
+    "verdict_right": {
+     "k": 20,
+     "n": 83,
+     "share": 0.241,
+     "ci": [
+      0.162,
+      0.343
+     ]
+    },
+    "verdict_outcomes": {
+     "right": 20,
+     "insufficient": 48,
+     "wrong": 15
+    },
+    "code_right_same_cases": {
+     "k": 71,
+     "n": 83,
+     "share": 0.855,
+     "ci": [
+      0.764,
+      0.915
+     ]
+    },
+    "code_minus_model": {
+     "n": 83,
+     "a": {
+      "k": 71,
+      "n": 83,
+      "share": 0.855,
+      "ci": [
+       0.764,
+       0.915
+      ]
+     },
+     "b": {
+      "k": 20,
+      "n": 83,
+      "share": 0.241,
+      "ci": [
+       0.162,
+       0.343
+      ]
+     },
+     "diff": 0.614,
+     "ci": [
+      0.506,
+      0.711
+     ],
+     "only_a": 51,
+     "only_b": 0,
+     "sign_p": 0.0
+    },
+    "by_topic": {
+     "energy": {
+      "n": 84,
+      "truth_among_hypotheses": {
+       "k": 83,
+       "n": 83,
+       "share": 1.0,
+       "ci": [
+        0.956,
+        1.0
+       ]
+      },
+      "verdict_right": {
+       "k": 4,
+       "n": 42,
+       "share": 0.095,
+       "ci": [
+        0.038,
+        0.221
+       ]
+      },
+      "code_right": {
+       "k": 37,
+       "n": 42,
+       "share": 0.881,
+       "ci": [
+        0.75,
+        0.948
+       ]
+      }
+     },
+     "fault": {
+      "n": 14,
+      "truth_among_hypotheses": {
+       "k": 8,
+       "n": 14,
+       "share": 0.571,
+       "ci": [
+        0.326,
+        0.786
+       ]
+      },
+      "verdict_right": {
+       "k": 5,
+       "n": 14,
+       "share": 0.357,
+       "ci": [
+        0.163,
+        0.612
+       ]
+      },
+      "code_right": {
+       "k": 14,
+       "n": 14,
+       "share": 1.0,
+       "ci": [
+        0.785,
+        1.0
+       ]
+      }
+     },
+     "sensor": {
+      "n": 27,
+      "truth_among_hypotheses": {
+       "k": 27,
+       "n": 27,
+       "share": 1.0,
+       "ci": [
+        0.875,
+        1.0
+       ]
+      },
+      "verdict_right": {
+       "k": 11,
+       "n": 27,
+       "share": 0.407,
+       "ci": [
+        0.245,
+        0.593
+       ]
+      },
+      "code_right": {
+       "k": 20,
+       "n": 27,
+       "share": 0.741,
+       "ci": [
+        0.553,
+        0.868
+       ]
+      }
+     }
+    },
+    "by_truth": {
+     "—": {
+      "n": 1,
+      "recall": 0,
+      "verdict_cases": 0,
+      "model_right": 0,
+      "code_right": 0
+     },
+     "soil": {
+      "n": 77,
+      "recall": 77,
+      "verdict_cases": 36,
+      "model_right": 1,
+      "code_right": 32
+     },
+     "stuck": {
+      "n": 6,
+      "recall": 6,
+      "verdict_cases": 6,
+      "model_right": 5,
+      "code_right": 6
+     },
+     "leak": {
+      "n": 4,
+      "recall": 4,
+      "verdict_cases": 4,
+      "model_right": 4,
+      "code_right": 4
+     },
+     "ok": {
+      "n": 8,
+      "recall": 8,
+      "verdict_cases": 8,
+      "model_right": 1,
+      "code_right": 3
+     },
+     "leak+soil": {
+      "n": 6,
+      "recall": 6,
+      "verdict_cases": 6,
+      "model_right": 3,
+      "code_right": 5
+     },
+     "bias+noise": {
+      "n": 3,
+      "recall": 3,
+      "verdict_cases": 3,
+      "model_right": 2,
+      "code_right": 2
+     },
+     "none": {
+      "n": 10,
+      "recall": 4,
+      "verdict_cases": 10,
+      "model_right": 1,
+      "code_right": 10
+     },
+     "noise+stuck": {
+      "n": 1,
+      "recall": 1,
+      "verdict_cases": 1,
+      "model_right": 1,
+      "code_right": 1
+     },
+     "noise": {
+      "n": 5,
+      "recall": 5,
+      "verdict_cases": 5,
+      "model_right": 1,
+      "code_right": 5
+     },
+     "bias": {
+      "n": 4,
+      "recall": 4,
+      "verdict_cases": 4,
+      "model_right": 1,
+      "code_right": 3
+     }
+    },
+    "llm": {
+     "requests": 209,
+     "exchanges": 221,
+     "first_ok": 197,
+     "repaired": 12,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.943,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ не JSON": 11,
+      "ответ обрезан": 4,
+      "нарушена схема": 1
+     },
+     "tokens": {
+      "prompt": 1154,
+      "completion": 1487
+     },
+     "retried": 2,
+     "latency_s": {
+      "median": 33.2,
+      "mean": 34.5,
+      "max": 74.8,
+      "n": 209
+     }
+    },
+    "judge": {
+     "requests": 125,
+     "exchanges": 125,
+     "first_ok": 125,
+     "repaired": 0,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 1.0,
+     "failed_share": 0.0,
+     "errors": {},
+     "tokens": {
+      "prompt": 550,
+      "completion": 1108
+     },
+     "retried": 1,
+     "latency_s": {
+      "median": 23.0,
+      "mean": 24.6,
+      "max": 69.7,
+      "n": 124
+     }
+    },
+    "verdict_minus_main": {
+     "n": 83,
+     "a": {
+      "k": 20,
+      "n": 83,
+      "share": 0.241,
+      "ci": [
+       0.162,
+       0.343
+      ]
+     },
+     "b": {
+      "k": 32,
+      "n": 83,
+      "share": 0.386,
+      "ci": [
+       0.288,
+       0.493
+      ]
+     },
+     "diff": -0.145,
+     "ci": [
+      -0.241,
+      -0.048
+     ],
+     "only_a": 4,
+     "only_b": 16,
+     "sign_p": 0.0118
+    }
+   }
+  }
+ },
+ "L3c": {
+  "generated": "2026-10-08T18:36:45",
+  "arms": {
+   "rule": {
+    "runs": 20,
+    "score": 73.63,
+    "collected_share": 0.9,
+    "returned": 19,
+    "penalties": 3,
+    "missing": []
+   },
+   "formula": {
+    "runs": 20,
+    "score": 71.06,
+    "collected_share": 0.9,
+    "returned": 18,
+    "penalties": 9,
+    "missing": [],
+    "decisions": 300,
+    "same_as_rule": {
+     "k": 279,
+     "n": 300,
+     "share": 0.93,
+     "ci": [
+      0.895,
+      0.954
+     ]
+    },
+    "diff_kinds": {
+     "investigate вместо investigate": 2,
+     "explore вместо explore": 2,
+     "explore вместо investigate": 17
+    },
+    "llm": {
+     "requests": 300,
+     "exchanges": 302,
+     "first_ok": 298,
+     "repaired": 2,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.993,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ обрезан": 2,
+      "нарушена схема": 1,
+      "ответ не JSON": 1
+     },
+     "tokens": {
+      "prompt": 2477,
+      "completion": 1371
+     },
+     "retried": 6,
+     "latency_s": {
+      "median": 24.4,
+      "mean": 26.3,
+      "max": 76.1,
+      "n": 291
+     }
+    },
+    "score_minus_rule": {
+     "n": 20,
+     "mean": -2.575,
+     "ci": [
+      -8.117,
+      1.903
+     ],
+     "a_higher": 4,
+     "b_higher": 6,
+     "ties": 10
+    }
+   },
+   "goal": {
+    "runs": 20,
+    "score": 70.27,
+    "collected_share": 0.883,
+    "returned": 19,
+    "penalties": 12,
+    "missing": [],
+    "decisions": 299,
+    "same_as_rule": {
+     "k": 232,
+     "n": 299,
+     "share": 0.776,
+     "ci": [
+      0.725,
+      0.82
+     ]
+    },
+    "diff_kinds": {
+     "explore вместо explore": 29,
+     "explore вместо investigate": 15,
+     "investigate вместо investigate": 15,
+     "goto вместо investigate": 1,
+     "goto вместо explore": 3,
+     "goto вместо return_base": 1,
+     "return_base вместо explore": 3
+    },
+    "llm": {
+     "requests": 299,
+     "exchanges": 304,
+     "first_ok": 294,
+     "repaired": 5,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.983,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ не JSON": 5,
+      "ответ обрезан": 5
+     },
+     "tokens": {
+      "prompt": 1952,
+      "completion": 1504
+     },
+     "retried": 7,
+     "latency_s": {
+      "median": 28.3,
+      "mean": 30.0,
+      "max": 88.5,
+      "n": 291
+     }
+    },
+    "score_minus_rule": {
+     "n": 20,
+     "mean": -3.36,
+     "ci": [
+      -8.646,
+      1.015
+     ],
+     "a_higher": 5,
+     "b_higher": 14,
+     "ties": 1
+    },
+    "score_minus_formula": {
+     "n": 20,
+     "mean": -0.785,
+     "ci": [
+      -3.924,
+      2.902
+     ],
+     "a_higher": 8,
+     "b_higher": 11,
+     "ties": 1
+    },
+    "same_minus_formula": {
+     "diff": -0.154,
+     "ci": [
+      -0.21,
+      -0.098
+     ]
+    }
+   }
+  }
+ },
+ "L3d": {
+  "generated": "2026-10-08T18:36:45",
+  "arms": {
+   "M1/rule": {
+    "mission": "M1",
+    "model": "rule",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 0,
+     "n": 12,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.243
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "wrong_count": 12
+    },
+    "score": 74.6,
+    "collected": 5.58,
+    "returned": 11,
+    "battery": 12.5,
+    "by_scenario": {
+     "medium-1001": false,
+     "medium-1002": false,
+     "medium-1003": false,
+     "medium-1004": false,
+     "medium-1005": false,
+     "medium-1006": false,
+     "hard-1001": false,
+     "hard-1002": false,
+     "hard-1003": false,
+     "hard-1004": false,
+     "hard-1005": false,
+     "hard-1006": false
+    }
+   },
+   "M1/qwen3.8-flash-next": {
+    "mission": "M1",
+    "model": "qwen3.8-flash-next",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 12,
+     "n": 12,
+     "share": 1.0,
+     "ci": [
+      0.757,
+      1.0
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "done": 12
+    },
+    "score": 44.2,
+    "collected": 2.0,
+    "returned": 12,
+    "battery": 41.9,
+    "by_scenario": {
+     "medium-1001": true,
+     "medium-1002": true,
+     "medium-1003": true,
+     "medium-1004": true,
+     "medium-1005": true,
+     "medium-1006": true,
+     "hard-1001": true,
+     "hard-1002": true,
+     "hard-1003": true,
+     "hard-1004": true,
+     "hard-1005": true,
+     "hard-1006": true
+    },
+    "llm": {
+     "requests": 68,
+     "exchanges": 68,
+     "first_ok": 68,
+     "repaired": 0,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 1.0,
+     "failed_share": 0.0,
+     "errors": {},
+     "tokens": {
+      "prompt": 2391,
+      "completion": 1020
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": 21.0,
+      "mean": 24.5,
+      "max": 55.6,
+      "n": 68
+     }
+    },
+    "rule_decisions": 0
+   },
+   "M1/DeepSeek-V4-Flash": {
+    "mission": "M1",
+    "model": "DeepSeek-V4-Flash",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 12,
+     "n": 12,
+     "share": 1.0,
+     "ci": [
+      0.757,
+      1.0
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "done": 12
+    },
+    "score": 44.2,
+    "collected": 2.0,
+    "returned": 12,
+    "battery": 41.9,
+    "by_scenario": {
+     "medium-1001": true,
+     "medium-1002": true,
+     "medium-1003": true,
+     "medium-1004": true,
+     "medium-1005": true,
+     "medium-1006": true,
+     "hard-1001": true,
+     "hard-1002": true,
+     "hard-1003": true,
+     "hard-1004": true,
+     "hard-1005": true,
+     "hard-1006": true
+    },
+    "llm": {
+     "requests": 68,
+     "exchanges": 75,
+     "first_ok": 61,
+     "repaired": 7,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.897,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ обрезан": 7,
+      "ответ не JSON": 6,
+      "нарушена схема": 1
+     },
+     "tokens": {
+      "prompt": 2573,
+      "completion": 1124
+     },
+     "retried": 1,
+     "latency_s": {
+      "median": 12.1,
+      "mean": 17.0,
+      "max": 81.8,
+      "n": 68
+     }
+    },
+    "rule_decisions": 0,
+    "minus_main": {
+     "diff": 0.0,
+     "ci": [
+      -0.243,
+      0.243
+     ]
+    }
+   },
+   "M1/qwen3.6-35b-a3b": {
+    "mission": "M1",
+    "model": "qwen3.6-35b-a3b",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 12,
+     "n": 12,
+     "share": 1.0,
+     "ci": [
+      0.757,
+      1.0
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "done": 12
+    },
+    "score": 44.2,
+    "collected": 2.0,
+    "returned": 12,
+    "battery": 41.9,
+    "by_scenario": {
+     "medium-1001": true,
+     "medium-1002": true,
+     "medium-1003": true,
+     "medium-1004": true,
+     "medium-1005": true,
+     "medium-1006": true,
+     "hard-1001": true,
+     "hard-1002": true,
+     "hard-1003": true,
+     "hard-1004": true,
+     "hard-1005": true,
+     "hard-1006": true
+    },
+    "llm": {
+     "requests": 68,
+     "exchanges": 68,
+     "first_ok": 68,
+     "repaired": 0,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 1.0,
+     "failed_share": 0.0,
+     "errors": {},
+     "tokens": {
+      "prompt": 2391,
+      "completion": 1000
+     },
+     "retried": 1,
+     "latency_s": {
+      "median": 26.8,
+      "mean": 27.0,
+      "max": 69.1,
+      "n": 67
+     }
+    },
+    "rule_decisions": 0,
+    "minus_main": {
+     "diff": 0.0,
+     "ci": [
+      -0.243,
+      0.243
+     ]
+    }
+   },
+   "M2/rule": {
+    "mission": "M2",
+    "model": "rule",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 0,
+     "n": 12,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.243
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "failed": 12
+    },
+    "score": 74.6,
+    "collected": 5.58,
+    "returned": 11,
+    "battery": 12.5,
+    "by_scenario": {
+     "medium-1001": false,
+     "medium-1002": false,
+     "medium-1003": false,
+     "medium-1004": false,
+     "medium-1005": false,
+     "medium-1006": false,
+     "hard-1001": false,
+     "hard-1002": false,
+     "hard-1003": false,
+     "hard-1004": false,
+     "hard-1005": false,
+     "hard-1006": false
+    }
+   },
+   "M2/qwen3.8-flash-next": {
+    "mission": "M2",
+    "model": "qwen3.8-flash-next",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 11,
+     "n": 12,
+     "share": 0.917,
+     "ci": [
+      0.646,
+      0.985
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "done": 11,
+     "failed": 1
+    },
+    "score": 41.2,
+    "collected": 1.67,
+    "returned": 12,
+    "battery": 45.1,
+    "by_scenario": {
+     "medium-1001": true,
+     "medium-1002": true,
+     "medium-1003": true,
+     "medium-1004": true,
+     "medium-1005": false,
+     "medium-1006": true,
+     "hard-1001": true,
+     "hard-1002": true,
+     "hard-1003": true,
+     "hard-1004": true,
+     "hard-1005": true,
+     "hard-1006": true
+    },
+    "llm": {
+     "requests": 62,
+     "exchanges": 64,
+     "first_ok": 60,
+     "repaired": 2,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.968,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ обрезан": 2,
+      "ответ не JSON": 2
+     },
+     "tokens": {
+      "prompt": 2409,
+      "completion": 1616
+     },
+     "retried": 1,
+     "latency_s": {
+      "median": 34.7,
+      "mean": 33.7,
+      "max": 66.1,
+      "n": 61
+     }
+    },
+    "rule_decisions": 0
+   },
+   "M2/DeepSeek-V4-Flash": {
+    "mission": "M2",
+    "model": "DeepSeek-V4-Flash",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 12,
+     "n": 12,
+     "share": 1.0,
+     "ci": [
+      0.757,
+      1.0
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "done": 12
+    },
+    "score": 36.6,
+    "collected": 1.17,
+    "returned": 12,
+    "battery": 49.6,
+    "by_scenario": {
+     "medium-1001": true,
+     "medium-1002": true,
+     "medium-1003": true,
+     "medium-1004": true,
+     "medium-1005": true,
+     "medium-1006": true,
+     "hard-1001": true,
+     "hard-1002": true,
+     "hard-1003": true,
+     "hard-1004": true,
+     "hard-1005": true,
+     "hard-1006": true
+    },
+    "llm": {
+     "requests": 50,
+     "exchanges": 59,
+     "first_ok": 41,
+     "repaired": 9,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.82,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ обрезан": 9,
+      "ответ не JSON": 9
+     },
+     "tokens": {
+      "prompt": 2568,
+      "completion": 1703
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": 25.9,
+      "mean": 27.7,
+      "max": 75.7,
+      "n": 50
+     }
+    },
+    "rule_decisions": 0,
+    "minus_main": {
+     "diff": 0.083,
+     "ci": [
+      -0.169,
+      0.354
+     ]
+    }
+   },
+   "M2/qwen3.6-35b-a3b": {
+    "mission": "M2",
+    "model": "qwen3.6-35b-a3b",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 11,
+     "n": 12,
+     "share": 0.917,
+     "ci": [
+      0.646,
+      0.985
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "failed": 1,
+     "done": 11
+    },
+    "score": 41.2,
+    "collected": 1.67,
+    "returned": 12,
+    "battery": 45.2,
+    "by_scenario": {
+     "medium-1001": false,
+     "medium-1002": true,
+     "medium-1003": true,
+     "medium-1004": true,
+     "medium-1005": true,
+     "medium-1006": true,
+     "hard-1001": true,
+     "hard-1002": true,
+     "hard-1003": true,
+     "hard-1004": true,
+     "hard-1005": true,
+     "hard-1006": true
+    },
+    "llm": {
+     "requests": 63,
+     "exchanges": 63,
+     "first_ok": 63,
+     "repaired": 0,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 1.0,
+     "failed_share": 0.0,
+     "errors": {},
+     "tokens": {
+      "prompt": 2395,
+      "completion": 1600
+     },
+     "retried": 1,
+     "latency_s": {
+      "median": 28.5,
+      "mean": 30.9,
+      "max": 62.4,
+      "n": 62
+     }
+    },
+    "rule_decisions": 0,
+    "minus_main": {
+     "diff": 0.0,
+     "ci": [
+      -0.279,
+      0.279
+     ]
+    }
+   },
+   "M3/rule": {
+    "mission": "M3",
+    "model": "rule",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 0,
+     "n": 12,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.243
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "entered_right": 12
+    },
+    "score": 74.6,
+    "collected": 5.58,
+    "returned": 11,
+    "battery": 12.5,
+    "by_scenario": {
+     "medium-1001": false,
+     "medium-1002": false,
+     "medium-1003": false,
+     "medium-1004": false,
+     "medium-1005": false,
+     "medium-1006": false,
+     "hard-1001": false,
+     "hard-1002": false,
+     "hard-1003": false,
+     "hard-1004": false,
+     "hard-1005": false,
+     "hard-1006": false
+    }
+   },
+   "M3/qwen3.8-flash-next": {
+    "mission": "M3",
+    "model": "qwen3.8-flash-next",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 11,
+     "n": 12,
+     "share": 0.917,
+     "ci": [
+      0.646,
+      0.985
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "clean": 11,
+     "entered_right": 1
+    },
+    "score": 50.5,
+    "collected": 3.08,
+    "returned": 12,
+    "battery": 17.1,
+    "by_scenario": {
+     "medium-1001": true,
+     "medium-1002": true,
+     "medium-1003": false,
+     "medium-1004": true,
+     "medium-1005": true,
+     "medium-1006": true,
+     "hard-1001": true,
+     "hard-1002": true,
+     "hard-1003": true,
+     "hard-1004": true,
+     "hard-1005": true,
+     "hard-1006": true
+    },
+    "llm": {
+     "requests": 200,
+     "exchanges": 213,
+     "first_ok": 187,
+     "repaired": 13,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.935,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ не JSON": 13,
+      "ответ обрезан": 12
+     },
+     "tokens": {
+      "prompt": 2463,
+      "completion": 1620
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": 30.6,
+      "mean": 34.4,
+      "max": 75.6,
+      "n": 201
+     }
+    },
+    "rule_decisions": 0
+   },
+   "M3/DeepSeek-V4-Flash": {
+    "mission": "M3",
+    "model": "DeepSeek-V4-Flash",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 9,
+     "n": 12,
+     "share": 0.75,
+     "ci": [
+      0.468,
+      0.911
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "clean": 9,
+     "entered_right": 3
+    },
+    "score": 53.0,
+    "collected": 3.33,
+    "returned": 12,
+    "battery": 13.6,
+    "by_scenario": {
+     "medium-1001": true,
+     "medium-1002": false,
+     "medium-1003": false,
+     "medium-1004": true,
+     "medium-1005": true,
+     "medium-1006": true,
+     "hard-1001": true,
+     "hard-1002": true,
+     "hard-1003": true,
+     "hard-1004": true,
+     "hard-1005": false,
+     "hard-1006": true
+    },
+    "llm": {
+     "requests": 194,
+     "exchanges": 219,
+     "first_ok": 166,
+     "repaired": 25,
+     "failed": 3,
+     "no_answer": 3,
+     "first_ok_share": 0.856,
+     "failed_share": 0.015,
+     "errors": {
+      "ответ обрезан": 25,
+      "ответ не JSON": 24,
+      "нет ответа модели": 3,
+      "нарушена схема": 1
+     },
+     "tokens": {
+      "prompt": 2642,
+      "completion": 1554
+     },
+     "retried": 4,
+     "latency_s": {
+      "median": 24.5,
+      "mean": 28.8,
+      "max": 88.0,
+      "n": 191
+     }
+    },
+    "rule_decisions": 3,
+    "minus_main": {
+     "diff": -0.167,
+     "ci": [
+      -0.457,
+      0.148
+     ]
+    }
+   },
+   "M3/qwen3.6-35b-a3b": {
+    "mission": "M3",
+    "model": "qwen3.6-35b-a3b",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 11,
+     "n": 12,
+     "share": 0.917,
+     "ci": [
+      0.646,
+      0.985
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "clean": 11,
+     "entered_right": 1
+    },
+    "score": 47.8,
+    "collected": 2.83,
+    "returned": 12,
+    "battery": 11.3,
+    "by_scenario": {
+     "medium-1001": true,
+     "medium-1002": true,
+     "medium-1003": true,
+     "medium-1004": true,
+     "medium-1005": true,
+     "medium-1006": true,
+     "hard-1001": true,
+     "hard-1002": true,
+     "hard-1003": false,
+     "hard-1004": true,
+     "hard-1005": true,
+     "hard-1006": true
+    },
+    "llm": {
+     "requests": 200,
+     "exchanges": 205,
+     "first_ok": 194,
+     "repaired": 5,
+     "failed": 1,
+     "no_answer": 1,
+     "first_ok_share": 0.97,
+     "failed_share": 0.005,
+     "errors": {
+      "ответ обрезан": 5,
+      "ответ не JSON": 5,
+      "нет ответа модели": 1
+     },
+     "tokens": {
+      "prompt": 2448,
+      "completion": 1606
+     },
+     "retried": 8,
+     "latency_s": {
+      "median": 25.5,
+      "mean": 28.3,
+      "max": 86.9,
+      "n": 192
+     }
+    },
+    "rule_decisions": 1,
+    "minus_main": {
+     "diff": 0.0,
+     "ci": [
+      -0.279,
+      0.279
+     ]
+    }
+   },
+   "M4/rule": {
+    "mission": "M4",
+    "model": "rule",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 0,
+     "n": 12,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.243
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "no_reaction": 11,
+     "premature_return": 1
+    },
+    "score": 70.2,
+    "collected": 5.58,
+    "returned": 12,
+    "battery": 7.2,
+    "by_scenario": {
+     "hard-1001": false,
+     "hard-1003": false,
+     "hard-1009": false,
+     "hard-1013": false,
+     "hard-1015": false,
+     "hard-1016": false,
+     "hard-1018": false,
+     "hard-1019": false,
+     "hard-1020": false,
+     "hard-1022": false,
+     "hard-1023": false,
+     "hard-1024": false
+    }
+   },
+   "M4/qwen3.8-flash-next": {
+    "mission": "M4",
+    "model": "qwen3.8-flash-next",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 12,
+     "n": 12,
+     "share": 1.0,
+     "ci": [
+      0.757,
+      1.0
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "returned_on_penalty": 12
+    },
+    "score": 45.2,
+    "collected": 2.67,
+    "returned": 12,
+    "battery": 30.9,
+    "by_scenario": {
+     "hard-1001": true,
+     "hard-1003": true,
+     "hard-1009": true,
+     "hard-1013": true,
+     "hard-1015": true,
+     "hard-1016": true,
+     "hard-1018": true,
+     "hard-1019": true,
+     "hard-1020": true,
+     "hard-1022": true,
+     "hard-1023": true,
+     "hard-1024": true
+    },
+    "llm": {
+     "requests": 126,
+     "exchanges": 127,
+     "first_ok": 125,
+     "repaired": 1,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.992,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ не JSON": 1
+     },
+     "tokens": {
+      "prompt": 2467,
+      "completion": 1095
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": 24.7,
+      "mean": 26.9,
+      "max": 71.7,
+      "n": 126
+     }
+    },
+    "rule_decisions": 0
+   },
+   "M4/DeepSeek-V4-Flash": {
+    "mission": "M4",
+    "model": "DeepSeek-V4-Flash",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 12,
+     "n": 12,
+     "share": 1.0,
+     "ci": [
+      0.757,
+      1.0
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "returned_on_penalty": 12
+    },
+    "score": 45.2,
+    "collected": 2.67,
+    "returned": 12,
+    "battery": 31.0,
+    "by_scenario": {
+     "hard-1001": true,
+     "hard-1003": true,
+     "hard-1009": true,
+     "hard-1013": true,
+     "hard-1015": true,
+     "hard-1016": true,
+     "hard-1018": true,
+     "hard-1019": true,
+     "hard-1020": true,
+     "hard-1022": true,
+     "hard-1023": true,
+     "hard-1024": true
+    },
+    "llm": {
+     "requests": 125,
+     "exchanges": 129,
+     "first_ok": 121,
+     "repaired": 4,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.968,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ обрезан": 4,
+      "ответ не JSON": 4
+     },
+     "tokens": {
+      "prompt": 2634,
+      "completion": 1182
+     },
+     "retried": 1,
+     "latency_s": {
+      "median": 17.5,
+      "mean": 21.6,
+      "max": 87.9,
+      "n": 125
+     }
+    },
+    "rule_decisions": 0,
+    "minus_main": {
+     "diff": 0.0,
+     "ci": [
+      -0.243,
+      0.243
+     ]
+    }
+   },
+   "M4/qwen3.6-35b-a3b": {
+    "mission": "M4",
+    "model": "qwen3.6-35b-a3b",
+    "runs": 12,
+    "planned": 12,
+    "success": {
+     "k": 12,
+     "n": 12,
+     "share": 1.0,
+     "ci": [
+      0.757,
+      1.0
+     ]
+    },
+    "unverified": 0,
+    "outcomes": {
+     "returned_on_penalty": 12
+    },
+    "score": 45.2,
+    "collected": 2.67,
+    "returned": 12,
+    "battery": 31.0,
+    "by_scenario": {
+     "hard-1001": true,
+     "hard-1003": true,
+     "hard-1009": true,
+     "hard-1013": true,
+     "hard-1015": true,
+     "hard-1016": true,
+     "hard-1018": true,
+     "hard-1019": true,
+     "hard-1020": true,
+     "hard-1022": true,
+     "hard-1023": true,
+     "hard-1024": true
+    },
+    "llm": {
+     "requests": 125,
+     "exchanges": 127,
+     "first_ok": 123,
+     "repaired": 2,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.984,
+     "failed_share": 0.0,
+     "errors": {
+      "ответ не JSON": 2
+     },
+     "tokens": {
+      "prompt": 2466,
+      "completion": 1109
+     },
+     "retried": 9,
+     "latency_s": {
+      "median": 20.2,
+      "mean": 25.9,
+      "max": 82.6,
+      "n": 116
+     }
+    },
+    "rule_decisions": 0,
+    "minus_main": {
+     "diff": 0.0,
+     "ci": [
+      -0.243,
+      0.243
+     ]
+    }
+   },
+   "all/qwen3.8-flash-next": {
+    "mission": "all",
+    "model": "qwen3.8-flash-next",
+    "success": {
+     "k": 46,
+     "n": 48,
+     "share": 0.958,
+     "ci": [
+      0.86,
+      0.988
+     ]
+    },
+    "llm": {
+     "requests": 0,
+     "exchanges": 0,
+     "first_ok": 0,
+     "repaired": 0,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.0,
+     "failed_share": 0.0,
+     "errors": {},
+     "tokens": {
+      "prompt": 0,
+      "completion": 0
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": null,
+      "mean": null,
+      "max": null,
+      "n": 0
+     }
+    }
+   },
+   "all/DeepSeek-V4-Flash": {
+    "mission": "all",
+    "model": "DeepSeek-V4-Flash",
+    "success": {
+     "k": 45,
+     "n": 48,
+     "share": 0.938,
+     "ci": [
+      0.832,
+      0.979
+     ]
+    },
+    "llm": {
+     "requests": 0,
+     "exchanges": 0,
+     "first_ok": 0,
+     "repaired": 0,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.0,
+     "failed_share": 0.0,
+     "errors": {},
+     "tokens": {
+      "prompt": 0,
+      "completion": 0
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": null,
+      "mean": null,
+      "max": null,
+      "n": 0
+     }
+    },
+    "minus_main": {
+     "diff": -0.02,
+     "ci": [
+      -0.13,
+      0.086
+     ]
+    }
+   },
+   "all/qwen3.6-35b-a3b": {
+    "mission": "all",
+    "model": "qwen3.6-35b-a3b",
+    "success": {
+     "k": 46,
+     "n": 48,
+     "share": 0.958,
+     "ci": [
+      0.86,
+      0.988
+     ]
+    },
+    "llm": {
+     "requests": 0,
+     "exchanges": 0,
+     "first_ok": 0,
+     "repaired": 0,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 0.0,
+     "failed_share": 0.0,
+     "errors": {},
+     "tokens": {
+      "prompt": 0,
+      "completion": 0
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": null,
+      "mean": null,
+      "max": null,
+      "n": 0
+     }
+    },
+    "minus_main": {
+     "diff": 0.0,
+     "ci": [
+      -0.102,
+      0.102
+     ]
+    }
+   }
+  }
+ },
+ "L3e": {
+  "generated": "2026-10-08T18:36:36",
+  "arms": {
+   "qwen3.8-flash-next": {
+    "cases": 125,
+    "done": 125,
+    "first_ok": {
+     "k": 102,
+     "n": 125,
+     "share": 0.816,
+     "ci": [
+      0.739,
+      0.874
+     ]
+    },
+    "accepted": {
+     "k": 118,
+     "n": 125,
+     "share": 0.944,
+     "ci": [
+      0.889,
+      0.973
+     ]
+    },
+    "fallback": 7,
+    "first_errors": {
+     "text: нужно от 2 до 4 предложений, а сейчас 5": 16,
+     "text: нет ни одного измеренного значения (постоять 2 секунды": 7
+    },
+    "cause_same_as_code": {
+     "k": 118,
+     "n": 118,
+     "share": 1.0,
+     "ci": [
+      0.968,
+      1.0
+     ]
+    },
+    "cause_mismatch": {},
+    "with_missing_number": {
+     "k": 0,
+     "n": 118,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.032
+     ]
+    },
+    "with_derived_number": {
+     "k": 0,
+     "n": 118,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.032
+     ]
+    },
+    "contradicts_or_invents": {
+     "k": 0,
+     "n": 118,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.032
+     ]
+    },
+    "missing_numbers": {},
+    "chars": 390,
+    "llm": {
+     "requests": 125,
+     "exchanges": 148,
+     "first_ok": 102,
+     "repaired": 16,
+     "failed": 7,
+     "no_answer": 0,
+     "first_ok_share": 0.816,
+     "failed_share": 0.056,
+     "errors": {
+      "нарушена схема": 30
+     },
+     "tokens": {
+      "prompt": 1506,
+      "completion": 807
+     },
+     "retried": 10,
+     "latency_s": {
+      "median": 14.1,
+      "mean": 21.0,
+      "max": 81.1,
+      "n": 134
+     }
+    },
+    "judge": {
+     "requests": 118,
+     "exchanges": 118,
+     "first_ok": 118,
+     "repaired": 0,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 1.0,
+     "failed_share": 0.0,
+     "errors": {},
+     "tokens": {
+      "prompt": 389,
+      "completion": 203
+     },
+     "retried": 9,
+     "latency_s": {
+      "median": 4.0,
+      "mean": 12.4,
+      "max": 83.7,
+      "n": 107
+     }
+    }
+   },
+   "DeepSeek-V4-Flash": {
+    "cases": 125,
+    "done": 125,
+    "first_ok": {
+     "k": 105,
+     "n": 125,
+     "share": 0.84,
+     "ci": [
+      0.766,
+      0.894
+     ]
+    },
+    "accepted": {
+     "k": 118,
+     "n": 125,
+     "share": 0.944,
+     "ci": [
+      0.889,
+      0.973
+     ]
+    },
+    "fallback": 7,
+    "first_errors": {
+     "text: нужно от 2 до 4 предложений, а сейчас 5": 14,
+     "text: нет ни одного измеренного значения (постоять 2 секунды": 7
+    },
+    "cause_same_as_code": {
+     "k": 118,
+     "n": 118,
+     "share": 1.0,
+     "ci": [
+      0.968,
+      1.0
+     ]
+    },
+    "cause_mismatch": {},
+    "with_missing_number": {
+     "k": 0,
+     "n": 118,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.032
+     ]
+    },
+    "with_derived_number": {
+     "k": 1,
+     "n": 118,
+     "share": 0.008,
+     "ci": [
+      0.001,
+      0.046
+     ]
+    },
+    "contradicts_or_invents": {
+     "k": 0,
+     "n": 118,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.032
+     ]
+    },
+    "missing_numbers": {},
+    "chars": 421,
+    "llm": {
+     "requests": 125,
+     "exchanges": 145,
+     "first_ok": 105,
+     "repaired": 13,
+     "failed": 7,
+     "no_answer": 0,
+     "first_ok_share": 0.84,
+     "failed_share": 0.056,
+     "errors": {
+      "нарушена схема": 27
+     },
+     "tokens": {
+      "prompt": 1543,
+      "completion": 617
+     },
+     "retried": 3,
+     "latency_s": {
+      "median": 12.0,
+      "mean": 16.1,
+      "max": 70.5,
+      "n": 142
+     }
+    },
+    "judge": {
+     "requests": 118,
+     "exchanges": 118,
+     "first_ok": 118,
+     "repaired": 0,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 1.0,
+     "failed_share": 0.0,
+     "errors": {},
+     "tokens": {
+      "prompt": 397,
+      "completion": 190
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": 9.8,
+      "mean": 13.8,
+      "max": 51.4,
+      "n": 118
+     }
+    },
+    "first_ok_minus_main": {
+     "diff": 0.024,
+     "ci": [
+      -0.07,
+      0.118
+     ]
+    }
+   },
+   "qwen3.6-35b-a3b": {
+    "cases": 125,
+    "done": 125,
+    "first_ok": {
+     "k": 105,
+     "n": 125,
+     "share": 0.84,
+     "ci": [
+      0.766,
+      0.894
+     ]
+    },
+    "accepted": {
+     "k": 118,
+     "n": 125,
+     "share": 0.944,
+     "ci": [
+      0.889,
+      0.973
+     ]
+    },
+    "fallback": 7,
+    "first_errors": {
+     "text: нужно от 2 до 4 предложений, а сейчас 5": 14,
+     "text: нет ни одного измеренного значения (постоять 2 секунды": 7
+    },
+    "cause_same_as_code": {
+     "k": 118,
+     "n": 118,
+     "share": 1.0,
+     "ci": [
+      0.968,
+      1.0
+     ]
+    },
+    "cause_mismatch": {},
+    "with_missing_number": {
+     "k": 0,
+     "n": 118,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.032
+     ]
+    },
+    "with_derived_number": {
+     "k": 0,
+     "n": 118,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.032
+     ]
+    },
+    "contradicts_or_invents": {
+     "k": 0,
+     "n": 118,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.032
+     ]
+    },
+    "missing_numbers": {},
+    "chars": 386,
+    "llm": {
+     "requests": 125,
+     "exchanges": 145,
+     "first_ok": 105,
+     "repaired": 13,
+     "failed": 7,
+     "no_answer": 0,
+     "first_ok_share": 0.84,
+     "failed_share": 0.056,
+     "errors": {
+      "нарушена схема": 27
+     },
+     "tokens": {
+      "prompt": 1497,
+      "completion": 816
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": 16.0,
+      "mean": 20.6,
+      "max": 64.7,
+      "n": 145
+     }
+    },
+    "judge": {
+     "requests": 118,
+     "exchanges": 118,
+     "first_ok": 118,
+     "repaired": 0,
+     "failed": 0,
+     "no_answer": 0,
+     "first_ok_share": 1.0,
+     "failed_share": 0.0,
+     "errors": {},
+     "tokens": {
+      "prompt": 388,
+      "completion": 200
+     },
+     "retried": 0,
+     "latency_s": {
+      "median": 6.1,
+      "mean": 12.4,
+      "max": 52.2,
+      "n": 118
+     }
+    },
+    "first_ok_minus_main": {
+     "diff": 0.024,
+     "ci": [
+      -0.07,
+      0.118
+     ]
+    }
+   }
+  }
+ },
+ "network_calls": {
+  "qwen3.8-flash-next": 3181,
+  "DeepSeek-V4-Flash": 1498,
+  "qwen3.6-35b-a3b": 1439
+ }
+}

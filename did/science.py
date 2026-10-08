@@ -15,6 +15,19 @@ import numpy as np
 
 OTHER = 'other'      # объяснение «причина не из списка»: предсказаний у него нет
 
+# Как выбирается следующий опыт среди допустимых (абляция R12, research/findings/R12.md). Допустимый — ещё не
+# проведён, укладывается в бюджет заряда и обещает не меньше min_gain бит. Всё остальное в расследовании
+# (объяснения, пересчёт вероятностей, остановка, бюджет) от способа выбора не зависит.
+CHOICES = {
+    'gain': 'наибольшая ожидаемая польза на единицу заряда (как всегда было)',
+    'bits': 'наибольшая ожидаемая польза, цена не учитывается',
+    'random': 'случайный из допустимых',
+    'cheapest': 'самый дешёвый из допустимых',
+    'fixed': 'первый допустимый в порядке объявления: постоять, проехать прямо, развернуться',
+    'worst': 'наименее различающий из допустимых (нижняя граница)',
+    'blind': 'случайный из непроведённых и посильных по заряду, польза не считается вовсе',
+}
+
 
 @dataclass
 class Alternative:
@@ -62,6 +75,11 @@ class Inquiry:
         self.action = ''
         self.critique = []
         self.note = ''
+        self.follow = None            # L3: опыты в порядке плана автора (список id) вместо выбора по пользе
+        self.llm = None               # L3: что предложили автор и критик (для сверки с выбором расчёта)
+        self.policy, self.rng = 'gain', None      # способ выбора опыта (CHOICES) и генератор для случайных способов
+        self.stop = None              # почему опыты кончились: settled | max_tests | budget | no_gain | no_tests | ...
+        self.steps = []               # каждый выбор: что было допустимо, что выбрано (в запись прогона, агент не читает)
         for test in self.tests:
             test.gain_bits = round(self.gain(test), 3)
 
@@ -118,23 +136,94 @@ class Inquiry:
         best, p = self.best
         return p >= self.accept and best != OTHER
 
+    def peek(self):
+        """Что выбрал бы choose() сейчас. Генератор случайного выбора, запись шагов и причина остановки не меняются
+        (оценки пользы опытов обновляются, как и при choose): это справка для записи, а не решение."""
+        stop, n = self.stop, len(self.steps)
+        state = self.rng.bit_generator.state if self.rng is not None else None
+        try:
+            return self.choose()
+        finally:
+            self.stop = stop
+            del self.steps[n:]
+            if state is not None:
+                self.rng.bit_generator.state = state
+
     def choose(self):
-        """Следующий опыт: наибольшая польза на единицу заряда. None — опыты больше не нужны или невозможны."""
-        if self.conclusion or self.settled or self.maneuvers >= self.max_tests:
+        """Следующий опыт: наибольшая польза на единицу заряда. None — опыты больше не нужны или невозможны.
+
+        Другие способы выбора (self.policy, см. CHOICES) нужны только для сравнения с этим.
+        """
+        if self.conclusion:
             return None
-        best, score = None, 0.0
+        if self.settled or self.maneuvers >= self.max_tests:
+            self.stop = 'settled' if self.settled else 'max_tests'
+            return None
+        if self.follow is not None:
+            return self._next_planned()
+        blind = self.policy == 'blind'
+        options, left, costly = [], 0, []
         for test in self.tests:
             if test.measured is not None and (not test.repeatable or test.repeats >= 2):
                 continue
+            left += 1
             if self.spent + test.cost > self.budget:
+                costly.append(test)
+                continue
+            if blind:
+                options.append(test)
                 continue
             test.gain_bits = round(self.gain(test), 3)
             if test.gain_bits < self.min_gain:
                 continue
-            value = test.gain_bits / (test.cost + 0.05)
-            if value > score:
-                best, score = test, value
+            options.append(test)
+        best = self._pick(options)
+        # Не по карману: записанная польза такого опыта не обновляется (как и раньше), считается только для учёта.
+        over = [{'id': x.id, 'gain_bits': round(self.gain(x), 3), 'cost': round(x.cost, 3)} for x in costly]
+        if best is None:
+            useful = [x for x in over if blind or x['gain_bits'] >= self.min_gain]
+            self.stop = 'no_tests' if not left else 'budget' if useful else 'no_gain'
+        self.steps.append({'options': [{'id': x.id, 'gain_bits': x.gain_bits, 'cost': round(x.cost, 3),
+                                        'kind': x.action.get('kind')} for x in options],
+                           'over_budget': over, 'chosen': best.id if best else None,
+                           'posterior': {k: round(v, 3) for k, v in self.posterior.items()}})
         return best
+
+    def _next_planned(self):
+        """Следующий опыт из плана автора: первый ещё не проведённый, который проходит по бюджету.
+
+        Польза не проверяется: что и в каком порядке мерить, решил автор. План исчерпан — опытов больше нет.
+        """
+        by_id = {x.id: x for x in self.tests}
+        for tid in self.follow:
+            test = by_id.get(tid)
+            if test is None or test.measured is not None or self.spent + test.cost > self.budget:
+                continue
+            test.gain_bits = round(self.gain(test), 3)
+            return test
+        return None
+
+    def _pick(self, options):
+        if not options:
+            return None
+        if self.policy == 'gain':
+            best, score = None, 0.0
+            for test in options:
+                value = test.gain_bits / (test.cost + 0.05)
+                if value > score:
+                    best, score = test, value
+            return best
+        if self.policy in ('random', 'blind'):
+            return options[int(self.rng.integers(len(options)))]
+        if self.policy == 'bits':
+            return max(options, key=lambda x: x.gain_bits)
+        if self.policy == 'cheapest':
+            return min(options, key=lambda x: x.cost)
+        if self.policy == 'worst':
+            return min(options, key=lambda x: x.gain_bits)
+        if self.policy == 'fixed':
+            return options[0]
+        raise ValueError(f'Unknown inquiry choice: {self.policy}')
 
     def record(self, test_id, value, sigma, t, cost=None, maneuver=True):
         """Результат опыта: пересчитать вероятности объяснений. cost — сколько заряда ушло на самом деле."""
@@ -191,6 +280,7 @@ class Inquiry:
                        'chosen': x.measured is not None, 'measured': x.measured} for x in self.tests],
             'conclusion': self.conclusion, 'action': self.action, 'source': self.source,
             'critique': self.critique, 'note': self.note,
+            **({'llm': self.llm} if self.llm else {}),
         }
 
     def context(self, state):

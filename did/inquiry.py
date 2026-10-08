@@ -329,6 +329,9 @@ class Investigator:
             self.active = inquiry
         self.inquiries.append(inquiry)
         inquiry.held, inquiry.est = held or [], est or {}
+        cfg = self.a.cfg                # способ выбора опыта; случайный воспроизводим: зерно — сценарий и номер расследования
+        inquiry.policy = cfg.inquiry_choice
+        inquiry.rng = np.random.default_rng([cfg.inquiry_seed, len(self.inquiries)])
         self._susp = []
         if self.roles is not None and hasattr(obs, 'battery'):     # мгновенная сверка у образца идёт без обсуждения
             self._deliberate(inquiry, obs)
@@ -346,8 +349,22 @@ class Investigator:
         state = {'battery': round(obs.battery, 1), 'return_cost': round(a._home_cost(obs.x, obs.y), 1),
                  'carried': a.collected, 'time_s': round(obs.t, 1),
                  'last_penalty_s_ago': round(obs.t - self._penalty_t, 1) if self._penalty_t > 0 else None}
+        first = q.peek()                     # что выбрал бы расчёт до того, как автор сузил список
+        offered = [x.id for x in q.alternatives]
         d = deliberate(self.roles, q.context(state))
         q.restrict(consider=d.proposal.consider, order=[step.test for step in d.proposal.plan])
+        if a.cfg.inquiry_follow_plan and d.proposal.source == 'llm':
+            q.follow = [step.test for step in d.proposal.plan]
+        steps = lambda p: [s.test for s in p.plan]      # noqa: E731
+        q.llm = {'offered': offered, 'tests_offered': [x.id for x in q.tests], 'code_first': first.id if first else None,
+                 'draft': {'source': d.draft.source, 'consider': list(d.draft.consider), 'plan': steps(d.draft),
+                           'extra': [{'statement': x.statement, 'why': x.why} for x in d.draft.extra]},
+                 'critic': {'source': d.critique.source, 'verdict': d.critique.verdict,
+                            'issues': [i.model_dump() for i in d.critique.issues]},
+                 'revised': d.revised,
+                 'final': {'source': d.proposal.source, 'consider': list(d.proposal.consider), 'plan': steps(d.proposal),
+                           'extra': [{'statement': x.statement, 'why': x.why} for x in d.proposal.extra]},
+                 'open_issues': len(d.open_issues), 'follow': q.follow is not None, 'latency_ms': d.latency_ms}
         q.source = d.proposal.source
         q.note = d.proposal.rationale
         q.critique = [{'issue': i.text, 'kind': i.kind, 'fix': i.fix, 'resolved': i not in (d.open_issues or [])}
@@ -385,6 +402,7 @@ class Investigator:
         if self.run is None:
             test = q.choose()
             if test is None or a._returning and test.action['kind'] != 'pause':
+                q.stop = q.stop or 'returning'
                 self._conclude(obs)
                 return False
             self.run = {'test': test, 'phase': 'settle', 't': obs.t}
@@ -519,7 +537,11 @@ class Investigator:
         c = q.close(t, action, veto=veto)
         if self.roles is not None:
             from .llm_roles import explain
-            text = explain(self.roles, q.to_dict())
+            # Рассказчик получает расследование без служебной записи обсуждения (в ней время ответов модели).
+            text = explain(self.roles, {k: v for k, v in q.to_dict().items() if k != 'llm'})
+            # Обмены рассказчика лежат при расследовании, а не в общей ленте: сводка llm_stats прежних опытов не меняется.
+            q.llm = {**(q.llm or {}), 'explain': {'source': text.source, 'error': text.error, 'text': str(text),
+                                                  'latency_ms': text.latency_ms, 'exchanges': list(text.exchanges)}}
             if str(text).strip():
                 q.note = (q.note + ' ' if q.note else '') + 'Объяснение модели: ' + str(text)
                 a.journal.add(t, 'llm', f'{q.id}. {text}', inquiry=q.id)
@@ -915,4 +937,8 @@ class Investigator:
 
     def export(self):
         return {'inquiries': [q.to_dict() for q in self.inquiries], 'energy_model': self.model.summary(),
-                'fault_durations': self.durations}
+                'fault_durations': self.durations,
+                # как выбирались опыты (R12): по одной записи на расследование, в том же порядке
+                'choices': [{'id': q.id, 'policy': q.policy, 'stop': q.stop, 'maneuvers': q.maneuvers,
+                             'spent': round(q.spent, 3), 'budget': round(q.budget, 3), 'steps': q.steps}
+                            for q in self.inquiries]}
