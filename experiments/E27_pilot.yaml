@@ -1,0 +1,48 @@
+title: Чего стоит выбор опыта по ожидаемой пользе — отладка на сценариях 1–80
+kind: science
+question: >-
+  Помогает ли исследователю именно выбор опыта по ожидаемой пользе на единицу заряда, или любой допустимый
+  опыт дал бы те же выводы за ту же цену?
+hypothesis: >-
+  При выборе по ожидаемой пользе на единицу заряда расследование приходит к выводу за меньшее число опытов
+  и меньший заряд, чем при случайном выборе из допустимых, а доля верных выводов не ниже.
+method: >-
+  Один и тот же исследователь (scientist) проходит одни и те же сценарии, отличается только способ выбора
+  следующего опыта среди допустимых: по пользе на единицу заряда (как сейчас), по пользе без учёта цены,
+  случайно, самый дешёвый, в порядке объявления, наименее различающий и случайно без расчёта пользы.
+  Набор объяснений, пересчёт вероятностей, критерий остановки и бюджет одинаковы. Выводы сверяются со
+  скрытой правдой сценария после прогона. Подсчёт по расследованиям — tools/r12_table.py.
+expect: >-
+  Разница, если она есть, набирается в расследованиях расхода заряда: только в них допустимых опытов
+  бывает больше одного.
+refute: >-
+  Гипотеза опровергнута, если 95% интервалы парных разностей с вариантом random по числу опытов на
+  расследование, по заряду на расследование и по доле верных выводов включают ноль.
+arms:
+  - {id: gain, label: По пользе на единицу заряда (как сейчас), agent: scientist}
+  - {id: bits, label: По пользе без учёта цены, agent: scientist, config: {inquiry_choice: bits}}
+  - {id: random, label: Случайный из допустимых, agent: scientist, config: {inquiry_choice: random}}
+  - {id: cheapest, label: Самый дешёвый, agent: scientist, config: {inquiry_choice: cheapest}}
+  - {id: fixed, label: В порядке объявления, agent: scientist, config: {inquiry_choice: fixed}}
+  - {id: worst, label: Наименее различающий, agent: scientist, config: {inquiry_choice: worst}}
+  - {id: blind, label: Случайный без расчёта пользы, agent: scientist, config: {inquiry_choice: blind}}
+levels: [medium, hard]
+seeds: 80
+seed_start: 1
+conditions:
+  - id: base
+    label: Базовые правила
+    rules: {}
+  - id: science
+    label: Научные правила
+    rules:
+      drain_per_rad: 0.12
+      load_drain: 0.05
+      battery_sigma: 0.02
+      faults: true
+      hazard_battery_hit: 0.0
+metrics: [inq_total, inq_energy, inq_correct, inq_wrong, inq_insufficient, score, samples_share, returned, battery_used]
+claims:
+  - {metric: inq_energy, a: gain, b: random, text: Выбор по пользе тратит на опыты меньше заряда, better: lower}
+  - {metric: score, a: gain, b: random, text: Выбор по пользе даёт больше очков, better: higher}
+  - {metric: inq_wrong, a: gain, b: random, text: Выбор по пользе даёт меньше ошибочных выводов, better: lower}
