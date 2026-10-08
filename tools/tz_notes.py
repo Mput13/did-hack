@@ -59,6 +59,26 @@ def blocks():
     return out
 
 
+def skills_page():
+    """Все скиллы из .claude/skills одним листом: читать и отмечать замечания прямо в браузере."""
+    import html
+    parts = []
+    for path in sorted((ROOT / '.claude' / 'skills').glob('*/SKILL.md')):
+        text = path.read_text(encoding='utf-8')
+        parts.append(f'<section><h2>{html.escape(path.parent.name)}</h2><div class="path">{html.escape(str(path.relative_to(ROOT)))}</div>'
+                     f'<pre>{html.escape(text)}</pre></section>')
+    return ('<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+            '<title>DID Hack — скиллы ассистента</title><style>body{margin:0 auto;max-width:900px;padding:12px 16px 80px;'
+            'font:15px/1.55 system-ui,-apple-system,sans-serif;color:#14181c;background:#fff}'
+            '@media (prefers-color-scheme: dark){body{color:#e9ecef;background:#15171a}}h1{font-size:22px}h2{font-size:18px;margin:28px 0 2px}'
+            '.path{font:12px ui-monospace,Menlo,monospace;opacity:.65;margin-bottom:6px}a{color:#eb6834}'
+            'pre{font:13px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word;background:rgba(127,127,127,.1);'
+            'border-radius:10px;padding:12px 14px;margin:0}</style></head><body><h1>Скиллы ассистента — на просмотр</h1>'
+            '<p><a href="/check">← сверка с требованиями</a> · <a href="/">текст условия</a></p>'
+            '<p>Пять скиллов собраны из того, что в этой работе повторялось десятки раз. В репозиторий пока не закоммичены.</p>'
+            + ''.join(parts) + '</body></html>')
+
+
 class Handler(BaseHTTPRequestHandler):
 
     def _send(self, body, ctype='application/json; charset=utf-8', code=200):
@@ -73,6 +93,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith('/api/state'):
             return self._send(json.dumps({'blocks': blocks(), 'questions': notes()}, ensure_ascii=False))
+        if self.path.startswith('/skills'):         # скиллы ассистента — на просмотр
+            return self._send(skills_page(), 'text/html; charset=utf-8')
         if self.path.startswith('/check'):          # сверка с требованиями — отдельная страница рядом с текстом условия
             return self._send((ROOT / 'docs' / 'requirements_check.html').read_bytes(), 'text/html; charset=utf-8')
         if self.path.split('?')[0] in ('/', '/index.html'):
