@@ -33,7 +33,7 @@ MAX_PAUSE_S = 10.0           # потолок паузы между повтор
 PROMPTS = Path(__file__).resolve().parent / 'prompts'
 PROMPT_PATH = PROMPTS / 'planner_system.md'
 SUBGOAL_TYPES = ('investigate', 'explore', 'goto', 'return_base')
-CLIENT_KINDS = ('mock', 'http', 'ollama', 'codex', 'openrouter')
+CLIENT_KINDS = ('mock', 'http', 'ollama', 'codex')
 OLLAMA_URL = 'http://127.0.0.1:11434/v1'
 OLLAMA_MODEL = 'qwen2.5:3b'
 
@@ -824,8 +824,7 @@ def make_client(kind='mock', **opts):
              3–4 тыс. токенов: если ответы портятся, запустите сервер с OLLAMA_CONTEXT_LENGTH=8192;
     codex  — GPT по подписке через Codex CLI: model ('gpt-6-luna'), effort ('low'), timeout_s (120),
              cache_dir, max_calls (см. did.llm_codex.CodexCliClient); ответы всегда кэшируются на диск.
-    openrouter — Jev Router через OpenRouter (did.llm_openrouter): только эта модель, учёт расходов и потолок.
-    Для http, ollama и openrouter cache=True кладёт ответы в тот же кэш (повторяемость прогонов).
+    Для http и ollama cache=True кладёт ответы в тот же кэш (повторяемость прогонов).
     Ошибка настроек — LLMError.
     """
     opts = dict(opts)
@@ -839,10 +838,7 @@ def make_client(kind='mock', **opts):
     if kind not in CLIENT_KINDS:
         raise LLMError(f"неизвестный вид клиента «{kind}»; есть: {', '.join(CLIENT_KINDS)}")
     cache = opts.pop('cache', False)
-    if kind == 'openrouter':               # Jev Router: единственная платная модель, с потолком расходов
-        from .llm_openrouter import JevClient
-        client = JevClient(**opts)
-    elif kind == 'ollama':
+    if kind == 'ollama':
         client = ChatClient(**{'base_url': os.environ.get('DID_OLLAMA_URL') or OLLAMA_URL, 'api_key': 'ollama',
                                'model': os.environ.get('DID_OLLAMA_MODEL') or OLLAMA_MODEL, 'timeout_s': 120,
                                'max_retries': 1, 'use_schema': True, **opts})
