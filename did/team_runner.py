@@ -170,7 +170,8 @@ def merge_parts(parts, mode, battery_start=None):
     Столкновения роботов друг с другом (robot_contacts) берутся только у судьи: он один видит обоих на общих
     часах. Нет его итога — показатель не измерен (None), а не ноль: из суммы столкновений роботов его не
     вывести, туда входят стены и контакты с уже закончившим роботом. Зазор min_gap_m — тоже от судьи; нет —
-    по путям агентов, приведённым к общим временам (min_gap_track_m считается всегда).
+    по путям агентов, приведённым к общим временам (min_gap_track_m считается всегда). Итог судьи, снятый
+    раньше конца прогона команды (judge_t меньше time), не используется вовсе: он измерил не весь прогон.
     """
     parts = [dict(p) for p in parts]
     trace = dict(parts[0])
@@ -186,6 +187,12 @@ def merge_parts(parts, mode, battery_start=None):
     total['battery_used'] = round(len(parts) * start - total['battery_left'], 2)
     judged = [p['judge'] for p in parts if p.get('judge')]
     last = max(judged, key=lambda j: j.get('t', 0.0)) if judged else {}
+    # Итог судьи годится, только если он снят не раньше конца прогона команды (после него роботы стоят).
+    # Итог старше — судья замолчал, и конец прогона им не измерен: это не «ноль контактов».
+    total['judge_t'] = last.get('t')
+    covered = last.get('t') is not None and last['t'] >= total['time']
+    if not covered:
+        last = {}
     total['robot_contacts'] = last.get('robot_contacts')
     total['same_target_s'] = None                 # считается только в быстром симуляторе: там видны планы обоих
     track_gap = min_gap(robots[0]['track'], robots[1]['track']) if len(robots) > 1 else None

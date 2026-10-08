@@ -416,6 +416,17 @@ def test_merged_gazebo_trace_without_judge_total_is_not_zero_contacts():
     assert (r['min_gap_m'], r['min_gap_source']) == (pytest.approx(0.0), 'tracks')
 
 
+def test_stale_judge_total_does_not_cover_the_whole_run():
+    """Судья замолчал на первой секунде, роботы ездили десять: его ноль контактов — не итог всего прогона."""
+    t = [0.0, 10.0]
+    parts = [_part('tb1', SLOTS[0], t, [0.0, 1.0], judge={'t': 1.0, 'robot_contacts': 0, 'min_gap_m': 0.4}),
+             _part('tb2', SLOTS[1], t, [2.0, 1.0])]
+    r = merge_parts(parts, 'team')['result']
+    assert r['time'] == 10.0 and r['judge_t'] == 1.0
+    assert r['robot_contacts'] is None
+    assert (r['min_gap_m'], r['min_gap_source']) == (pytest.approx(0.0), 'tracks')
+
+
 def test_lab_shows_unmeasured_contacts_and_own_base():
     """Интерфейс не подставляет ноль вместо отсутствующего показателя и показывает базу и поправку своего робота."""
     js = (Path(__file__).resolve().parents[1] / 'lab' / 'views' / 'run.js').read_text(encoding='utf-8')
