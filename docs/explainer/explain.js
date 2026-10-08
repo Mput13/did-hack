@@ -1032,11 +1032,18 @@
     const t = $('llm-real'); if (!t) return;
     const rows = Object.entries(D.llm_real || {});
     if (!rows.length) { t.outerHTML = '<p class="warn">Прогонов с настоящей моделью на момент сборки нет.</p>'; return; }
-    const NAME = { 'gpt-6-luna_v1': 'GPT-6 Luna, первый вариант запроса', 'gpt-6-luna': 'GPT-6 Luna, доработанный запрос и схема ответа', 'qwen2.5-3b': 'Qwen 2.5 (3 млрд параметров), локально на ноутбуке' };
-    const ORDER = ['gpt-6-luna_v1', 'gpt-6-luna', 'qwen2.5-3b'];
-    rows.sort((a, b) => (ORDER.indexOf(a[0]) + 99) % 99 - (ORDER.indexOf(b[0]) + 99) % 99);
-    t.innerHTML = `<thead><tr><th>Модель и запрос</th><th>Обращений</th><th>Годный план с первого раза</th><th>После исправления</th><th>Отказ в запасное правило</th><th>Время ответа, медиана</th><th>Счёт: модель / правило</th></tr></thead><tbody>` +
-      rows.map(([k, v]) => `<tr><td>${NAME[k] || k}</td><td>${v.requests}</td><td><b>${pct(v.first_ok_share)}</b></td><td>${pct(v.repaired_share)}</td><td>${pct(v.fallback_share)}</td><td>${num(v.latency_ms.median / 1000, 0)} с</td><td>${num(v.score_mean_complete, 1)} / ${num(v.rule_score_mean_complete, 1)} <small>(${v.complete_runs} прогонов)</small></td></tr>`).join('') + '</tbody>';
+    const NAME = { 'gpt-6-luna_v1': 'GPT-6 Luna, первый вариант запроса', 'gpt-6-luna': 'GPT-6 Luna, доработанный запрос и схема ответа',
+      'jev-router_800': 'Jev Router, лимит ответа 800 токенов', 'jev-router': 'Jev Router, запас на рассуждение и схема ответа',
+      'mai-qwen3.8-flash-next': 'МАИ: qwen3.8-flash-next', 'mai-qwen3.8-27b': 'МАИ: qwen3.8-27b', 'mai-qwen3.6-35b-a3b': 'МАИ: qwen3.6-35b-a3b',
+      'mai-qwen3.5-122b-a10b': 'МАИ: Qwen3.5-122B-A10B', 'mai-deepseek-v4.1-flash': 'МАИ: deepseek-v4.1-flash', 'mai-deepseek-v4-flash': 'МАИ: DeepSeek-V4-Flash',
+      'qwen2.5-3b': 'Qwen 2.5 (3 млрд), локально — больше не используется' };
+    const ORDER = ['mai-qwen3.8-flash-next', 'mai-qwen3.6-35b-a3b', 'mai-qwen3.8-27b', 'mai-qwen3.5-122b-a10b', 'mai-deepseek-v4.1-flash', 'mai-deepseek-v4-flash',
+      'jev-router', 'jev-router_800', 'gpt-6-luna', 'gpt-6-luna_v1', 'qwen2.5-3b'];
+    const rank = k => { const i = ORDER.indexOf(k); return i < 0 ? 99 : i; };
+    rows.sort((a, b) => rank(a[0]) - rank(b[0]));
+    const same = v => { const d = v.score_diff || []; return d.length ? `${d.filter(x => Math.abs(x) < 0.05).length} из ${d.length}` : '—'; };
+    t.innerHTML = `<thead><tr><th>Модель и запрос</th><th>Обращений</th><th>Годный план с первого раза</th><th>После исправления</th><th>Отказ в запасное правило</th><th>Время ответа, медиана</th><th>Счёт: модель / правило</th><th>Сценариев, где счёт совпал с правилом</th></tr></thead><tbody>` +
+      rows.map(([k, v]) => `<tr><td>${NAME[k] || k}</td><td>${v.requests}</td><td><b>${pct(v.first_ok_share)}</b></td><td>${pct(v.repaired_share)}</td><td>${pct(v.fallback_share)}</td><td>${num(v.latency_ms.median / 1000, 0)} с</td><td>${num(v.score_mean_complete, 1)} / ${num(v.rule_score_mean_complete, 1)} <small>(${v.complete_runs} прогонов)</small></td><td>${same(v)}</td></tr>`).join('') + '</tbody>';
   })();
 
   /* ------------------------------------------------- один такт на настоящих данных */
