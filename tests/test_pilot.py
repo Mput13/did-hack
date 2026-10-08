@@ -8,7 +8,7 @@ import pytest
 from did.arena import load_arena
 from did.config import BASE
 from did.mission_agents import MISSION_AGENTS
-from did.pilot import (PRESETS, RESET_LOST_S, RESET_SYNC_S, FastWorld, Pilot, PilotHub, RunReset, dumps,
+from did.pilot import (PRESETS, RESET_SYNC_S, FastWorld, Pilot, PilotHub, RunReset, dumps,
                        fresh_score)
 
 
@@ -268,7 +268,7 @@ def test_second_press_does_not_send_second_reset_while_first_hangs(arena):
     assert world.sim.judge.t > 4.0                          # часы судьи идут с подтверждённого сброса, не обнулялись
 
 
-def test_new_reset_is_sent_when_previous_was_answered_or_lost(arena):
+def test_new_reset_is_sent_only_after_previous_was_answered(arena):
     world, pilot = _stand(arena, lost=1)
     pilot.command({'cmd': 'mission', 'agent': 'adaptive'})
     world.now += 10.5
@@ -284,7 +284,16 @@ def test_new_reset_is_sent_when_previous_was_answered_or_lost(arena):
     pilot.command({'cmd': 'mission', 'agent': 'adaptive'})
     world.now += 10.5
     _run(world, pilot, lambda: True)
-    world.now += RESET_LOST_S
+    world.now += 600.0                                      # по возрасту вызов не забывается: второго сброса нет
+    assert pilot.command({'cmd': 'mission', 'agent': 'adaptive'})['ok']
+    world.now += 10.5
+    _run(world, pilot, lambda: True)
+    assert world.calls == 1 and pilot.bot is None and pilot.mission['state'] == 'refused'
+    assert 'перезапустите показ' in pilot.mission['reason']
+    world.deliver()                                         # запоздавший вызов исполнился, когда миссии нет
+    for _ in range(20):
+        _run(world, pilot, lambda: True)
+    assert pilot.bot is None and pilot.mode == 'idle'       # под агентом судью никто не сбросил: агента и нет
     assert pilot.command({'cmd': 'mission', 'agent': 'adaptive'})['ok'] and world.calls == 2 and pilot.bot is not None
 
 
