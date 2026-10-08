@@ -18,6 +18,7 @@ from .belief import ChangeDetector, HazardMap, SampleBelief, SensorHealth, SoilM
 from .config import BASE, Rules
 from .explore import rank_points
 from .foresight import Advisor
+from .frugal import Frugal
 from .inquiry import Investigator
 from .journal import Journal
 from .localize import PoseTracker
@@ -90,6 +91,11 @@ class AgentConfig:
     fault_wait_s: float = 120.0       # бюджет ожидания датчика на весь прогон, с
     fault_wait_charge: float = 3.0    # и по заряду, ед. (по показаниям батареи)
     straight_paths: bool = False      # спрямлять путь по клеткам там, где прямая проходима и не дороже
+    # --- правки P2 (research/findings/P2.md, логика — did/frugal.py): по умолчанию выключены; включены в *_v3
+    known_ground: float = 0.0         # насколько дорога к цели избегает пола, по которому робот ещё не ездил (0 — нет)
+    collect_reach: float = 0.25       # сбор — когда образец с уверенностью collect_confidence лежит в этом радиусе, м
+    own_drain: bool = False           # цену дороги поправлять по своим замерам: во сколько раз расход выше расчётного
+    sensor_offset: bool = False       # замечать постоянный сдвиг показаний датчика образцов и поправлять их
     # --- абляция R12 (research/findings/R12.md): как исследователь выбирает опыт; gain — прежнее поведение
     inquiry_choice: str = 'gain'      # gain | bits | random | cheapest | fixed | worst | blind (did.science.CHOICES)
     inquiry_seed: int = 0             # зерно случайного выбора; прогон подставляет номер сценария (did/runner.py)
@@ -97,6 +103,9 @@ class AgentConfig:
     def to_dict(self):
         return asdict(self)
 
+
+# Правки P2, включённые в пресеты *_v3 (подбор — на отладочных сценариях 1–80, research/findings/P2.md).
+V3 = {'sensor_offset': True}
 
 PRESETS = {
     # Контрольный агент: объезд по заранее составленному маршруту, модель мира план не меняет.
@@ -146,6 +155,9 @@ PRESETS = {
     # adaptive_v2 с самокалибровкой датчика и расхода (R14, второй круг).
     'adaptive_cal_v2': AgentConfig(name='adaptive_cal_v2', fault_wait=True, calibrate=True),
     'scientist_v2': AgentConfig(name='scientist_v2', science=True, fault_wait=True),
+    # Версия 3 (research/findings/P2.md): версия 2 плюс правки P2. Значения — в V3 ниже.
+    'adaptive_v3': AgentConfig(name='adaptive_v3', fault_wait=True, **V3),
+    'scientist_v3': AgentConfig(name='scientist_v3', science=True, fault_wait=True, **V3),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
                                avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
@@ -299,6 +311,7 @@ class Agent:
         self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
         self.cal = Calibrator(self) if config.calibrate else None  # проверка допущений о датчике и расходе
         self.guard = SensorGuard(self) if config.fault_wait else None   # пережидание сбоя датчика (did/sensorguard.py)
+        self.frugal = Frugal(self) if Frugal.wanted(config) else None   # правки P2: бережный расход (did/frugal.py)
         self._battery_threshold_triggered = False
         self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
         # R16: пока модель думает, робот действует по правилу, а ответ сверяет с тем, что уже делает.
@@ -491,6 +504,8 @@ class Agent:
         if not self.cfg.learn_soil:
             return
         ratio, predicted, conf = self.soil.observe(x0, y0, x1, y1, spent, dt)
+        if self.frugal:
+            self.frugal.segment(ds, ratio, predicted)   # свой замер: насколько расход выше расчётного
         self._cost_dirty = True
         if self.cfg.fresh_soil:
             self._fresh.append(((x0 + x1) / 2, (y0 + y1) / 2, ds, ratio))
@@ -553,6 +568,10 @@ class Agent:
             z, sigma = self.inv.reading(z, obs, sigma)
             if z is None:                      # датчик залип: карту образцов не трогаем
                 return
+        if self.frugal and self.frugal.offset:
+            z = self.frugal.offset.reading(z, obs)     # постоянный сдвиг показаний: поправить до карты
+            if z is None:
+                return
         if self.cal:
             self.cal.reading(obs, z, sigma)
         else:
@@ -613,7 +632,7 @@ class Agent:
             mult = self._truth
         # Риск опасной зоны — штраф к стоимости клетки: чем вероятнее зона, тем дальше её объезжать.
         danger = 1.0 + self.cfg.hazard_weight * self._risk if self.hazards else None
-        self.graph.set_cost(mult, bias=danger)
+        self.graph.set_cost(mult, bias=self.frugal.outbound_bias(danger) if self.frugal else danger)
         # Домой — по проверенному: там, где робот уже ездил, нет ни опасных зон, ни сюрпризов с грунтом.
         # Оракулу грунт известен везде, и надбавка за непроверенный пол ему не нужна.
         if self.cfg.learn_soil and self._truth is None:
@@ -641,7 +660,9 @@ class Agent:
 
     def _per_m(self):
         """Заряд на метр пути: номинал из правил либо то, что исследователь выяснил сам (груз, повороты)."""
-        return self.inv.per_meter() if self.inv else self._floor_per_m()
+        if self.inv:
+            return self.inv.per_meter()
+        return self._floor_per_m() * self.frugal.drain_factor() if self.frugal else self._floor_per_m()
 
     def _floor_per_m(self):
         """Заряд на метр обычного пола: допущение из правил либо измеренное при самокалибровке."""
@@ -1064,7 +1085,7 @@ class Agent:
             sg['key'] = f'sample:{self._n_sample_h}'
             self.journal.open(t, sg['key'], f"образец лежит около ({sg['x']:.1f}; {sg['y']:.1f})",
                               'подъехать вплотную и попробовать собрать', x=sg['x'], y=sg['y'])
-        here = self.belief.prob_within(obs.x, obs.y, 0.25)
+        here = self.belief.prob_within(obs.x, obs.y, self.cfg.collect_reach)
         if t < self._no_collect_until:
             here = min(here, 0.0)                  # пауза после промахов: только подъезжаем и слушаем
         if here >= self.cfg.collect_confidence:
@@ -1099,6 +1120,8 @@ class Agent:
             self._sample_taken(obs)
             if self.inv:
                 self.inv.on_collect(obs.t)
+            if self.frugal and self.frugal.offset:
+                self.frugal.offset.collected(obs.t)
             self.journal.add(obs.t, 'action', f'Сбор в ({obs.x:.2f}; {obs.y:.2f}) при уверенности {confidence:.0%}: '
                              f'образец взят, всего {self.collected} из {self.n_samples}')
             self.journal.close(obs.t, sg.get('key'), 'confirmed', f'образец собран в ({obs.x:.2f}; {obs.y:.2f})')
@@ -1117,6 +1140,8 @@ class Agent:
                 self.journal.add(obs.t, 'alarm', 'Два ложных сбора подряд: 15 секунд не собираю и заново набираю показания')
             if self.inv:
                 self.inv.on_miss(obs)
+            if self.frugal and self.frugal.offset:
+                self.frugal.offset.missed(obs.t)
             self.journal.add(obs.t, 'action', f'Сбор в ({obs.x:.2f}; {obs.y:.2f}) при уверенности {confidence:.0%}: '
                              'промах, получен штраф')
             self.journal.close(obs.t, sg.get('key'), 'refuted', 'образца в радиусе 0,3 м не оказалось')
