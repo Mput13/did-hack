@@ -186,13 +186,15 @@ class Pilot:
         if self.slam_nav:
             self.nav = SlamArena()              # пусто, пока SLAM не прислал первую сетку
             self.graph = None
-            self.tracker = SlamPose(world.slam_tf, clock=lambda: self.t)
+            self.tracker = SlamPose(self._slam_reading, clock=lambda: self.t)
         else:
             self.nav = arena
             self.graph = CostGraph(arena)
             self.tracker = PoseTracker(arena) if PoseTracker else None
         self._nav_ver = 0
         self._nav_ms = 0.0
+        self._grid_ver = 0                  # последняя сетка SLAM, проверенная во время миссии
+        self._grid_bad = False              # она непригодна: в миссии это запрет на движение
         self._slam_fault = None             # что не так со SLAM (текст), пока он молчит
         self._slam_jumps = 0                # сколько скачков позы от SLAM уже учтено
         self._progress = None               # срок текущего подъезда: {'leg', 't0', 'limit', 'x', 'y', 'still'}
@@ -249,6 +251,8 @@ class Pilot:
             self._on_event(ev)
 
         if self.mode == 'mission' and self.bot:
+            if self.slam_nav:
+                self._check_grid()                  # до команды агента: по непригодной новой карте ехать нельзя
             self.bot.tick(obs, self._guard)         # агент сам поправляет позу (трекер у нас общий)
             x, y, th = self._to_map(obs.x, obs.y, obs.th)
         elif self.tracker:
@@ -268,6 +272,7 @@ class Pilot:
         if self.slam_nav:
             self._watch_slam()
             if self.mode != 'mission':
+                self._grid_bad = False      # вне миссии пригодность сетки проверяет _refresh_nav
                 self._refresh_nav()         # в миссии агент едет по снимку карты, сделанному на её старте
 
         if self._last_odom is not None:
@@ -294,6 +299,24 @@ class Pilot:
                 self._fresh_run()
             return self._drive(obs, x, y, th)
         self._command(0.0, 0.0)
+
+    def _slam_reading(self):
+        """Что SLAM сообщает SlamPose: поправка позы и возрасты от стенда плюс пригодность последней сетки."""
+        r = self.world.slam_tf()
+        if not self._grid_bad or r is None:
+            return r
+        r = dict(r) if isinstance(r, dict) else {'tf': r, 'tf_age': 0.0, 'grid_age': None}
+        r['grid_ok'] = False
+        return r
+
+    def _check_grid(self):
+        """В миссии агент едет по снимку карты, но каждая свежая сетка проверяется: если на ней роботу негде
+        стоять, SlamPose сообщает о потере положения, и защита агента останавливает езду, как при молчании SLAM."""
+        ver, values = self.world.slam_grid()
+        if values is None or ver == self._grid_ver:
+            return
+        self._grid_ver = ver
+        self._grid_bad = not bool((SlamArena(values, near=self.pose[:2]).clear >= INFLATE).any())
 
     def _refresh_nav(self):
         """Свежая сетка SLAM → новая арена и граф путей. Путь, который перестал быть проходимым, строится заново.
@@ -1004,10 +1027,10 @@ class Pilot:
     def _nav_view(self):
         """Что робот знает о карте в режиме SLAM: сколько пола, сколько границ неувиденного, как идёт объезд,
         жив ли сам SLAM (возраст последней поправки позы и последней сетки)."""
-        key = (self._nav_ver, self.graph is not None)
+        key = (self._nav_ver, self.graph is not None, self._grid_bad)
         if self._nav_cache[0] != key:
             self._nav_cache = (key, {
-                'version': self._nav_ver, 'ready': self.graph is not None,
+                'version': self._nav_ver, 'ready': self.graph is not None and not self._grid_bad,
                 'free_m2': round(float(self.nav.free.sum()) * self.nav.res ** 2, 2),
                 'frontiers': len(frontiers(self.nav)), 'ms': round(self._nav_ms, 1)})
         ex = self._explore

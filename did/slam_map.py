@@ -122,7 +122,8 @@ class SlamPose:
 
     Интерфейс — как у PoseTracker (update, to_map, stats, shift), чтобы пульт и агент не различали,
     кто поправляет позу. Признаки для защиты (did/agent.py::_guard) считаются по данным самого SLAM:
-    - lost — SLAM замолчал: преобразования нет или оно старше TF_STALE_S, либо сетка старше GRID_STALE_S.
+    - lost — SLAM замолчал: преобразования нет или оно старше TF_STALE_S, либо сетка старше GRID_STALE_S,
+      либо последняя сетка непригодна для езды (source() вернул 'grid_ok': False — это решает пульт).
       Последняя поправка при этом продолжает применяться (лучше её ничего нет), но ехать по ней нельзя;
     - relocations — поправка сдвинула позу скачком (больше JUMP_XY или JUMP_TH за такт): SLAM передумал,
       где робот; путь надо строить заново. JUMP_HOLD_S после скачка держится unsure;
@@ -131,7 +132,7 @@ class SlamPose:
 
     source() — что сейчас известно от SLAM: None (преобразования нет), тройка (dx, dy, dth) — свежее
     преобразование «мировой кадр одометрии → карта SLAM», либо словарь {'tf': (dx, dy, dth), 'tf_age': с,
-    'grid_age': с или None} с возрастом последнего сообщения /tf и последней сетки. clock() — текущее
+    'grid_age': с или None, 'grid_ok': bool} с возрастом последнего сообщения /tf и последней сетки. clock() — текущее
     время в секундах (нужно только для срока после скачка).
     """
 
@@ -155,7 +156,7 @@ class SlamPose:
     def update(self, x, y, th, scan=None, scan_pose=None, scan_step=None):
         st = self.stats
         now = self._clock()
-        t, tf_age, grid_age = _reading(self._source())
+        t, tf_age, grid_age, grid_ok = _reading(self._source())
         if t is not None and tf_age <= TF_STALE_S and t != self._t:
             ox, oy, oth = self.to_map(x, y, th)
             self._t = t
@@ -183,6 +184,8 @@ class SlamPose:
                 st['fault'] = f'SLAM Toolbox молчит: поправки позы нет уже {_age(tf_age)}'
             elif grid_age is not None and grid_age > GRID_STALE_S:
                 st['fault'] = f'SLAM Toolbox молчит: карта не обновлялась {_age(grid_age)}'
+            elif not grid_ok:
+                st['fault'] = 'Новая карта от SLAM Toolbox непригодна для езды: на ней нет места, где робот может стоять'
         st['lost'] = st['fault'] is not None
         if self._jump_at is not None and not 0.0 <= now - self._jump_at < JUMP_HOLD_S:
             self._jump_at = None
@@ -198,17 +201,18 @@ class SlamPose:
 
 
 def _reading(r):
-    """Ответ source() → (преобразование или None, возраст /tf, возраст сетки или None)."""
+    """Ответ source() → (преобразование или None, возраст /tf, возраст сетки или None, пригодна ли сетка)."""
     if r is None:
-        return None, math.inf, None
+        return None, math.inf, None, True
     if isinstance(r, dict):
         t = r.get('tf')
         age = r.get('tf_age', 0.0)
         # Возраст меньше нуля — часы пошли заново (стенд перезапустили): сообщение из прошлого запуска.
         age = math.inf if t is None or age is None or age < 0.0 else float(age)
         grid = r.get('grid_age')
-        return (None if t is None else tuple(float(v) for v in t)), age, (None if grid is None else abs(float(grid)))
-    return tuple(float(v) for v in r), 0.0, None
+        return ((None if t is None else tuple(float(v) for v in t)), age, (None if grid is None else abs(float(grid))),
+                r.get('grid_ok', True) is not False)
+    return tuple(float(v) for v in r), 0.0, None, True
 
 
 def _age(s):

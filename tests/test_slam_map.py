@@ -541,6 +541,41 @@ def test_unusable_new_map_takes_the_old_one_out_of_service():
     assert _run(pilot, world, lambda: pilot.mode == 'idle', 1500) is not None and pilot.arrivals
 
 
+def test_unusable_map_during_a_mission_stops_the_agent():
+    """Ревью, круг 2: в миссии агент едет по снимку карты, но свежая непригодная сетка запрещает движение."""
+    pilot, world = _slam_mission()
+    bot, good = pilot.bot, world.values
+    world.ver, world.values = 2, np.full((120, 120), OCCUPIED, np.int8)
+    moved = []
+    for _ in range(50):
+        pilot.tick(world.observe())
+        world.advance()
+        moved.append(abs(world.sim.v))
+        assert bot.mode == 'lost' and bot._waiting and bot._stuck is None
+    assert max(moved[10:]) <= 0.081                  # после торможения — только переползание защиты
+    view = pilot.state()['nav']
+    assert view['ready'] is False and view['slam']['ok'] is False and 'непригодна' in view['slam']['fault']
+    assert pilot.mode == 'mission' and pilot.note['tone'] == 'bad' and 'непригодна' in pilot.note['text']
+    world.ver, world.values = 3, good                # пригодная карта вернулась: агент едет дальше
+    _run(pilot, world, lambda: False, 150)
+    assert bot.mode != 'lost' and 'idle' not in _tags(bot) and pilot.state()['nav']['ready'] is True
+    assert _run(pilot, world, lambda: pilot.mode == 'idle', 6000) is not None
+    assert pilot.mission['result']['returned'] and world.score()['collisions'] == 0
+
+
+def test_map_that_stays_unusable_does_not_hang_the_mission():
+    """Карта так и не стала пригодной: агент не стоит вечно, а возвращается на базу, как при молчании SLAM."""
+    pilot, world = _slam_mission()
+    world.ver, world.values = 2, np.full((120, 120), OCCUPIED, np.int8)
+    assert _run(pilot, world, lambda: pilot.mode == 'idle', 6000) is not None
+    assert 'blind' in _tags(pilot.bot)
+    assert pilot.mission['state'] == 'finished' and world.score()['collisions'] == 0
+    assert math.dist((world.sim.x, world.sim.y), (-2.0, -0.5)) < 0.3
+    # вне миссии та же сетка снимает карту с работы обычным порядком
+    _run(pilot, world, lambda: False, 2)
+    assert pilot.graph is None and not pilot.command({'cmd': 'route', 'points': [[-1.5, -0.5]]})['ok']
+
+
 def test_path_is_dropped_by_the_same_margin_the_graph_is_built_with():
     ref = load_arena()
     pilot, world = _grid_pilot()
