@@ -96,27 +96,47 @@ def stop(proc, name, grace=12.0):
         pass
 
 
-def ensure_server(port):
-    """Сервер лаборатории с пультом: уже работающий или свой. Возвращает (адрес, процесс или None)."""
-    for p in range(port, port + 5):
+def ensure_server(port, tries=5):
+    """Сервер лаборатории с пультом: уже работающий или свой. Возвращает (адрес, процесс или None).
+
+    Занятый порт пропускается в обоих случаях: и когда на нём отвечает чужой сервер по HTTP, и когда он
+    по HTTP молчит, а наш сервер не смог к нему привязаться.
+    """
+    for p in range(port, port + tries):
         url = f'http://127.0.0.1:{p}'
         code, _ = http(f'{url}/api/pilot/state')
         if code == 200:
             say(f'сервер интерфейса уже работает: {url}')
             return url, None
-        if code is None:
-            proc = spawn([sys.executable, '-m', 'did.lab.server', '--port', str(p)], f'demo-lab-{p}.log')
-            for _ in range(100):
-                if http(f'{url}/api/pilot/state')[0] == 200:
-                    say(f'сервер интерфейса запущен: {url}')
-                    return url, proc
-                if proc.poll() is not None:
-                    break
-                time.sleep(0.2)
-            stop(proc, 'сервер интерфейса')
-            raise SystemExit(f'сервер интерфейса не запустился: см. {LOGS / f"demo-lab-{p}.log"}')
-        say(f'на порту {p} работает сервер старой версии, без пульта — пробую порт {p + 1}')
-    raise SystemExit('не нашёл свободного порта для сервера интерфейса')
+        if code is not None:
+            say(f'на порту {p} работает сервер старой версии, без пульта — пробую порт {p + 1}')
+            continue
+        log = LOGS / f'demo-lab-{p}.log'
+        proc = spawn([sys.executable, '-m', 'did.lab.server', '--port', str(p)], log.name)
+        for _ in range(100):
+            if proc.poll() is not None:
+                break
+            if http(f'{url}/api/pilot/state')[0] == 200:
+                say(f'сервер интерфейса запущен: {url}')
+                return url, proc
+            time.sleep(0.2)
+        died = proc.poll() is not None
+        stop(proc, 'сервер интерфейса')
+        if died and 'Address already in use' in tail(log, 40):
+            say(f'порт {p} занят программой, которая не отвечает по HTTP, — пробую порт {p + 1}')
+            continue
+        raise SystemExit(f'сервер интерфейса не запустился: см. {log}')
+    raise SystemExit(f'не нашёл свободного порта для сервера интерфейса: заняты {port}–{port + tries - 1} '
+                     '(укажите другой ключом --port)')
+
+
+def agent_error(name):
+    """Почему такого агента нельзя выбрать для миссии; None — можно. Список тот же, что у пульта."""
+    sys.path.insert(0, str(ROOT))
+    from did.mission_agents import MISSION_AGENTS
+    if name in MISSION_AGENTS:
+        return None
+    return f'нет агента «{name}» для автономной миссии. Есть: {", ".join(MISSION_AGENTS)}'
 
 
 def settled(url):
@@ -161,6 +181,8 @@ def main():
     ap.add_argument('--launch-arg', action='append', default=[], metavar='ИМЯ:=ЗНАЧЕНИЕ',
                     help='дополнительный аргумент для stand.launch.py (можно несколько раз)')
     args = ap.parse_args()
+    if args.agent is not None and agent_error(args.agent):
+        ap.error(agent_error(args.agent))       # иначе страница молча выбрала бы агента по умолчанию
 
     halt = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
