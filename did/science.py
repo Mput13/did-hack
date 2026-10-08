@@ -75,6 +75,8 @@ class Inquiry:
         self.action = ''
         self.critique = []
         self.note = ''
+        self.follow = None            # L3: опыты в порядке плана автора (список id) вместо выбора по пользе
+        self.llm = None               # L3: что предложили автор и критик (для сверки с выбором расчёта)
         self.policy, self.rng = 'gain', None      # способ выбора опыта (CHOICES) и генератор для случайных способов
         self.stop = None              # почему опыты кончились: settled | max_tests | budget | no_gain | no_tests | ...
         self.steps = []               # каждый выбор: что было допустимо, что выбрано (в запись прогона, агент не читает)
@@ -134,6 +136,19 @@ class Inquiry:
         best, p = self.best
         return p >= self.accept and best != OTHER
 
+    def peek(self):
+        """Что выбрал бы choose() сейчас. Генератор случайного выбора, запись шагов и причина остановки не меняются
+        (оценки пользы опытов обновляются, как и при choose): это справка для записи, а не решение."""
+        stop, n = self.stop, len(self.steps)
+        state = self.rng.bit_generator.state if self.rng is not None else None
+        try:
+            return self.choose()
+        finally:
+            self.stop = stop
+            del self.steps[n:]
+            if state is not None:
+                self.rng.bit_generator.state = state
+
     def choose(self):
         """Следующий опыт: наибольшая польза на единицу заряда. None — опыты больше не нужны или невозможны.
 
@@ -144,6 +159,8 @@ class Inquiry:
         if self.settled or self.maneuvers >= self.max_tests:
             self.stop = 'settled' if self.settled else 'max_tests'
             return None
+        if self.follow is not None:
+            return self._next_planned()
         blind = self.policy == 'blind'
         options, left, costly = [], 0, []
         for test in self.tests:
@@ -171,6 +188,20 @@ class Inquiry:
                            'over_budget': over, 'chosen': best.id if best else None,
                            'posterior': {k: round(v, 3) for k, v in self.posterior.items()}})
         return best
+
+    def _next_planned(self):
+        """Следующий опыт из плана автора: первый ещё не проведённый, который проходит по бюджету.
+
+        Польза не проверяется: что и в каком порядке мерить, решил автор. План исчерпан — опытов больше нет.
+        """
+        by_id = {x.id: x for x in self.tests}
+        for tid in self.follow:
+            test = by_id.get(tid)
+            if test is None or test.measured is not None or self.spent + test.cost > self.budget:
+                continue
+            test.gain_bits = round(self.gain(test), 3)
+            return test
+        return None
 
     def _pick(self, options):
         if not options:
@@ -249,6 +280,7 @@ class Inquiry:
                        'chosen': x.measured is not None, 'measured': x.measured} for x in self.tests],
             'conclusion': self.conclusion, 'action': self.action, 'source': self.source,
             'critique': self.critique, 'note': self.note,
+            **({'llm': self.llm} if self.llm else {}),
         }
 
     def context(self, state):
