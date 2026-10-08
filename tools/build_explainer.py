@@ -297,7 +297,6 @@ def main():
                      for p in sorted((RUNS / 'llm_real').glob('*.summary.json'))},
         'roles': {p.stem: _json(p) for p in sorted((RUNS / 'llm_real' / 'roles').glob('*.json'))},
         'llm_agreement': _json(RUNS / 'llm_real' / 'agreement.json'),
-        'llm_budget': _json(RUNS / '_llm_budget' / 'openrouter.json'),
         'soil_demo': soil_demo(arena),
         'route': fixed_route(arena),
         'llm': llm_example(),

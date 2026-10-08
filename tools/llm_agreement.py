@@ -20,7 +20,7 @@ from did.planner import HeuristicPlanner         # noqa: E402
 
 CACHE = ROOT / 'runs' / '_llm_cache'
 # папка кэша -> имя строки в таблице моделей
-ARMS = {'gpt-6-luna': 'gpt-6-luna', 'typesafe-jev-router': 'jev-router', 'qwen3.8-flash-next': 'mai-qwen3.8-flash-next',
+ARMS = {'gpt-6-luna': 'gpt-6-luna', 'qwen3.8-flash-next': 'mai-qwen3.8-flash-next',
         'qwen3.6-35b-a3b': 'mai-qwen3.6-35b-a3b', 'Qwen3.5-122B-A10B': 'mai-qwen3.5-122b-a10b', 'qwen3.8-27b': 'mai-qwen3.8-27b',
         'deepseek-v4.1-flash': 'mai-deepseek-v4.1-flash', 'DeepSeek-V4-Flash': 'mai-deepseek-v4-flash'}
 

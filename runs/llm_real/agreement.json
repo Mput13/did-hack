@@ -1,14 +1,4 @@
 {
- "jev-router": {
-  "decisions": 63,
-  "same": 60,
-  "share": 0.952,
-  "differences": {
-   "explore вместо investigate": 1,
-   "— вместо return_base": 1,
-   "investigate вместо investigate": 1
-  }
- },
  "mai-qwen3.8-flash-next": {
   "decisions": 51,
   "same": 49,
