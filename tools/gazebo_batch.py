@@ -8,6 +8,8 @@
 проверяется пауза (research/PAUSE) и не идёт ли показ: пока он идёт, очередной прогон ждёт.
 """
 import argparse
+import gzip
+import json
 import os
 import subprocess
 import sys
@@ -25,6 +27,16 @@ def busy():
     return None
 
 
+def lagged(path):
+    """Доля тактов записи, пришедших с опозданием: признак того, что компьютер был перегружен."""
+    try:
+        t = json.load(gzip.open(path))['track']['t']
+    except (OSError, ValueError, KeyError):
+        return None
+    gaps = [b - a for a, b in zip(t, t[1:])]
+    return sum(1 for g in gaps if g > 0.45) / max(1, len(gaps))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--level', default='hard')
@@ -37,11 +49,17 @@ def main():
         while (why := busy()):
             print(f'жду: {why}', flush=True)
             time.sleep(30)
-        t0 = time.time()
-        r = subprocess.run([sys.executable, str(ROOT / 'tools' / 'gazebo_run.py'), '--level', args.level, '--seed', str(seed),
-                            '--agent', args.agent, '--exp', args.exp], cwd=ROOT, env=env, capture_output=True, text=True)
-        tail = [line for line in r.stdout.strip().splitlines() if line.strip()][-1:] or ['нет вывода']
-        print(f'{args.level}-{seed}: код {r.returncode}, {time.time() - t0:.0f} с — {tail[0][:120]}', flush=True)
+        for attempt in (1, 2):
+            t0 = time.time()
+            r = subprocess.run([sys.executable, str(ROOT / 'tools' / 'gazebo_run.py'), '--level', args.level, '--seed', str(seed),
+                                '--agent', args.agent, '--exp', args.exp], cwd=ROOT, env=env, capture_output=True, text=True)
+            tail = [line for line in r.stdout.strip().splitlines() if line.strip()][-1:] or ['нет вывода']
+            lag = lagged(ROOT / 'runs' / args.exp / 'gazebo' / f'{args.level}-{seed}.json.gz')
+            note = '' if lag is None else f', опоздавших тактов {lag:.0%}'
+            print(f'{args.level}-{seed}: код {r.returncode}, {time.time() - t0:.0f} с{note} — {tail[0][:100]}', flush=True)
+            if lag is None or lag <= 0.03:
+                break
+            print(f'{args.level}-{seed}: компьютер был перегружен, прогон не годится' + ('; повторяю' if attempt == 1 else ''), flush=True)
     print('BATCH_DONE', flush=True)
     return 0
 

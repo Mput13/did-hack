@@ -45,16 +45,16 @@ seed_start: 1001
 conditions:
   - id: normal
     label: Обычный характер
-    temperament: normal
+    llm: {temperament: normal}
   - id: timid
     label: Робкий характер
-    temperament: timid
+    llm: {temperament: timid}
   - id: random
     label: Случайный характер
-    temperament: random
+    llm: {temperament: random}
   - id: careless
     label: Беспечный характер
-    temperament: careless
+    llm: {temperament: careless}
 metrics: [score, samples_share, returned, llm_calls]
 claims:
   - {metric: score, a: scored, b: single, text: "Схема scored даёт счёт выше single", better: higher}

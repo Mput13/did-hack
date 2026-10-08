@@ -52,7 +52,9 @@ def _job(args, knowledge=None):
         s = run_episode(level, seed, arm['agent'], experiment=spec_id, arm=folder,
                         scenario_args={**cond.get('scenario', {})},
                         config=arm.get('config'), rules=cond.get('rules'),
-                        llm={**arm.get('llm', {}), **(cond.get('llm') or {}), **({'temperament': cond['temperament']} if 'temperament' in cond else {})} if arm.get('llm') else None,
+                        agent_rules=cond.get('agent_rules'),
+                        # условие может дополнить настройки модели варианта (например, характер имитатора)
+                        llm={**arm['llm'], **(cond.get('llm') or {})} if arm.get('llm') else None,
                         sim=cond.get('sim'), knowledge=knowledge, study=arm.get('study'))
         s.pop('study', None)              # отчёт исследования лежит в записи прогона, в сводку идут только метрики
         s['arm'], s['condition'] = arm['id'], cond['id']
@@ -73,7 +75,15 @@ def run_experiment(exp_id, seeds=None, jobs=8, progress=None):
         shutil.rmtree(out)
     # Правила среды для всего опыта (например science) плюс поправки отдельных условий.
     base_rules = dict(SCIENCE) if spec.get('rules') == 'science' else dict(spec.get('rules') or {})
-    conditions = [{**c, 'rules': {**base_rules, **c.get('rules', {})}} for c in spec['conditions']]
+    base_agent_rules = spec.get('agent_rules')
+    conditions = []
+    for c in spec['conditions']:
+        cond = {**c, 'rules': {**base_rules, **c.get('rules', {})}}
+        if 'agent_rules' in c:
+            cond['agent_rules'] = c['agent_rules']
+        elif base_agent_rules is not None:
+            cond['agent_rules'] = base_agent_rules
+        conditions.append(cond)
     seeds_range = range(spec['seed_start'], spec['seed_start'] + n_seeds)
     tasks = [(exp_id, arm, cond, level, seed)
              for arm in spec['arms'] if not arm.get('memory') for cond in conditions
@@ -157,9 +167,24 @@ def summarize_experiment(spec, results, n_seeds, wall_s):
         status = 'inconclusive'
     else:
         status = 'partial'
+    control_differences = []
+    control = spec.get('control_condition')
+    if control is not None:
+        if control not in {c['id'] for c in spec['conditions']}:
+            raise ValueError(f'Unknown control_condition: {control}')
+        for arm in spec['arms']:
+            for cond in spec['conditions']:
+                for level in spec['levels']:
+                    control_differences.append({
+                        'arm': arm['id'], 'condition': cond['id'], 'control': control, 'level': level,
+                        'pairs': {m: paired(pick(arm['id'], cond['id'], level),
+                                            pick(arm['id'], control, level), m, rng)
+                                  for m in spec['metrics']},
+                    })
     return {'spec': spec, 'generated': time.strftime('%Y-%m-%dT%H:%M:%S'), 'seeds': n_seeds,
             'wall_s': round(wall_s, 1), 'status': status, 'runs': runs, 'errors': errors, 'groups': groups,
-            'claims': claims, 'metrics': {k: {'label': v[0], 'unit': v[1], 'better': v[2]} for k, v in METRICS.items()}}
+            'claims': claims, **({'control_differences': control_differences} if control is not None else {}),
+            'metrics': {k: {'label': v[0], 'unit': v[1], 'better': v[2]} for k, v in METRICS.items()}}
 
 
 def rebuild_from_traces(exp_id):

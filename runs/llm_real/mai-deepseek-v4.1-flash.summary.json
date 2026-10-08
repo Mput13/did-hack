@@ -1,0 +1,301 @@
+{
+ "arm": "mai-deepseek-v4.1-flash",
+ "llm": {
+  "kind": "http",
+  "model": "deepseek-v4.1-flash",
+  "cache": true,
+  "use_schema": true,
+  "min_tokens": 3000
+ },
+ "created": "2026-10-08T11:17:50",
+ "wall_s": 610.4,
+ "scenarios": 6,
+ "requests": 51,
+ "quota_blocked": 0,
+ "first_ok_share": 0.882,
+ "repaired_share": 0.078,
+ "fallback_share": 0.039,
+ "errors": {
+  "ответ обрезан": 4,
+  "ответ не JSON": 4,
+  "нет ответа модели": 2
+ },
+ "latency_ms": {
+  "mean": 25914,
+  "median": 17594,
+  "max": 91752,
+  "total": 1425247
+ },
+ "transport_retries": 21,
+ "tokens": {
+  "prompt": 2596,
+  "completion": 1489
+ },
+ "cached_exchanges": 0,
+ "score_mean": 71.3,
+ "rule_score_mean": 71.18,
+ "score_diff": [
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.7
+ ],
+ "complete_runs": 6,
+ "score_mean_complete": 71.3,
+ "rule_score_mean_complete": 71.18,
+ "runs": [
+  {
+   "level": "medium",
+   "seed": 1001,
+   "score": 71.88,
+   "rule_score": 71.88,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 5,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 7,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 15665,
+    "median": 11231,
+    "max": 30839,
+    "total": 109653
+   },
+   "file": "llm_real/mai-deepseek-v4.1-flash/medium-1001.json.gz"
+  },
+  {
+   "level": "medium",
+   "seed": 1002,
+   "score": 70.75,
+   "rule_score": 70.75,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 4,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 7,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 18880,
+    "median": 18080,
+    "max": 24143,
+    "total": 132162
+   },
+   "file": "llm_real/mai-deepseek-v4.1-flash/medium-1002.json.gz"
+  },
+  {
+   "level": "medium",
+   "seed": 1003,
+   "score": 72.23,
+   "rule_score": 72.23,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 1,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 6,
+   "repaired": 1,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 22110,
+    "median": 14742,
+    "max": 61949,
+    "total": 176878
+   },
+   "file": "llm_real/mai-deepseek-v4.1-flash/medium-1003.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "score": 66.8,
+   "rule_score": 66.8,
+   "samples": "5/7",
+   "rule_samples": "5/7",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "fallback": 1,
+    "heuristic": 4,
+    "llm": 9
+   },
+   "requests": 10,
+   "first_ok": 7,
+   "repaired": 2,
+   "failed": 1,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 33016,
+    "median": 20359,
+    "max": 91752,
+    "total": 396194
+   },
+   "file": "llm_real/mai-deepseek-v4.1-flash/hard-1001.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1002,
+   "score": 60.0,
+   "rule_score": 60.0,
+   "samples": "6/7",
+   "rule_samples": "6/7",
+   "returned": false,
+   "rule_returned": false,
+   "plans": {
+    "heuristic": 5,
+    "llm": 8,
+    "rule": 1
+   },
+   "requests": 8,
+   "first_ok": 8,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 22571,
+    "median": 26952,
+    "max": 30858,
+    "total": 180566
+   },
+   "file": "llm_real/mai-deepseek-v4.1-flash/hard-1002.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "score": 86.12,
+   "rule_score": 85.42,
+   "samples": "7/7",
+   "rule_samples": "7/7",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "fallback": 1,
+    "heuristic": 8,
+    "llm": 11,
+    "rule": 1
+   },
+   "requests": 12,
+   "first_ok": 10,
+   "repaired": 1,
+   "failed": 1,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 33061,
+    "median": 17594,
+    "max": 91717,
+    "total": 429794
+   },
+   "file": "llm_real/mai-deepseek-v4.1-flash/hard-1003.json.gz"
+  }
+ ],
+ "rejected": [
+  {
+   "level": "medium",
+   "seed": 1003,
+   "t": 55.7,
+   "attempt": 1,
+   "errors": [
+    "пустой ответ",
+    "ответ обрезан по лимиту токенов, отвечай короче"
+   ],
+   "kinds": [
+    "ответ не JSON",
+    "ответ обрезан"
+   ],
+   "response": ""
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "t": 42.2,
+   "attempt": 1,
+   "errors": [
+    "пустой ответ",
+    "ответ обрезан по лимиту токенов, отвечай короче"
+   ],
+   "kinds": [
+    "ответ не JSON",
+    "ответ обрезан"
+   ],
+   "response": ""
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "t": 51.4,
+   "attempt": 1,
+   "errors": [
+    "пустой ответ",
+    "ответ обрезан по лимиту токенов, отвечай короче"
+   ],
+   "kinds": [
+    "ответ не JSON",
+    "ответ обрезан"
+   ],
+   "response": ""
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "t": 75.7,
+   "attempt": 1,
+   "errors": [
+    "модель не ответила за 3 попыток: таймаут 30 с"
+   ],
+   "kinds": [
+    "нет ответа модели"
+   ],
+   "response": null
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "t": 33.2,
+   "attempt": 1,
+   "errors": [
+    "пустой ответ",
+    "ответ обрезан по лимиту токенов, отвечай короче"
+   ],
+   "kinds": [
+    "ответ не JSON",
+    "ответ обрезан"
+   ],
+   "response": ""
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "t": 46.7,
+   "attempt": 1,
+   "errors": [
+    "модель не ответила за 3 попыток: таймаут 30 с"
+   ],
+   "kinds": [
+    "нет ответа модели"
+   ],
+   "response": null
+  }
+ ]
+}

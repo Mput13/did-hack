@@ -165,7 +165,8 @@ def _hazard_on_soil(zid, arena, rng, soils, samples, base, others):
 
 
 def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, events=None,
-             event_window=(20.0, 70.0), fault_kinds=None, hazard_on_soil=False, soil_mults=None):
+             event_window=(20.0, 70.0), fault_kinds=None, hazard_on_soil=False, soil_mults=None,
+             n_soil_changes=1, n_new_hazards=1):
     """Сценарий уровня easy/medium/hard. Параметры n_* и events переопределяют таблицу уровней.
 
     event_window — в какие секунды прогона случаются события hard: окно подобрано под длительность
@@ -206,7 +207,11 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
     timeline = []
     t0, t1 = event_window
     span = t1 - t0
-    if 'soil_change' in events and soils:
+    rng_extra = None
+    if (n_soil_changes > 1 and 'soil_change' in events) or (n_new_hazards > 1 and 'new_hazard' in events):
+        rng_extra = np.random.default_rng([seed, sum(level.encode()), 4])
+
+    if 'soil_change' in events and soils and n_soil_changes >= 1:
         # Один грунт меняет стоимость, один переезжает: карта стоимостей агента устаревает.
         changed = [Zone(**asdict(z)) for z in soils]
         i = int(rng.integers(len(changed)))
@@ -218,10 +223,36 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
             changed[j] = moved
         timeline.append({'t': round(float(rng.uniform(t0, t0 + 0.4 * span)), 1), 'type': 'soil_change',
                          'soils': changed})
-    if 'new_hazard' in events:
+        for step in range(1, n_soil_changes):
+            changed = [Zone(**asdict(z)) for z in changed]
+            i = int(rng_extra.integers(len(changed)))
+            changed[i].mult = 4.0 if changed[i].mult <= 2.5 else 1.5
+            if len(changed) > 1:
+                j = int((i + 1 + rng_extra.integers(len(changed) - 1)) % len(changed))
+                others = [z for k, z in enumerate(changed) if k != j]
+                moved = _soil_zone(changed[j].id, changed[j].mult, arena, rng_extra, others, base)
+                changed[j] = moved
+            t_low = t0 + (0.4 + 0.55 * (step - 1) / (n_soil_changes - 1)) * span
+            t_high = min(t1, t0 + (0.4 + 0.55 * step / (n_soil_changes - 1)) * span)
+            timeline.append({'t': round(float(rng_extra.uniform(t_low, t_high)), 1), 'type': 'soil_change',
+                             'soils': changed})
+
+    extra_hazards = []
+    if 'new_hazard' in events and n_new_hazards >= 1:
         zone = _hazard_zone(f'X{len(hazards) + 1}', arena, rng, samples, base, hazards)
         timeline.append({'t': round(float(rng.uniform(t0 + 0.2 * span, t0 + 0.7 * span)), 1), 'type': 'new_hazard',
                          'zone': zone})
+        if n_new_hazards > 1:
+            all_hz = list(hazards) + [zone]
+            for step in range(1, n_new_hazards):
+                t_low = t0 + (0.2 + 0.7 * step / n_new_hazards) * span
+                t_high = min(t1, t0 + (0.2 + 0.7 * (step + 1) / n_new_hazards) * span)
+                t_ev = round(float(rng_extra.uniform(t_low, t_high)), 1)
+                z_extra = _hazard_zone(f'X{len(all_hz) + 1}', arena, rng_extra, samples, base, all_hz)
+                all_hz.append(z_extra)
+                extra_hazards.append(z_extra)
+                timeline.append({'t': t_ev, 'type': 'new_hazard', 'zone': z_extra})
+
     if 'sensor_fault' in events:
         timeline.append({'t': round(float(rng.uniform(t0 + 0.4 * span, t1)), 1), 'type': 'sensor_fault',
                          'duration': round(float(rng.uniform(25, 40)), 1), 'sigma': 0.25})
@@ -239,12 +270,15 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
     # Виды сбоев назначаются отдельным генератором случайных чисел: расстановка прежних серий не меняется.
     rng2 = np.random.default_rng([seed, sum(level.encode()), 2])
     kinds = list(fault_kinds) if fault_kinds else list(FAULT_KINDS)
-    for z in hazards + [e['zone'] for e in timeline if e['type'] == 'new_hazard']:
+    for z in hazards + ([e['zone'] for e in timeline if e['type'] == 'new_hazard'][:1] if 'new_hazard' in events and n_new_hazards >= 1 else []):
         z.fault = str(rng2.choice(kinds))
         z.fault_s = round(float(rng2.uniform(20, 30)), 1)
     for e in timeline:
         if e['type'] == 'sensor_fault':
             e['kind'] = str(rng2.choice(FAULT_KINDS[1:]))
+    for z in extra_hazards:
+        z.fault = str(rng_extra.choice(kinds))
+        z.fault_s = round(float(rng_extra.uniform(20, 30)), 1)
 
     return Scenario(level=level, seed=int(seed), samples=samples, soils=soils, hazards=hazards,
                     events=timeline, base=base)

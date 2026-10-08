@@ -12,7 +12,7 @@ from .agent import Agent, make_config
 from .arena import load_arena
 from .config import SCIENCE, Rules
 from .fastsim import FastSim
-from .metrics import run_metrics, score_inquiries
+from .metrics import run_metrics, score_hypotheses, score_inquiries
 from .planner import HeuristicPlanner, LLMPlanner
 from .recorder import Recorder, save_trace
 from .scenario import Scenario, generate
@@ -52,16 +52,29 @@ def make_agent(name, config=None):
 
 
 def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, scenario=None,
-                scenario_args=None, config=None, rules=None, llm=None, sim=None, save=True, quiet=True,
+                scenario_args=None, config=None, rules=None, agent_rules=None, llm=None, sim=None, save=True, quiet=True,
                 knowledge=None, study=None):
     """Прогон целиком. Возвращает сводку: идентификаторы, метрики, путь к записи.
 
     study — задание исследования (словарь did.study.StudySpec) для агента 'study'.
+    rules — правила мира; agent_rules=None — те же правила у агента (прежнее поведение),
+    agent_rules={} — агент верит в Rules() независимо от правил мира.
     """
     arena = load_arena()
     if rules == 'science':                 # набор правил с несколькими причинами расхода и сбоями
         rules = dict(SCIENCE)
     rules = Rules(**(rules or {}))
+    if agent_rules is None:
+        bot_rules = rules
+    elif agent_rules == 'science':
+        bot_rules = Rules(**SCIENCE)
+    elif isinstance(agent_rules, Rules):
+        bot_rules = agent_rules
+    elif isinstance(agent_rules, dict):
+        bot_rules = Rules(**agent_rules)
+    else:
+        raise ValueError(f"Unknown agent_rules: {agent_rules}")
+
     if scenario is None:
         scenario = generate(level, seed, arena, **(scenario_args or {}))
     elif isinstance(scenario, dict):
@@ -74,10 +87,10 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     extra = {'knowledge': knowledge} if getattr(cfg, 'science', False) else {}
     if agent == 'study':                            # проверка задания и план; из сценария берётся только контур области
         from .study import prepare
-        extra['study'] = prepare(study, arena, rules, scenario)
+        extra['study'] = prepare(study, arena, bot_rules, scenario)
     if extra and cfg.planner == 'llm':              # та же модель — автор и критик расследований
         extra['roles'] = planner.client
-    bot = cls(arena, cfg, n_samples=len(scenario.samples), rules=rules, planner=planner, recorder=rec, **extra)
+    bot = cls(arena, cfg, n_samples=len(scenario.samples), rules=bot_rules, planner=planner, recorder=rec, **extra)
 
     wall = time.perf_counter()
     while not world.done:
@@ -89,6 +102,12 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     judge = world.judge
     score = judge.score()
     metrics = run_metrics(score, rules, bot.journal, judge.world_log, rec.plans, rec.llm)
+    sh = score_hypotheses(bot.journal.hypotheses, scenario, judge.world_log, events=rec.events)
+    metrics['hypotheses_truth'] = sh
+    metrics['hyp_correct_share'] = sh['correct_share']
+    metrics['hyp_confirmed_correct'] = sh['confirmed_correct']
+    metrics['hyp_refuted_correct'] = sh['refuted_correct']
+    metrics['hyp_soil_error'] = sh['soil_error']
     science = bot.inv.export() if getattr(bot, 'inv', None) else {}
     report = None
     if agent == 'study':                            # отчёт исследования и сверка со скрытой правдой сценария
@@ -108,6 +127,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     run_id = f'{experiment}/{arm}/{scenario.name}'
     summary = {'id': run_id, 'experiment': experiment, 'arm': arm, 'agent': cfg.name, 'level': scenario.level,
                'seed': scenario.seed, 'backend': 'fastsim', 'metrics': metrics, 'wall_s': round(wall, 2)}
+    if bot_rules != rules:
+        summary['agent_rules'] = bot_rules.to_dict()
     if report is not None:
         summary['study'] = report
     if save:
@@ -115,6 +136,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
                           agent={'name': cfg.name, 'config': cfg.to_dict()}, scenario=scenario.to_dict(),
                           rules=rules.to_dict(), result={**score, **metrics}, world=judge.world_log,
                           journal=bot.journal)
+        if bot_rules != rules:
+            trace['agent_rules'] = bot_rules.to_dict()
         trace.update(science)
         path = save_trace(trace, RUNS / experiment / arm / f'{scenario.name}.json.gz')
         summary['file'] = str(path.relative_to(RUNS))
