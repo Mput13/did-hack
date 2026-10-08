@@ -46,6 +46,10 @@ METRICS = {
     'study_time': ('Время исследования', 'с', 'lower'),
     'llm_calls': ('Обращений к модели', 'вызовы', 'lower'),
     'llm_failed': ('Ошибок модели', 'вызовы', 'lower'),
+    # ожидание ответа модели (did/waiting.py)
+    'idle_s': ('Простой в ожидании модели', 'с', 'lower'),
+    'llm_late': ('Ответов модели, пришедших поздно', 'шт.', 'lower'),
+    'llm_switches': ('Переходов на план модели', 'шт.', 'lower'),
     # команда роботов (did/judge_team.py, did/team_runner.py); у обычных прогонов этих метрик нет
     'score_per_robot': ('Счёт на одного робота', 'очки', 'higher'),
     't_last_collect': ('Время до последнего сбора', 'с', 'lower'),
@@ -63,6 +67,7 @@ SIDE_METRICS = ('llm_calls', 'llm_failed', 'score_per_robot', 't_last_collect', 
                 'same_target_s', 'messages')
 # Добавлены ещё позже (ревью M1): свой генератор, чтобы не сдвинуть интервалы ни основных, ни SIDE_METRICS.
 LATE_METRICS = ('returned_all',)
+WAIT_METRICS = ('idle_s', 'llm_late', 'llm_switches')    # R16: по той же причине — на своём генераторе
 
 
 def run_metrics(score, rules, journal, world, plans, llm):

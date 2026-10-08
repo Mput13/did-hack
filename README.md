@@ -82,6 +82,8 @@ pixi run lab                                  # только интерфейс:
 | `pixi run run --level hard --seed 3 --agent adaptive` | один прогон в быстром симуляторе |
 | `pixi run python tools/loss_breakdown.py runs/E1/adaptive --level hard` | разбор потерь: куда уходят очки между потолком сценария и счётом агента (`research/findings/P1.md`) |
 | `pixi run python tools/p1_acceptance.py` | таблица приёмки агента v2 по опыту E22b: разность счёта и возврата с прежним агентом при своих и «чужих» правилах |
+| `pixi run python tools/p2_acceptance.py` | таблица приёмки агента v3 по опыту E26 (и E26r — «чужие» правила): парные разности с v2 и исходным (`research/findings/P2.md`) |
+| `pixi run python tools/p2_inspect.py runs/E26/adaptive_v3/hard-11026.json.gz` | разбор одного прогона по записи: решения, штрафы, что робот знал о каждом несобранном образце |
 | `pixi run run --level hard --seed 3 --agent scientist --rules science` | исследователь на «научных» правилах |
 | `pixi run gazebo-run --level hard --seed 1 [--gui] [--rules science --agent scientist]` | один прогон в Gazebo целиком |
 | `pixi run stand-gui level:=hard seed:=3` + `pixi run agent-ros --level hard --seed 3` | стенд и агент в двух терминалах |
@@ -98,7 +100,7 @@ pixi run lab                                  # только интерфейс:
   `fastsim.py` быстрый симулятор, `arena.py` карта, `nav.py` путь и ведение, `localize.py` поправка положения
   по лидару, `mapping.py` построение карты, `belief.py` картина мира агента, `energy.py` + `science.py` +
   `inquiry.py` модель расхода и расследования, `memory.py` память между прогонами, `foresight.py` сравнение
-  будущих маршрутов, `study*.py` исследование по заданию пользователя, `planner.py` + `llm*.py`
+  будущих маршрутов, `calibrate.py` самокалибровка датчика и расхода (вариант `adaptive_cal`), `study*.py` исследование по заданию пользователя, `planner.py` + `llm*.py`
   планировщик и языковая модель, `agent.py` агентский цикл, `baselines.py` базовые стратегии,
   `recorder.py` запись прогона, `metrics.py` + `experiments.py` серии опытов, `pilot.py` пульт для показа,
   `ros_agent.py` агент в ROS 2, `lab/server.py` сервер интерфейса.

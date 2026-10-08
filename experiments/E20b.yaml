@@ -1,0 +1,40 @@
+title: Самокалибровка вместе со сторожем датчика (adaptive_cal_v2)
+kind: sensitivity
+control_condition: base
+question: >-
+  Уживается ли самокалибровка (R14) со сторожем датчика из P1: не хуже ли adaptive_cal_v2, чем adaptive_v2, при
+  обычных правилах, и возвращает ли она образцы при чужом законе датчика?
+hypothesis: >-
+  При обычных правилах adaptive_cal_v2 не хуже adaptive_v2 больше чем на 1 очко в среднем; при законах «по корню» и
+  «по квадрату» собирает заметно больше образцов.
+method: >-
+  Два варианта проходят одни и те же 20 сценариев трудного уровня (на нём в расписании есть сбой датчика, который
+  сторож пережидает). adaptive_v2 — адаптивный агент со сторожем датчика (did/sensorguard.py). adaptive_cal_v2 —
+  он же с самокалибровкой (did/calibrate.py): показания при сбое датчика в сравнение законов не идут. Оба верят в
+  прямую с дальностью 2,0 м и расход 2,5 ед/м (agent_rules: {}). Условия: правила совпадают с допущениями; закон
+  «по корню»; закон «по квадрату». Сценарии 12001–12020 раньше не использовались.
+expect: >-
+  В контроле средняя разность счёта не ниже −1; при чужом законе — выигрыш по образцам и счёту.
+refute: >-
+  Если в контроле adaptive_cal_v2 в среднем хуже больше чем на 1 очко, или при чужом законе выигрыша нет, или
+  калибровка принимает сбой датчика за другой закон (уходит от верного допущения).
+arms:
+  - {id: adaptive_v2, label: Адаптивный v2, agent: adaptive_v2}
+  - {id: adaptive_cal_v2, label: Адаптивный v2 с калибровкой, agent: adaptive_cal_v2}
+levels: [hard]
+seeds: 20
+seed_start: 12001
+conditions:
+  - {id: base, label: Контроль (совпадает), agent_rules: {}}
+  - {id: law_sqrt, label: Закон sqrt (вера linear), rules: {sensor_law: 'sqrt'}, agent_rules: {}}
+  - {id: law_quad, label: Закон quadratic (вера linear), rules: {sensor_law: 'quadratic'}, agent_rules: {}}
+metrics: [samples_share, returned, score, false_collects, battery_used]
+claims:
+  - metric: score
+    a: adaptive_cal_v2
+    b: adaptive_v2
+    text: С калибровкой счёт не ниже, чем без неё (в контроле — допуск 1 очко по средней разности, см. отчёт R14)
+  - metric: samples_share
+    a: adaptive_cal_v2
+    b: adaptive_v2
+    text: С калибровкой агент собирает больше образцов при чужом законе датчика

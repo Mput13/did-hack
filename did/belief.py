@@ -21,7 +21,7 @@ class SampleBelief:
 
     SUB = 2   # клетка убеждений = 2×2 клетки карты
 
-    def __init__(self, arena, n_expected, sensor_range, margin=0.15):
+    def __init__(self, arena, n_expected, sensor_range, margin=0.15, power=1.0):
         s = self.SUB
         self.res = arena.res * s
         self.x0, self.y0 = arena.x0, arena.y0
@@ -33,6 +33,7 @@ class SampleBelief:
         self.cy = self.y0 + (self.iy + 0.5) * self.res
         self.n = len(self.ix)
         self.range = sensor_range
+        self.power = float(power)       # закон датчика: показание = 1 − (d / range) ** power; 1 — прямая
         self.prior = min(0.5, n_expected / self.n)
         self.p = np.full(self.n, self.prior)
         self.left = n_expected          # сколько образцов ещё не собрано
@@ -41,11 +42,16 @@ class SampleBelief:
         self._log = []                  # показания с того момента: (x, y, z, sigma)
 
     def update(self, x, y, z, sigma):
-        """Учесть показание z в точке (x, y) при шуме датчика sigma."""
+        """Учесть показание z в точке (x, y) при шуме датчика sigma.
+
+        Возвращает логарифм вероятности этого показания при прежней карте (см. evidence): по нему
+        сравнивают карты с разными законами датчика.
+        """
         self._log.append((x, y, z, sigma))
-        self._apply(x, y, z, sigma)
+        ev = self._apply(x, y, z, sigma)
         self._normalize()
         self.updates += 1
+        return ev
 
     def _normalize(self):
         """Образцов осталось ровно left: суммарная вероятность по арене не может быть другой.
@@ -56,22 +62,43 @@ class SampleBelief:
         if total > 0:
             self.p = np.clip(self.p * (self.left / total), 1e-7, 0.995)
 
+    def _resp(self, d):
+        """Показание без шума на расстоянии d от образца (ниже нуля — образец не слышен)."""
+        if self.power == 1.0:
+            return 1.0 - d / self.range
+        return 1.0 - (d / self.range) ** self.power
+
+    def _blur(self, sigma, d):
+        """Шум показания с поправкой на размер клетки: (шум для клеток, шум для «рядом пусто»).
+
+        У прямой наклон закона везде один, и поправка — одно число. У кривого закона наклон зависит
+        от расстояния, поэтому шум у каждой клетки свой, а плотность делится на свой разброс.
+        """
+        if self.power == 1.0:
+            s = math.hypot(sigma, 0.4 * self.res / self.range)   # клетка конечного размера — тоже шум
+            return s, s
+        u = np.maximum(d, 0.5 * self.res) / self.range
+        return np.hypot(sigma, 0.4 * self.res * self.power / self.range * u ** (self.power - 1.0)), sigma
+
     def _apply(self, x, y, z, sigma):
-        sigma = math.hypot(sigma, 0.4 * self.res / self.range)   # клетка конечного размера — тоже шум
         d = np.hypot(self.cx - x, self.cy - y)
-        f = 1.0 - d / self.range
+        f = self._resp(d)
         idx = np.nonzero(f > 0.0)[0]
         if len(idx) == 0:
-            return
+            return self.evidence(x, y, z, sigma)
         order = idx[np.argsort(-f[idx], kind='stable')]      # от ближних клеток к дальним
         p, f = self.p[order], f[order]
+        raw = sigma              # шум самого датчика: им меряется «рядом пусто» при сравнении законов
+        sigma, s_none = self._blur(sigma, d[order])
         if z <= 1e-6:            # показание упёрлось в ноль: вероятность, а не плотность
             like, like_none = ndtr(-f / sigma), 0.5
         elif z >= 1.0 - 1e-6:
-            like, like_none = ndtr((f - 1.0) / sigma), ndtr(-1.0 / sigma)
+            like, like_none = ndtr((f - 1.0) / sigma), ndtr(-1.0 / s_none)
         else:
             like = np.exp(-0.5 * ((z - f) / sigma) ** 2)
-            like_none = math.exp(-0.5 * (z / sigma) ** 2)
+            like_none = math.exp(-0.5 * (z / s_none) ** 2)
+            if self.power != 1.0:
+                like = like * (s_none / sigma)
         cum = np.cumsum(np.log1p(-p))
         closer_empty = np.exp(np.concatenate(([0.0], cum[:-1])))   # ближе этой клетки образцов нет
         a = p * closer_empty * like                                # «ближайший образец — в этой клетке»
@@ -82,6 +109,17 @@ class SampleBelief:
         lr = np.clip(num / np.maximum(den, 1e-300), 1e-4, 1e4)
         odds = p * lr
         self.p[order] = np.clip(odds / (odds + 1.0 - p), 1e-7, 0.995)
+        # То же, что evidence: компонента «рядом пусто» считается с шумом самого датчика при любом законе,
+        # хотя карта по прямой обновляется с расширенным (так было до R14, и карта должна остаться прежней).
+        empty = math.exp(cum[-1])
+        if z <= 1e-6:
+            ev = total
+        elif z >= 1.0 - 1e-6:
+            ev = a.sum() + empty * float(ndtr(-1.0 / raw))
+        else:
+            k = 1.0 / math.sqrt(2.0 * math.pi)
+            ev = a.sum() * (k / s_none) + empty * (k / raw) * math.exp(-0.5 * (z / raw) ** 2)
+        return math.log(max(ev, 1e-300))
 
     def trial(self, x, y, z, sigma, p=None, normalize=True):
         """Пробное обновление: какой стала бы карта после показания z в точке (x, y).
@@ -92,20 +130,23 @@ class SampleBelief:
         """
         z = np.atleast_1d(np.asarray(z, dtype=float))[:, None]
         out = np.array(np.broadcast_to(self.p if p is None else p, (len(z), self.n)))
-        sigma = math.hypot(sigma, 0.4 * self.res / self.range)
-        f = 1.0 - np.hypot(self.cx - x, self.cy - y) / self.range
+        d = np.hypot(self.cx - x, self.cy - y)
+        f = self._resp(d)
         idx = np.nonzero(f > 0.0)[0]
         if len(idx):
             order = idx[np.argsort(-f[idx], kind='stable')]
             q, f = out[:, order], f[order]
+            sigma, s_none = self._blur(sigma, d[order])
             like = np.exp(-0.5 * ((z - f) / sigma) ** 2)
-            like_none = np.exp(-0.5 * (z / sigma) ** 2)
+            like_none = np.exp(-0.5 * (z / s_none) ** 2)
+            if self.power != 1.0:
+                like = like * (s_none / sigma)
             lo, hi = z <= 1e-6, z >= 1.0 - 1e-6
             if lo.any():
                 like, like_none = np.where(lo, ndtr(-f / sigma), like), np.where(lo, 0.5, like_none)
             if hi.any():
                 like = np.where(hi, ndtr((f - 1.0) / sigma), like)
-                like_none = np.where(hi, ndtr(-1.0 / sigma), like_none)
+                like_none = np.where(hi, ndtr(-1.0 / s_none), like_none)
             cum = np.cumsum(np.log1p(-q), axis=1)
             zero = np.zeros((len(z), 1))
             closer_empty = np.exp(np.hstack([zero, cum[:, :-1]]))
@@ -137,11 +178,11 @@ class SampleBelief:
         f_all = None
         for (rx, ry, z, sigma) in self._log:
             sig = math.hypot(sigma, 0.06)
-            f_known = max(0.0, 1.0 - math.hypot(sx - rx, sy - ry) / self.range)
+            f_known = max(0.0, float(self._resp(math.hypot(sx - rx, sy - ry))))
             if abs(z - f_known) > 3.5 * sig:
                 self._apply(rx, ry, z, sigma)        # тогда ближайшим был другой образец
                 continue
-            f = 1.0 - np.hypot(self.cx - rx, self.cy - ry) / self.range
+            f = self._resp(np.hypot(self.cx - rx, self.cy - ry))
             closer = f > f_known
             lr = np.exp(np.minimum(0.0, -0.5 * ((z - f[closer]) / sig) ** 2 + 0.5 * ((z - f_known) / sig) ** 2))
             self.p[closer] = np.maximum(self.p[closer] * lr, 1e-7)
@@ -150,6 +191,19 @@ class SampleBelief:
         self._normalize()
         self._epoch = self.p.copy()
         self._log = []
+
+    def amend(self, k, dz):
+        """Последние k показаний были сдвинуты на постоянную величину: поправить их на dz и пересчитать карту
+        от последнего сбора (did/frugal.py). Сглаживания после тревог (relax) в журнале показаний нет — оно
+        при пересчёте теряется, как и при пересчёте после сбора."""
+        k = min(int(k), len(self._log))
+        if k <= 0:
+            return
+        self._log[-k:] = [(x, y, min(1.0, max(0.0, z + dz)), s) for x, y, z, s in self._log[-k:]]
+        self.p = self._epoch.copy()
+        for x, y, z, s in self._log:
+            self._apply(x, y, z, s)
+            self._normalize()
 
     def clear_disc(self, x, y, r, factor=0.0):
         """После сбора или промаха: в круге радиуса r образцов (почти) нет."""
@@ -167,7 +221,7 @@ class SampleBelief:
         «в клетке есть образец, а во всех более близких нет». p — карта, по умолчанию текущая.
         """
         p = self.p if p is None else p
-        f = 1.0 - np.hypot(self.cx - x, self.cy - y) / self.range
+        f = self._resp(np.hypot(self.cx - x, self.cy - y))
         idx = np.nonzero(f > 0.0)[0]
         if len(idx) == 0:
             return 0.0, 0.0
@@ -186,18 +240,50 @@ class SampleBelief:
         чья карта лучше предсказывает показания (did/inquiry.py, сравнение «исправен» — «занижает»).
         """
         p = self.p if p is None else p
-        sigma = math.hypot(sigma, 0.4 * self.res / self.range)
-        none = math.exp(-0.5 * (z / sigma) ** 2)
-        f = 1.0 - np.hypot(self.cx - x, self.cy - y) / self.range
+        d = np.hypot(self.cx - x, self.cy - y)
+        f = self._resp(d)
         idx = np.nonzero(f > 0.0)[0]
         if len(idx) == 0:
-            return math.log(max(none, 1e-300))
+            return math.log(max(math.exp(-0.5 * (z / self._blur(sigma, d[:1])[1]) ** 2), 1e-300))
         order = idx[np.argsort(-f[idx], kind='stable')]
         q, f = p[order], f[order]
+        sigma, s_none = self._blur(sigma, d[order])
+        none = math.exp(-0.5 * (z / s_none) ** 2)
+        like = np.exp(-0.5 * ((z - f) / sigma) ** 2)
+        if self.power != 1.0:
+            like = like * (s_none / sigma)
         cum = np.cumsum(np.log1p(-q))
         closer_empty = np.exp(np.concatenate(([0.0], cum[:-1])))
-        total = float((q * closer_empty * np.exp(-0.5 * ((z - f) / sigma) ** 2)).sum()) + math.exp(cum[-1]) * none
+        total = float((q * closer_empty * like).sum()) + math.exp(cum[-1]) * none
         return math.log(max(total, 1e-300))
+
+    def evidence(self, x, y, z, sigma):
+        """Логарифм вероятности показания z при текущей карте — с нормировкой, чтобы сравнивать законы.
+
+        В отличие от loglik, годится для карт с разными дальностью и формой закона: у показаний
+        внутри шкалы это плотность, у упёршихся в 0 или 1 — вероятность (как в _apply). Показание
+        «рядом пусто» — чистый шум датчика, от закона он не зависит, поэтому здесь он один для всех
+        гипотез (sigma); поправка на размер клетки относится только к клеткам с образцом.
+        """
+        d = np.hypot(self.cx - x, self.cy - y)
+        f = self._resp(d)
+        idx = np.nonzero(f > 0.0)[0]
+        order = idx[np.argsort(-f[idx], kind='stable')]
+        q, f = self.p[order], f[order]
+        s, s_none = self._blur(sigma, d[order] if len(order) else d[:1])[0], sigma
+        if z <= 1e-6:
+            like, none = ndtr(-f / s), 0.5
+        elif z >= 1.0 - 1e-6:
+            like, none = ndtr((f - 1.0) / s), float(ndtr(-1.0 / s_none))
+        else:
+            k = 1.0 / math.sqrt(2.0 * math.pi)
+            like = k / s * np.exp(-0.5 * ((z - f) / s) ** 2)
+            none = k / s_none * math.exp(-0.5 * (z / s_none) ** 2)
+        if len(order) == 0:
+            return math.log(max(none, 1e-300))
+        cum = np.cumsum(np.log1p(-q))
+        closer_empty = np.exp(np.concatenate(([0.0], cum[:-1])))
+        return math.log(max(float((q * closer_empty * like).sum()) + math.exp(cum[-1]) * none, 1e-300))
 
     def prob_within(self, x, y, r):
         near = np.hypot(self.cx - x, self.cy - y) <= r
