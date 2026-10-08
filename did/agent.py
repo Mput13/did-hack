@@ -61,9 +61,12 @@ class AgentConfig:
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
     risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
     foresight_choice: str = 'planner'  # среди прошедших по риску выбирает: planner — правило планировщика, score — счёт
-    # --- правки P1 (research/findings/P1.md): по умолчанию выключены, обе включены в пресетах *_v2
-    fault_wait: bool = False          # при признаках сбоя датчика стоять и ждать, а не ездить за ложными кандидатами
-    fault_wait_lost: int = 3          # столько подъездов без сбора подряд — тоже признак сбоя датчика (0 — не считать)
+    # --- правки P1 (research/findings/P1.md): по умолчанию выключены; в пресетах *_v2 включена первая
+    fault_wait: bool = False          # при сбое датчика стоять, пока это дешевле езды за ложными кандидатами, и
+                                      # считать в цене дороги расход «за включённость» по своим замерам
+    fault_wait_lost: int = 0          # столько подъездов без сбора подряд — повод коротко проверить датчик (0 — нет)
+    fault_wait_s: float = 120.0       # бюджет ожидания датчика на весь прогон, с
+    fault_wait_charge: float = 3.0    # и по заряду, ед. (по показаниям батареи)
     straight_paths: bool = False      # спрямлять путь по клеткам там, где прямая проходима и не дороже
 
     def to_dict(self):
@@ -94,9 +97,10 @@ PRESETS = {
     'no_hazard': AgentConfig(name='no_hazard', avoid_hazards=False),
     'no_sensor_health': AgentConfig(name='no_sensor_health', sensor_health=False),
     'static_reserve': AgentConfig(name='static_reserve', dynamic_reserve=False),
-    # Версия 2 (research/findings/P1.md): все правки P1 вместе. Прежние пресеты не меняются.
-    'adaptive_v2': AgentConfig(name='adaptive_v2', fault_wait=True, straight_paths=True),
-    'scientist_v2': AgentConfig(name='scientist_v2', science=True, fault_wait=True, straight_paths=True),
+    # Версия 2 (research/findings/P1.md): пережидание сбоя датчика по измеренной цене простоя. Спрямление
+    # пути в неё не входит: выигрыша у него не показано. Прежние пресеты не меняются.
+    'adaptive_v2': AgentConfig(name='adaptive_v2', fault_wait=True),
+    'scientist_v2': AgentConfig(name='scientist_v2', science=True, fault_wait=True),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
                                avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
@@ -223,6 +227,8 @@ class Agent:
     # ======================================================================================
 
     def _perceive(self, obs):
+        if self.guard:
+            self.guard.observe(obs)        # замеры цены простоя и езды по батарее
         if obs.scan is not None:
             self._front = float(min(obs.scan[:20].min(), obs.scan[-20:].min()))
         for ev in obs.events:
@@ -350,8 +356,6 @@ class Agent:
 
     def _on_reading(self, z, obs):
         self._readings.append(z)
-        if self.guard:
-            self.guard.reading(z, obs)
         sigma = self.rules.sensor_sigma
         if self.cfg.sensor_health:
             change = self.health.update(z)
@@ -370,6 +374,8 @@ class Agent:
                                    f'шум был повышен, сейчас вернулся к {self.health.sigma:.2f}; '
                                    'показания за время сбоя учтены с малым весом')
             sigma = self.health.effective_sigma()
+        if self.guard:
+            self.guard.reading(z, obs)
         if self.inv:
             z, sigma = self.inv.reading(z, obs, sigma)
             if z is None:                      # датчик залип: карту образцов не трогаем
@@ -432,7 +438,15 @@ class Agent:
         """Оценка заряда на дорогу до базы по текущей карте стоимостей."""
         if self._base_dist is None:
             self._base_dist, self._base_pred = self.home_graph.field(*self.base)
-        return self.home_graph.energy(self._base_dist, self._base_pred, x, y) * self._per_m()
+        return self._trip_cost(self.home_graph, self._base_dist, self._base_pred, x, y)
+
+    def _trip_cost(self, graph, dist, pred, x, y):
+        """Заряд на путь из источника поля в (x, y). У агента v2 — вместе с расходом «за включённость» за время
+        пути по его собственным замерам: при дорогом простое дорога стоит заметно больше, чем метры."""
+        if not self.guard:
+            return graph.energy(dist, pred, x, y) * self._per_m()
+        energy, meters = graph.span(dist, pred, x, y)
+        return energy * self._per_m() + self.guard.trip_idle(meters)
 
     def _per_m(self):
         """Заряд на метр пути: номинал из правил либо то, что исследователь выяснил сам (груз, повороты)."""
@@ -448,13 +462,7 @@ class Agent:
             return self.fs.check(obs)          # вместо жёсткого запаса — сравнение «ехать дальше» и «домой»
         if self._returning:
             return
-        home = self._home_cost(obs.x, obs.y)
-        if self.cfg.dynamic_reserve:
-            need = home * self.cfg.reserve_margin + self.cfg.reserve_abs
-        else:
-            need = self.cfg.static_reserve
-        if self.inv:
-            need += self.inv.reserve(obs.t)    # идущая утечка или невыясненная причина расхода
+        home, need = self._return_need(obs)
         reason = None
         if self.collected >= self.n_samples:
             reason = 'все образцы собраны'
@@ -465,6 +473,17 @@ class Agent:
             reason = 'время прогона на исходе'
         if reason:
             self._go_home(obs.t, reason)
+
+    def _return_need(self, obs):
+        """(оценка дороги домой, заряд, при котором пора возвращаться)."""
+        home = self._home_cost(obs.x, obs.y)
+        if self.cfg.dynamic_reserve:
+            need = home * self.cfg.reserve_margin + self.cfg.reserve_abs
+        else:
+            need = self.cfg.static_reserve
+        if self.inv:
+            need += self.inv.reserve(obs.t)    # идущая утечка или невыясненная причина расхода
+        return home, need
 
     def _ask_at_battery_floor(self, obs):
         """Один раз за прогон спросить планировщик, когда заряда осталось «порог миссии + дорога домой».
@@ -509,7 +528,7 @@ class Agent:
         battery = obs.battery
 
         def costs(p):
-            to = self.graph.energy(dist, pred, p['x'], p['y']) * self._per_m()
+            to = self._trip_cost(self.graph, dist, pred, p['x'], p['y'])
             back = self._home_cost(p['x'], p['y'])
             ix, iy = self.arena.w2g(p['x'], p['y'])
             safe = self._risk[iy, ix] < 0.5

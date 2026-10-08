@@ -11,8 +11,11 @@
     потолок − счёт = 10 · несобранные + 20 · невозврат + штрафы + 0,1 · (остаток оракула − остаток агента)
 
 Каждому несобранному образцу, невозврату и штрафу приписывается одна причина — по записи прогона
-(журнал решений, планы, карта вероятностей, события судьи). Оракул недостижим: поиск образцов по
-датчику без направления стоит пути. Поэтому «лишний путь» показан отдельной строкой справки.
+(журнал решений, планы, карта вероятностей, события судьи). Подъезд относится к одному образцу —
+ближайшему из ещё не собранных; «сбой датчика» ставится, только если сбой шёл во время подъезда;
+«заряда не хватало» — только если его и правда не хватало. Что этими правилами не объясняется,
+идёт в отдельную причину «неясно». Оракул недостижим: поиск образцов по датчику без направления
+стоит пути. Поэтому «лишний путь» показан отдельной строкой справки.
 """
 import argparse
 import json
@@ -46,6 +49,7 @@ CAUSES = [
     ('sample_miss', 'образец: бросил после ложного сбора'),
     ('sample_cut', 'образец: подъезд прерван возвратом или концом прогона'),
     ('sample_early', 'образец: вернулся рано — привезённого заряда хватало'),
+    ('sample_unclear', 'образец: причина неясна'),
     ('noreturn_hazard', 'невозврат: зона или сбой по дороге домой'),
     ('noreturn_leak', 'невозврат: утечка заряда'),
     ('noreturn_cost', 'невозврат: недооценена цена пути домой'),
@@ -190,20 +194,25 @@ def oracle(scenario, rules, budget=None, start=None, targets=None):
 # разбор одной записи
 # ---------------------------------------------------------------------------------------------
 
-def _belief_peaks(tr, points, radius=0.35):
-    """Для каждой точки — наибольшая за прогон уверенность агента, что рядом с ней лежит образец."""
+def _belief_peaks(tr, points, radius=0.35, known=0.35):
+    """Для каждой точки — наибольшая за прогон уверенность агента, что рядом с ней лежит образец, и
+    моменты, когда эта уверенность была не ниже known (агент о месте знал)."""
     b = tr.get('belief')
     out = [0.0] * len(points)
+    when = [[] for _ in points]
     if not b:
-        return out
+        return out, when
     ys = b['y0'] + (np.arange(b['h']) + 0.5) * b['res']
     xs = b['x0'] + (np.arange(b['w']) + 0.5) * b['res']
     masks = [np.hypot(xs[None, :] - p[0], ys[:, None] - p[1]) <= radius for p in points]
     for snap in b['snaps']:
         p = (decode_grid(snap['data'], b['h'], b['w']).astype(float) / 255.0) ** 2
         for i, m in enumerate(masks):
-            out[i] = max(out[i], 1.0 - math.exp(-float(p[m].sum())))
-    return out
+            conf = 1.0 - math.exp(-float(p[m].sum()))
+            out[i] = max(out[i], conf)
+            if conf >= known:
+                when[i].append(snap['t'])
+    return out, when
 
 
 def _soils_at(scenario, t):
@@ -250,6 +259,65 @@ def _attempts(tr, scenario):
     return out
 
 
+def assign_attempts(attempts, samples, collected_t, radius=0.6):
+    """Какому образцу принадлежит каждый подъезд: {номер образца: [подъезды]}.
+
+    Подъезд относится к одному образцу — ближайшему к его цели среди тех, что к началу подъезда ещё не
+    собраны, и только если тот не дальше radius. collected_t — {номер образца: когда собран}.
+    """
+    out = defaultdict(list)
+    for a in attempts:
+        left = [i for i in range(len(samples)) if collected_t.get(i, math.inf) > a[0]]
+        if not left:
+            continue
+        i = min(left, key=lambda i: math.hypot(a[3] - samples[i][0], a[4] - samples[i][1]))
+        if math.hypot(a[3] - samples[i][0], a[4] - samples[i][1]) <= radius:
+            out[i].append(a)
+    return out
+
+
+def attempt_cause(attempt, faults):
+    """Причина по тому, чем кончился последний подъезд. faults — [(вид, начало, конец)] сбоев датчика.
+
+    «Сбой датчика» — только если сбой шёл во время самого подъезда. Подъезд, который кончился вскоре
+    после сбоя (карта образцов ещё могла быть испорчена) или был прерван тревогой о датчике без
+    настоящего сбоя, — «неясно».
+    """
+    t0, t1, how = attempt[:3]
+    if how == 'hazard':
+        return 'sample_hazard'
+    if how == 'false_collect':
+        return 'sample_miss'
+    if how in ('return', 'end'):
+        return 'sample_cut'
+    if any(a <= t1 and b >= t0 for _, a, b in faults):
+        return 'sample_fault'
+    if how in ('sensor_degraded', 'sensor_wait') or any(b < t0 and t1 <= b + 8.0 for _, a, b in faults):
+        return 'sample_unclear'
+    return 'sample_lost'
+
+
+def _could_afford(tr, scenario, rules, sample, times, limit=6):
+    """Хватало ли заряда доехать до образца и вернуться в один из моментов, когда агент о нём знал.
+
+    Мерка та же, что у агента: дорога туда и обратно с запасом 10% и 4 единицы сверху; дорога считается
+    по настоящему миру (после всех событий сценария).
+    """
+    cfg = (tr.get('agent') or {}).get('config') or {}
+    margin, spare = cfg.get('reserve_margin', 1.1), cfg.get('reserve_abs', 4.0)
+    t = np.array(tr['track']['t'])
+    stop = next((p['t'] for p in tr['plans'] if p['subgoals'] and p['subgoals'][0]['type'] == 'return_base'),
+                tr['result']['t'])
+    times = [x for x in times if x < stop]
+    for when in times[::max(1, len(times) // limit)][:limit]:
+        k = min(int(np.searchsorted(t, when)), len(t) - 1)
+        here = (tr['track']['x'][k], tr['track']['y'][k])
+        trip = oracle(scenario, rules, budget=1e9, start=here, targets=[sample])['energy']
+        if tr['track']['battery'][k] - trip * margin - spare >= 0.0:
+            return True
+    return False
+
+
 def analyze(tr):
     """Разбор одной записи прогона: потолок, недобор и его причины."""
     scenario = Scenario.from_dict(tr['scenario'])
@@ -263,8 +331,9 @@ def analyze(tr):
     detail = {'missed': {}}
 
     # --- несобранные образцы ---------------------------------------------------------------
-    peaks = _belief_peaks(tr, [samples[i] for i in missed])
-    attempts = _attempts(tr, scenario)
+    peaks, known_at = _belief_peaks(tr, [samples[i] for i in missed])
+    collected_t = {e['sample']: e['t'] for e in tr['events'] if e['type'] == 'sample_collected'}
+    owned = assign_attempts(_attempts(tr, scenario), samples, collected_t)
     faults = [(k, a, b) for k, a, b in fault_intervals(tr['world']) if k.startswith('sensor')]
     spare = set()
     if res['returned'] and missed:
@@ -272,28 +341,17 @@ def analyze(tr):
         extra = oracle(scenario, rules, budget=res['battery'], targets=[samples[i] for i in missed])
         spare = {missed[j] for j in extra['order']}
     tx, ty = np.array(tr['track']['x']), np.array(tr['track']['y'])
-    for i, peak in zip(missed, peaks):
+    for i, peak, known in zip(missed, peaks, known_at):
         sx, sy = samples[i]
-        # Подъезд относится к образцу, если цель подъезда ближе к нему, чем к любому другому несобранному.
-        mine = [a for a in attempts if math.hypot(a[3] - sx, a[4] - sy) <= 0.6]
+        mine = owned.get(i, [])
         near = float(np.hypot(tx - sx, ty - sy).min())
         if mine:
-            how = mine[-1][2]
-            t_end = mine[-1][1]
-            if how == 'hazard':
-                cause = 'sample_hazard'
-            elif how == 'false_collect':
-                cause = 'sample_miss'
-            elif how in ('return', 'end'):
-                cause = 'sample_cut'
-            elif how == 'sensor_degraded' or any(a - 1.0 <= t_end <= b + 8.0 for _, a, b in faults):
-                cause = 'sample_fault'
-            else:
-                cause = 'sample_lost'
+            cause = attempt_cause(mine[-1], faults)
         elif i in spare:
             cause = 'sample_early'
         elif peak >= 0.35:
-            cause = 'sample_no_charge'
+            # Знал, но не поехал. «Заряда не хватало» — только если его и правда не хватало.
+            cause = 'sample_unclear' if _could_afford(tr, scenario, rules, samples[i], known) else 'sample_no_charge'
         else:
             cause = 'sample_unknown'
         if cause in ('sample_no_charge', 'sample_unknown', 'sample_cut') and i in spare:
