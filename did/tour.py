@@ -42,8 +42,6 @@ class Settings:
     explore_min: float = 0.03         # участки с меньшей ценностью (в образцах) в план не идут
     dwell: float = 0.3                # ед. заряда на подъезд вплотную, остановку и сбор
     commit_slack: float = 1.0         # к уже выбранной цели робот едет, пока запаса не хватает не больше чем на столько
-    min_gain: float = 0.0             # C: цель входит в план, только если её вклад в ожидаемый счёт больше стольких очков
-    replan_s: float = 0.0             # > 0 — по дороге к точке разведки пересчитывать план раз в столько секунд
     true_rates: bool = False          # только оракул: расход на груз и повороты берётся из правил, а не из оценки агента
     turn_rate: float = 1.3            # рад на метр пути (для true_rates)
     # --- «сначала разведка, потом сбор»
@@ -196,10 +194,7 @@ class TourScheme:
         if not ok.any():
             return [], {'value': 0.0, 'cost': 0.0, 'score': -np.inf}
         score = np.where(ok, pts_sample * value[:, None] - pts_left * (dp + home), -np.inf)
-        if self.s.min_gain > 0.0:
-            mask, last = self._prune(score, ok, n)
-        else:
-            mask, last = np.unravel_index(int(score.argmax()), score.shape)
+        mask, last = np.unravel_index(int(score.argmax()), score.shape)
         info = {'value': float(value[mask]), 'cost': float(dp[mask, last] + home[mask, last]),
                 'score': float(score[mask, last])}
         order = []
@@ -255,19 +250,6 @@ class TourScheme:
                 best.update(score=g - pts_left * (c + home), order=[first], value=value[first], cost=c + home)
                 visit(first, 1 << first, c, g, value[first], carry[first])
         return best['order'], {'value': best['value'], 'cost': best['cost'], 'score': best['score']}
-
-    def _prune(self, score, ok, n):
-        """Порог «цель не стоит заряда»: из лучшего набора выбрасываются цели, чей вклад в счёт меньше min_gain."""
-        best = score.max(axis=1)                         # лучший счёт для каждого набора целей
-        mask = int(best.argmax())
-        changed = True
-        while changed:
-            changed = False
-            for i in range(n):
-                sub = mask & ~(1 << i)
-                if mask >> i & 1 and sub and best[sub] > -np.inf and best[mask] - best[sub] < self.s.min_gain:
-                    mask, changed = sub, True
-        return mask, int(score[mask].argmax())
 
     # --- связка с агентом --------------------------------------------------------------------------
 
@@ -363,8 +345,6 @@ class TourScheme:
         if self._survey and t - self._plan_t >= 2.0 and any(
                 c['mass'] >= s.survey_pick for c in a._candidates(t)):
             return a._request_plan('survey')             # по пути появился уверенный кандидат
-        if s.replan_s > 0.0 and sg['type'] in ('explore', 'goto') and t - self._plan_t >= s.replan_s:
-            a._request_plan('tour_refresh')
 
     # --- обзорный объезд ---------------------------------------------------------------------------
 
