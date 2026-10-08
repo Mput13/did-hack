@@ -22,7 +22,7 @@ import yaml
 from . import ROOT
 from .config import SCIENCE
 from .memory import KnowledgeBase
-from .metrics import METRICS, SIDE_METRICS, paired, paired_did, summarize, verdict
+from .metrics import METRICS, SIDE_METRICS, WAIT_METRICS, paired, paired_did, summarize, verdict
 from .runner import RUNS, run_episode
 from .scenario import ROUTE_VERSION
 
@@ -128,6 +128,7 @@ def summarize_experiment(spec, results, n_seeds, wall_s):
     errors = [{k: r[k] for k in ('arm', 'condition', 'level', 'seed', 'error')} for r in results if 'error' in r]
     rng = np.random.default_rng(0)
     side = np.random.default_rng(1)       # для SIDE_METRICS: основной ряд случайных чисел они не трогают
+    wait = np.random.default_rng(2)       # для WAIT_METRICS: то же, и ряд SIDE_METRICS тоже не трогают
 
     def pick(arm, cond=None, level=None):
         return [r for r in runs if r['arm'] == arm and (cond is None or r['condition'] == cond)
@@ -141,7 +142,8 @@ def summarize_experiment(spec, results, n_seeds, wall_s):
                 if not sel:
                     continue
                 groups.append({'arm': arm['id'], 'condition': cond['id'], 'level': level, 'n': len(sel),
-                               'stats': {m: summarize(sel, m, side if m in SIDE_METRICS else rng) for m in METRICS}})
+                               'stats': {m: summarize(sel, m, side if m in SIDE_METRICS else
+                                                      wait if m in WAIT_METRICS else rng) for m in METRICS}})
 
     claims = []
     for c in spec['claims']:

@@ -21,6 +21,7 @@ from .localize import PoseTracker
 from .nav import CostGraph, Follower
 from .planner import MISSION, HeuristicPlanner, resolve_subgoals
 from .route import survey_route
+from .waiting import ActWhileWaiting, answer_delay
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,12 @@ class AgentConfig:
     llm_min_interval_s: float = 4.0   # не дёргать модель чаще
     llm_wait_s: float = 0.0           # быстрый симулятор: сколько секунд робот стоит, «ожидая ответ модели»
     async_planner: bool = False       # Gazebo: модель думает в отдельном потоке, робот в это время стоит
+    llm_act_while_waiting: str = 'off'   # R16, пока модель думает: off — стоять; rule — ехать по плану правила;
+                                         # safe — только обратимое: без сбора и не дальше llm_wait_leash_m (did/waiting.py)
+    llm_wait_leash_m: float = 0.5     # safe: как далеко от места вопроса можно отъехать до ответа модели
+    llm_wait_superseded: str = 'apply'   # ответ не совпал с правилом, а план с тех пор уже сменился: apply — перейти
+                                         # на план модели, если он выполним сейчас; drop — отбросить (кроме возврата на базу)
+    llm_wait_measured: bool = False   # быстрый симулятор: ждать столько, сколько модель отвечала на деле, а не llm_wait_s
     localize: bool = True             # поправлять позу одометрии по лидару и карте (did/localize.py)
     science: bool = False             # вести расследования: несколько объяснений странности и опыт (did/inquiry.py)
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
@@ -176,6 +183,8 @@ class Agent:
         self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
         self._battery_threshold_triggered = False
         self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
+        # R16: пока модель думает, робот действует по правилу, а ответ сверяет с тем, что уже делает.
+        self.aw = ActWhileWaiting(self) if config.planner == 'llm' and config.llm_act_while_waiting != 'off' else None
 
     # ======================================================================================
     # один такт цикла
@@ -200,6 +209,8 @@ class Agent:
                 self._ask_at_battery_floor(obs)
         if self._trigger and obs.t >= self._wait_until:
             self._deliberate(obs)
+        if self.aw is not None:
+            self.aw.poll(obs)
         self._act(obs, io)
         self._record(obs)
 
@@ -589,6 +600,8 @@ class Agent:
             state = self._state(obs, trigger)
             ahead = self.fs.plan(obs, state) if self.fs is not None else None    # выбор сравнением вариантов
             use_llm =self.cfg.planner == 'llm' and obs.t - self._last_llm_t >= self.cfg.llm_min_interval_s
+            if self.aw is not None and ahead is None and self.aw.decide(obs, state, trigger, use_llm):
+                return
             planner = self.planner if use_llm or self.cfg.planner != 'llm' else HeuristicPlanner()
             if use_llm:
                 self._last_llm_t = obs.t
@@ -597,8 +610,8 @@ class Agent:
                 self._future = self._pool.submit(planner.plan, state)
                 return
             plan = ahead or planner.plan(state)
-            if use_llm and self.cfg.llm_wait_s:
-                self._wait_until = obs.t + self.cfg.llm_wait_s
+            if use_llm and (self.cfg.llm_wait_s or self.cfg.llm_wait_measured):
+                self._wait_until = obs.t + answer_delay(self.cfg, plan)
         else:
             if not self._future.done():
                 return
@@ -657,6 +670,9 @@ class Agent:
             self._escape = None
             self._path_goal = None
             self._stuck = None
+        if self.aw is not None and self.aw.hold(obs):
+            self.mode = 'think'                # safe: до ответа модели дальше не еду и не собираю
+            return self._command(io, 0.0, 0.0)
         if self.inv and self.inv.act(obs, io):
             return                             # такт занят опытом расследования
         if not self.queue:

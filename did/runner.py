@@ -18,6 +18,7 @@ from .metrics import SoilProbe, run_metrics, score_hypotheses, score_inquiries
 from .planner import HeuristicPlanner, LLMPlanner
 from .recorder import Recorder, save_trace
 from .scenario import Scenario, generate
+from .waiting import wait_metrics
 
 RUNS = ROOT / 'runs'
 # Мерило, а не участник: агент no_change, которому быстрый симулятор сообщает настоящую карту грунтов.
@@ -144,6 +145,7 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     judge = world.judge
     score = judge.score()
     metrics = run_metrics(score, rules, bot.journal, judge.world_log, rec.plans, rec.llm)
+    metrics.update(wait_metrics(rec, bot))
     if probe:
         metrics.update(probe.metrics(bot.journal))
     sh = score_hypotheses(bot.journal.hypotheses, scenario, judge.world_log, events=rec.events)
