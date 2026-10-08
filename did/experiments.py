@@ -51,6 +51,13 @@ def _job(args, knowledge=None, soil_probe=False):
     spec_id, arm, cond, level, seed = args
     folder = arm['id'] if cond['id'] == 'base' else f"{arm['id']}@{cond['id']}"
     try:
+        if arm.get('team'):               # прогон команды роботов (did/team_runner.py): solo | pair | pair_lidar | team
+            from .team_runner import run_team_episode
+            s = run_team_episode(level, seed, arm['team'], agent=arm.get('agent', 'adaptive'), experiment=spec_id,
+                                 arm=folder, scenario_args={**cond.get('scenario', {})}, config=arm.get('config'),
+                                 rules=cond.get('rules'), team=arm.get('team_config'), sim=cond.get('sim'))
+            s['arm'], s['condition'] = arm['id'], cond['id']
+            return s
         s = run_episode(level, seed, arm['agent'], experiment=spec_id, arm=folder,
                         scenario_args={**cond.get('scenario', {})},
                         config=arm.get('config'), rules=cond.get('rules'),

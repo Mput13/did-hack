@@ -48,8 +48,10 @@ LIVE = RUNS / '_live' / 'state.json'
 class RosIO(Node):
     """RobotIO поверх топиков и сервисов. Колбэки только складывают последние значения."""
 
-    def __init__(self):
-        super().__init__('did_agent')
+    def __init__(self, ns='', base=BASE, name='did_agent'):
+        # ns и base — для второго робота в одном мире (did/ros_team.py): свои топики /tb2/... и своя точка старта.
+        super().__init__(name)
+        self.base = base
         self.lock = threading.Lock()
         self.sim_time = None
         self.odom = None
@@ -63,19 +65,19 @@ class RosIO(Node):
         self.truth = None
         self.clock_offset = None        # время судьи минус время симуляции
         self.create_subscription(Clock, '/clock', self._on_clock, qos_profile_sensor_data)
-        self.create_subscription(Odometry, '/odom', self._on_odom, qos_profile_sensor_data)
-        self.create_subscription(LaserScan, '/scan', self._on_scan, qos_profile_sensor_data)
-        self.create_subscription(Float32, '/did/battery', self._on_battery, 10)
-        self.create_subscription(Float32, '/did/sample_sensor', self._on_sensor, 10)
-        self.create_subscription(String, '/did/events', self._on_events, 50)
-        self.create_subscription(String, '/did/score', self._on_score, 10)
+        self.create_subscription(Odometry, ns + '/odom', self._on_odom, qos_profile_sensor_data)
+        self.create_subscription(LaserScan, ns + '/scan', self._on_scan, qos_profile_sensor_data)
+        self.create_subscription(Float32, ns + '/did/battery', self._on_battery, 10)
+        self.create_subscription(Float32, ns + '/did/sample_sensor', self._on_sensor, 10)
+        self.create_subscription(String, ns + '/did/events', self._on_events, 50)
+        self.create_subscription(String, ns + '/did/score', self._on_score, 10)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, '/did/truth', self._on_truth, latched)
-        self.cmd_pub = self.create_publisher(TwistStamped, '/cmd_vel', 10)
-        self.belief_pub = self.create_publisher(OccupancyGrid, '/did/viz/belief', latched)
-        self.path_pub = self.create_publisher(Path, '/did/viz/path', latched)
-        self.collect_cli = self.create_client(Trigger, '/did/collect')
-        self.finish_cli = self.create_client(Trigger, '/did/finish')
+        self.cmd_pub = self.create_publisher(TwistStamped, ns + '/cmd_vel', 10)
+        self.belief_pub = self.create_publisher(OccupancyGrid, ns + '/did/viz/belief', latched)
+        self.path_pub = self.create_publisher(Path, ns + '/did/viz/path', latched)
+        self.collect_cli = self.create_client(Trigger, ns + '/did/collect')
+        self.finish_cli = self.create_client(Trigger, ns + '/did/finish')
 
     # --- колбэки -----------------------------------------------------------------------------
 
@@ -86,7 +88,7 @@ class RosIO(Node):
         p, q, tw = msg.pose.pose.position, msg.pose.pose.orientation, msg.twist.twist
         yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
         with self.lock:
-            self.odom = (BASE[0] + p.x, BASE[1] + p.y, yaw, tw.linear.x, tw.angular.z)
+            self.odom = (self.base[0] + p.x, self.base[1] + p.y, yaw, tw.linear.x, tw.angular.z)
             self.odom_log.append((msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9, *self.odom))
 
     def _on_scan(self, msg):
