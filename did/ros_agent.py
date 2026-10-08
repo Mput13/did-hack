@@ -270,7 +270,13 @@ def run(level, seed, agent, experiment, arm=None, llm=None, wait_s=120.0, settle
         cfg = make_config(agent, async_planner=llm_on, **(config or {}))
         arm = arm or cfg.name
         rec = Recorder()
-        bot = Agent(arena, cfg, n_samples=LEVELS[level]['samples'], rules=rules,
+        bot_rules = rules
+        if getattr(cfg, 'calibrate', False):
+            # Калибрующийся агент и в Gazebo стартует с допущений команды о датчике и расходе, а не с правил
+            # стенда (как в быстром симуляторе, did/runner.py). Правила стенда остаются для записи и подсчёта.
+            from .calibrate import assumed_rules
+            bot_rules = assumed_rules(rules)
+        bot = Agent(arena, cfg, n_samples=LEVELS[level]['samples'], rules=bot_rules,
                     planner=make_planner(cfg, llm, seed), recorder=rec, knowledge=knowledge)
         scenario = generate(level, seed, arena)     # только для подписи записи, если /did/truth не придёт
         run_id = f'{experiment}/{arm}/{level}-{seed}'

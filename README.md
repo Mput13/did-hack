@@ -98,7 +98,7 @@ pixi run lab                                  # только интерфейс:
   `fastsim.py` быстрый симулятор, `arena.py` карта, `nav.py` путь и ведение, `localize.py` поправка положения
   по лидару, `mapping.py` построение карты, `belief.py` картина мира агента, `energy.py` + `science.py` +
   `inquiry.py` модель расхода и расследования, `memory.py` память между прогонами, `foresight.py` сравнение
-  будущих маршрутов, `study*.py` исследование по заданию пользователя, `planner.py` + `llm*.py`
+  будущих маршрутов, `calibrate.py` самокалибровка датчика и расхода (вариант `adaptive_cal`), `study*.py` исследование по заданию пользователя, `planner.py` + `llm*.py`
   планировщик и языковая модель, `agent.py` агентский цикл, `baselines.py` базовые стратегии,
   `recorder.py` запись прогона, `metrics.py` + `experiments.py` серии опытов, `pilot.py` пульт для показа,
   `ros_agent.py` агент в ROS 2, `lab/server.py` сервер интерфейса.
