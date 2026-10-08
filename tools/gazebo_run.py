@@ -26,6 +26,8 @@ def stop(proc):
             proc.wait(timeout=15)
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
+    if subprocess.run(['pgrep', '-f', 'tools/demo.py'], stdout=subprocess.DEVNULL).returncode == 0:
+        return                                  # рядом идёт показ: его Gazebo трогать нельзя
     for name in LEFTOVERS:                      # launch иногда оставляет дочерние процессы
         subprocess.run(['pkill', '-f', name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

@@ -183,6 +183,27 @@ def inquiry_accuracy(exp='E10', arm='scientist', level='hard'):
             'wrong': sum(r['wrong'] for r in rows.values())} if runs else None
 
 
+def research():
+    """План исследований (research/agenda.yaml) и выводы из сданных отчётов (research/findings/*.md)."""
+    import re
+
+    import yaml
+    path = ROOT / 'research' / 'agenda.yaml'
+    if not path.exists():
+        return None
+    studies = yaml.safe_load(path.read_text(encoding='utf-8')).get('studies', [])
+    for st in studies:
+        report = ROOT / 'research' / 'findings' / f"{st['id']}.md"
+        if report.exists():
+            text = report.read_text(encoding='utf-8')
+            m = re.search(r'^## Вывод\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M)
+            st['conclusion'] = m.group(1).strip() if m else None
+            lim = re.search(r'^## Ограничения\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M)
+            st['limits'] = lim.group(1).strip() if lim else None
+        st['computed'] = bool(st.get('experiment')) and (RUNS / str(st['experiment']) / 'summary.json').exists()
+    return {'studies': studies, 'built': time.strftime('%d.%m.%Y %H:%M')}
+
+
 def shots():
     """Снимки окон (docs/explainer/shots/*.jpg) — внутрь страницы, чтобы она оставалась одним файлом."""
     import base64
@@ -254,6 +275,7 @@ def main():
         'traps': trap_table(),
         'code': code_size(),
         'shots': shots(),
+        'research': research(),
         'kb': _json(RUNS / '_knowledge' / 'kb.json'),
         'llm_real': {p.name.removesuffix('.summary.json'): {k: v for k, v in _json(p).items() if k not in ('runs',)}
                      for p in sorted((RUNS / 'llm_real').glob('*.summary.json'))},

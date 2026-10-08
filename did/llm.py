@@ -33,7 +33,7 @@ MAX_PAUSE_S = 10.0           # потолок паузы между повтор
 PROMPTS = Path(__file__).resolve().parent / 'prompts'
 PROMPT_PATH = PROMPTS / 'planner_system.md'
 SUBGOAL_TYPES = ('investigate', 'explore', 'goto', 'return_base')
-CLIENT_KINDS = ('mock', 'http', 'ollama', 'codex')
+CLIENT_KINDS = ('mock', 'http', 'ollama', 'codex', 'openrouter')
 OLLAMA_URL = 'http://127.0.0.1:11434/v1'
 OLLAMA_MODEL = 'qwen2.5:3b'
 
@@ -155,7 +155,7 @@ class ChatClient:
     """Клиент OpenAI-совместимого /chat/completions с повторами. Ключ наружу не выдаёт."""
 
     def __init__(self, base_url, api_key, model, timeout_s=30, max_retries=2, json_mode=True,
-                 retry_pause_s=0.5, extra_body=None, use_schema=False):
+                 retry_pause_s=0.5, extra_body=None, use_schema=False, min_tokens=0):
         base = str(base_url or '').strip().rstrip('/')
         if base.endswith('/chat/completions'):
             base = base[:-len('/chat/completions')]
@@ -169,6 +169,9 @@ class ChatClient:
         self.use_schema = bool(use_schema)           # слать JSON-схему ответа, если вызывающий её дал
         self.retry_pause_s = float(retry_pause_s)    # пауза перед первым повтором, дальше удваивается
         self.extra_body = dict(extra_body or {})     # добавки к телу запроса, например enable_thinking
+        # Нижняя граница лимита ответа: у рассуждающих моделей рассуждение тратит тот же лимит, и при 800
+        # токенах ответ обрывается на середине JSON.
+        self.min_tokens = int(min_tokens or 0)
         self._api_key = str(api_key or '')
         headers = {'Authorization': f'Bearer {self._api_key}'} if self._api_key else {}
         # Системный прокси нужен для внешнего адреса, а до локального сервера он запрос не довезёт.
@@ -184,7 +187,7 @@ class ChatClient:
         """Клиент по переменным окружения; None, если DID_LLM_BASE_URL не задан.
 
         Основные: DID_LLM_BASE_URL, DID_LLM_API_KEY, DID_LLM_MODEL, DID_LLM_TIMEOUT_S (30).
-        Дополнительные: DID_LLM_MAX_RETRIES (2), DID_LLM_JSON_MODE (1), DID_LLM_JSON_SCHEMA (0),
+        Дополнительные: DID_LLM_MAX_RETRIES (2), DID_LLM_JSON_MODE (1), DID_LLM_JSON_SCHEMA (0), DID_LLM_MIN_TOKENS (0),
         DID_LLM_EXTRA_BODY (JSON-объект).
         Сначала читается файл env_path; env_path=None — только то, что уже в окружении.
         overrides — параметры конструктора поверх окружения, например model или timeout_s.
@@ -205,6 +208,7 @@ class ChatClient:
         opts = dict(api_key=env.get('DID_LLM_API_KEY', '').strip(), model=env.get('DID_LLM_MODEL', '').strip(),
                     timeout_s=_env_number('DID_LLM_TIMEOUT_S', 30.0, float),
                     max_retries=_env_number('DID_LLM_MAX_RETRIES', 2, int),
+                    min_tokens=_env_number('DID_LLM_MIN_TOKENS', 0, int),
                     json_mode=env.get('DID_LLM_JSON_MODE', '1').strip().lower() not in off,
                     use_schema=env.get('DID_LLM_JSON_SCHEMA', '0').strip().lower() not in off, extra_body=extra)
         return cls(base, **{**opts, **overrides})
@@ -269,6 +273,8 @@ class ChatClient:
         уходит на сервер только при use_schema, а отказ сервера снижает запрос до json_object.
         """
         t0 = time.monotonic()
+        if self.min_tokens:
+            max_tokens = max(int(max_tokens or 0), self.min_tokens)
         want_schema = bool(schema) and self.use_schema and self.json_mode
         use_json = 'schema' if want_schema else self.json_mode
         attempts = failures = 0
@@ -818,7 +824,8 @@ def make_client(kind='mock', **opts):
              3–4 тыс. токенов: если ответы портятся, запустите сервер с OLLAMA_CONTEXT_LENGTH=8192;
     codex  — GPT по подписке через Codex CLI: model ('gpt-6-luna'), effort ('low'), timeout_s (120),
              cache_dir, max_calls (см. did.llm_codex.CodexCliClient); ответы всегда кэшируются на диск.
-    Для http и ollama cache=True кладёт ответы в тот же кэш (повторяемость прогонов).
+    openrouter — Jev Router через OpenRouter (did.llm_openrouter): только эта модель, учёт расходов и потолок.
+    Для http, ollama и openrouter cache=True кладёт ответы в тот же кэш (повторяемость прогонов).
     Ошибка настроек — LLMError.
     """
     opts = dict(opts)
@@ -832,7 +839,10 @@ def make_client(kind='mock', **opts):
     if kind not in CLIENT_KINDS:
         raise LLMError(f"неизвестный вид клиента «{kind}»; есть: {', '.join(CLIENT_KINDS)}")
     cache = opts.pop('cache', False)
-    if kind == 'ollama':
+    if kind == 'openrouter':               # Jev Router: единственная платная модель, с потолком расходов
+        from .llm_openrouter import JevClient
+        client = JevClient(**opts)
+    elif kind == 'ollama':
         client = ChatClient(**{'base_url': os.environ.get('DID_OLLAMA_URL') or OLLAMA_URL, 'api_key': 'ollama',
                                'model': os.environ.get('DID_OLLAMA_MODEL') or OLLAMA_MODEL, 'timeout_s': 120,
                                'max_retries': 1, 'use_schema': True, **opts})

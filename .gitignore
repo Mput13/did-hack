@@ -16,3 +16,6 @@ ws/build/
 ws/install/
 ws/log/
 research/PAUSE
+research/state.json
+research/task_statement.txt
+research/results_digest.txt

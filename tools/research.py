@@ -77,6 +77,7 @@ def listing():
 def pause():
     PAUSE.write_text('Исследования приостановлены: идёт показ или репетиция.\n', encoding='utf-8')
     subprocess.run(['pkill', '-f', str(TREES)], capture_output=True)
+    subprocess.run(['pkill', '-f', 'tools/gazebo_batch.py'], capture_output=True)
     print('пауза включена; расчёты в деревьях исследований остановлены')
     return 0
 

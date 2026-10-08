@@ -225,6 +225,8 @@ def test_cached_client_wraps_any_client(tmp_path):
 def env(monkeypatch):
     for name in [n for n in os.environ if n.startswith(('DID_LLM_', 'DID_OLLAMA_', 'DID_CODEX_'))]:
         monkeypatch.delenv(name)
+    # Настоящий файл .env проекта (если он есть) в проверках не участвует.
+    monkeypatch.setattr('did.llm.load_env', lambda *args, **kwargs: {})
     return monkeypatch
 
 

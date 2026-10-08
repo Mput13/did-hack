@@ -224,3 +224,10 @@ figure.shot.wide { margin: 16px 0; }
 figure.shot img { width: 100%; height: auto; display: block; border-radius: 6px; border: 1px solid var(--line); }
 figure.shot figcaption { font-size: 14.5px; color: var(--ink-2); line-height: 1.45; margin-top: 10px; }
 figure.shot figcaption b { color: var(--ink); }
+
+/* журнал исследований */
+.study { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 18px; margin: 12px 0; }
+.study-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; font-size: 17px; }
+.study-id { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--ink-3); }
+.study-meta { font-size: 13px; color: var(--ink-3); margin: 2px 0 6px; }
+.study p { font-size: 15.5px; margin: 6px 0; max-width: 86ch; }
