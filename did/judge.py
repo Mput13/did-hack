@@ -140,7 +140,14 @@ class Judge:
             return float(self._stuck)
         if self.remaining:
             d = min(math.dist((x, y), p) for p in self.remaining.values())
-            clean = max(0.0, 1.0 - d / self.rules.sensor_range_m)
+            law = self.rules.sensor_law
+            u = d / self.rules.sensor_range_m
+            if law == 'quadratic':
+                clean = max(0.0, 1.0 - u * u)
+            elif law == 'sqrt':
+                clean = max(0.0, 1.0 - math.sqrt(u))
+            else:
+                clean = max(0.0, 1.0 - u)
         else:
             clean = 0.0
         if 'sensor_bias' in self.faults:

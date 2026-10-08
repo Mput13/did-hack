@@ -260,7 +260,7 @@ class Agent:
                 self.rec.add_hazard(t, cx, cy, r)
             self.journal.open(t, f'hazard:{len(self.hazards)}',
                               f'около ({cx:.1f}; {cy:.1f}) опасная зона радиусом около {r:.1f} м',
-                              'объезжать; новых штрафов в этом месте быть не должно', x=cx, y=cy)
+                              'объезжать; новых штрафов в этом месте быть не должно', x=cx, y=cy, r=float(r))
 
     def _trail_point(self, x, y, t):
         """Ещё одна точка, пройденная без штрафа: она уточняет, где опасных зон нет."""
@@ -341,7 +341,7 @@ class Agent:
                                   f"около ({z['x']:.1f}; {z['y']:.1f}) грунт дороже обычного примерно в "
                                   f"{z['mult']:.1f} раза",
                                   'сравнить расход на следующих 0,3 м этого участка с прогнозом',
-                                  x=z['x'], y=z['y'])
+                                  x=z['x'], y=z['y'], mult=float(z['mult']))
                 self._soil_h.append({'key': key, 'x': z['x'], 'y': z['y']})
             elif z['evidence_m'] >= 0.3:
                 self.journal.close(t, known['key'], 'confirmed',

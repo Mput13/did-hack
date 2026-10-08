@@ -544,8 +544,9 @@
   const story = D.stories[0];
   (() => {
     const all = Object.values(E).filter(Boolean);
-    F.runs_total = all.reduce((n, e) => n + (e.spec.manual ? 0 : e.runs.length), 0).toLocaleString('ru');
-    F.errors_total = all.reduce((n, e) => n + e.errors, 0);
+    const extra = D.research_runs || { runs: 0, errors: 0 };
+    F.runs_total = (all.reduce((n, e) => n + (e.spec.manual ? 0 : e.runs.length), 0) + extra.runs).toLocaleString('ru');
+    F.errors_total = all.reduce((n, e) => n + e.errors, 0) + extra.errors;
     const walls = E.E1.runs.map(r => r.wall_s).filter(Boolean).sort((a, b) => a - b);
     F.wall = num(walls[walls.length >> 1], 1);
     F.built = D.built;
@@ -896,6 +897,18 @@
         for (const [tr, col, dash] of [[pair.fastsim, C.fixed, null], [pair.gazebo, C.third, null]]) polyline(T, tr.track.x.map((x, i) => [x, tr.track.y[i]]), col, 2.4, dash);
       });
     });
+    // все пары «один сценарий — два симулятора», включая те, что без карты
+    const runs = (E.E7 ? E.E7.runs : []), pairs = {};
+    runs.forEach(r => { const k = r.level + '-' + r.seed; (pairs[k] = pairs[k] || { level: r.level, seed: r.seed })[r.arm] = r; });
+    const list = Object.values(pairs).filter(p => p.gazebo && p.fastsim).sort((a, b) => ['easy', 'medium', 'hard'].indexOf(a.level) - ['easy', 'medium', 'hard'].indexOf(b.level) || a.seed - b.seed);
+    if (list.length > D.gazebo.length) {
+      const mean = (xs) => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
+      const hard = list.filter(p => p.level === 'hard');
+      root.appendChild(el('h4', null, `Все сверочные пары: ${list.length} сценариев`));
+      root.appendChild(el('table', 'plain', '<thead><tr><th>Сценарий</th><th>Собрано: Gazebo / быстрый</th><th>Вернулся: Gazebo / быстрый</th><th>Штрафы</th><th>Столкновения в Gazebo</th><th>Счёт: Gazebo / быстрый</th><th>Разность счёта</th></tr></thead><tbody>' +
+        list.map(p => `<tr><td>${p.level} № ${p.seed}</td><td>${pct(p.gazebo.samples_share)} / ${pct(p.fastsim.samples_share)}</td><td>${p.gazebo.returned ? 'да' : '<b>нет</b>'} / ${p.fastsim.returned ? 'да' : '<b>нет</b>'}</td><td>${num(p.gazebo.penalties, 0)} / ${num(p.fastsim.penalties, 0)}</td><td>${num(p.gazebo.collisions, 0)}</td><td>${num(p.gazebo.score, 1)} / ${num(p.fastsim.score, 1)}</td><td>${(p.gazebo.score - p.fastsim.score >= 0 ? '+' : '−') + num(Math.abs(p.gazebo.score - p.fastsim.score), 1)}</td></tr>`).join('') +
+        (hard.length > 1 ? `<tr><td><b>hard, среднее по ${hard.length}</b></td><td><b>${pct(mean(hard.map(p => p.gazebo.samples_share)))} / ${pct(mean(hard.map(p => p.fastsim.samples_share)))}</b></td><td><b>${pct(mean(hard.map(p => +p.gazebo.returned)))} / ${pct(mean(hard.map(p => +p.fastsim.returned)))}</b></td><td>${num(mean(hard.map(p => p.gazebo.penalties)), 1)} / ${num(mean(hard.map(p => p.fastsim.penalties)), 1)}</td><td>${num(mean(hard.map(p => p.gazebo.collisions)), 1)}</td><td><b>${num(mean(hard.map(p => p.gazebo.score)), 1)} / ${num(mean(hard.map(p => p.fastsim.score)), 1)}</b></td><td>${(() => { const d = mean(hard.map(p => p.gazebo.score - p.fastsim.score)); return (d >= 0 ? '+' : '−') + num(Math.abs(d), 1); })()}</td></tr>` : '') + '</tbody>'));
+    }
   })();
 
   /* ------------------------------------------------------------------- опыты */
