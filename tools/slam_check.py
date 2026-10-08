@@ -89,10 +89,13 @@ def drive(base, explore, goal, limit):
             time.sleep(0.5)
         return None, limit_s
 
+    def healthy(s):
+        return ((s.get('nav') or {}).get('slam') or {}).get('ok')
+
     s, _ = wait(lambda s: s.get('active') and s.get('linked') and s.get('mode') == 'idle'
-                and (s.get('nav') or {}).get('ready'), 180)
+                and (s.get('nav') or {}).get('ready') and healthy(s), 180)
     if s is None:
-        raise SystemExit('пульт не готов: нет связи со стендом или карта SLAM не пришла')
+        raise SystemExit('пульт не готов: нет связи со стендом, карта SLAM не пришла или SLAM молчит')
     if not s.get('slam_nav'):
         raise SystemExit('показ запущен без --slam-map: робот едет по готовой карте, проверять нечего')
     if explore:
@@ -100,9 +103,14 @@ def drive(base, explore, goal, limit):
         res = call(base + '/command', {'cmd': 'explore'})
         if not res.get('ok'):
             raise SystemExit(f"команда explore отклонена: {res.get('error')}")
-        s, dt = wait(lambda s: s['mode'] == 'idle' and ((s.get('nav') or {}).get('explore') or {}).get('done'), limit)
+        time.sleep(1.0)                                 # состояние на странице должно успеть обновиться
+        # Пульт сам прекращает объезд, если SLAM замолчал или карта стала непригодной: тогда explore пропадает.
+        s, dt = wait(lambda s: s['mode'] == 'idle' and (((s.get('nav') or {}).get('explore') or {}).get('done')
+                                                      or (s.get('nav') or {}).get('explore') is None), limit)
         if s is None:
             raise SystemExit(f'объезд не закончился за {limit:.0f} с')
+        if not (s['nav'].get('explore') or {}).get('done'):
+            raise SystemExit(f"объезд прерван пультом: {s['note']['text']}")
         ex = s['nav']['explore']
         out['explore'] = {'seconds_sim': ex.get('seconds'), 'legs': ex['visited'], 'frontiers_left': ex.get('left'),
                           'distance': s['distance'], 'collisions': s['score'].get('collisions'),
@@ -117,18 +125,28 @@ def drive(base, explore, goal, limit):
             raise SystemExit(f"маршрут отклонён: {res.get('error')}")
         n = len(state().get('arrivals', []))
         call(base + '/command', {'cmd': 'go'})
-        s, dt = wait(lambda s: s['mode'] == 'idle' and len(s.get('arrivals', [])) > n, 180)
+        time.sleep(1.0)
+        s, dt = wait(lambda s: s['mode'] == 'idle', 180)        # приехал либо пульт остановил езду с сообщением
         if s is None:
             raise SystemExit('робот не доехал до точки за 180 с')
+        if len(s.get('arrivals', [])) <= n:
+            raise SystemExit(f"робот до точки не доехал, пульт остановил езду: {s['note']['text']}")
         truth = (s.get('truth') or {}).get('robot')
         out['goal'] = {'goal': goal, 'pose_slam': s['pose'][:2], 'err_slam': s['arrivals'][-1],
-                       'collisions': s['score'].get('collisions'), 'seconds': round(dt, 1)}
+                       'collisions': s['score'].get('collisions'), 'seconds': round(dt, 1),
+                       'slam': (s.get('nav') or {}).get('slam')}
         if truth:
             out['goal']['err_true'] = round(math.dist(truth[:2], goal), 3)
         print(f"   {dt:.0f} с; до точки {s['arrivals'][-1] * 100:.0f} см по позе SLAM, "
               f"столкновений {s['score'].get('collisions')}")
         time.sleep(2.5)
     return out
+
+
+def accepted(rep):
+    """Порог приёмки карты: все девять столбов подтверждены, каждый не дальше 10 см, совпадение не ниже 90 %."""
+    return bool(rep['pillars_found'] == len(PILLARS) and rep['pillar_err_max'] is not None
+                and rep['pillar_err_max'] <= 0.10 and rep['agreement'] >= 0.9)
 
 
 def main():
@@ -158,8 +176,8 @@ def main():
     # Та же мерка для готовой карты: насколько она сама стоит в мире.
     ref_found = pillars(outline(ref), (ref.res, ref.x0, ref.y0, ref.w, ref.h))
     ref_errs = [p['err'] for p in ref_found if p['err'] is not None]
-    rep['ready_map'] = {'pillar_err_mean': float(np.mean(ref_errs)), 'pillar_err_max': float(np.max(ref_errs)),
-                        'origin': origin_offset(ref_found)}
+    rep['ready_map'] = {'pillars_found': len(ref_errs), 'pillar_err_mean': float(np.mean(ref_errs)),
+                        'pillar_err_max': float(np.max(ref_errs)), 'origin': origin_offset(ref_found)}
     rep.update(frame=frame, grid={'w': int(grid.shape[1]), 'h': int(grid.shape[0]), 'res': res, 'origin': [ox, oy]}, **driven)
 
     cm = lambda v: '—' if v is None else f'{v * 100:.1f}'      # noqa: E731
@@ -174,7 +192,9 @@ def main():
     print('\nСтолбы: место в мире → центр на карте SLAM, ошибка')
     for p in rep['pillars']:
         where = '      не найден' if p['found'] is None else f"({p['found'][0]:+.3f}; {p['found'][1]:+.3f})"
-        print(f"  ({p['x']:+.1f}; {p['y']:+.1f}) → {where}   {cm(p['err']):>5} см   клеток {p['cells']}")
+        shape = f", остаток {cm(p['rms'])} см, секторов {p['arc']} из 12" if 'rms' in p else ''
+        print(f"  ({p['x']:+.1f}; {p['y']:+.1f}) → {where}   {cm(p['err']):>5} см   клеток {p['cells']}{shape}"
+              + (f" — не подтверждён: {p['why']}" if p.get('why') else ''))
     print(f"Найдено столбов {rep['pillars_found']} из {len(PILLARS)}; ошибка средняя {cm(rep['pillar_err_mean'])} см, "
           f"наибольшая {cm(rep['pillar_err_max'])} см")
     o = rep['origin']
@@ -183,15 +203,17 @@ def main():
               f"({o['dx'] * 100:+.1f}; {o['dy'] * 100:+.1f}), поворот {o['rot_deg']:+.2f}°; "
               f"после их вычитания столбы расходятся в среднем на {o['residual'] * 100:.1f} см")
     r = rep['ready_map']
-    print(f"Для сравнения, готовая карта той же меркой: ошибка столбов средняя {cm(r['pillar_err_mean'])} см, "
+    print(f"Для сравнения, готовая карта той же меркой: столбов подтверждено {r['pillars_found']} из {len(PILLARS)}, "
+          f"ошибка столбов средняя {cm(r['pillar_err_mean'])} см, "
           f"наибольшая {cm(r['pillar_err_max'])} см; сдвиг начала координат {r['origin']['shift'] * 100:.1f} см "
           f"({r['origin']['dx'] * 100:+.1f}; {r['origin']['dy'] * 100:+.1f})")
     if not args.source:
         (OUT / f'{args.tag}_check.json').write_text(json.dumps(rep, ensure_ascii=False, indent=1))
         print(f"\nСетка: {OUT / f'{args.tag}_map.npz'}; числа: {OUT / f'{args.tag}_check.json'}")
-    ok = rep['pillars_found'] == len(PILLARS) and rep['pillar_err_max'] <= 0.10 and rep['agreement'] >= 0.9
-    print('\nИтог: ' + ('карта SLAM совмещена с миром (все столбы на месте с точностью 10 см, совпадение не ниже 90%)'
-                        if ok else 'НЕ ПРОШЛО: столбы найдены не все, ошибка больше 10 см или совпадение ниже 90%'))
+    ok = accepted(rep)
+    print('\nИтог: ' + ('карта SLAM совмещена с миром (все девять столбов подтверждены кольцом нужного радиуса и стоят '
+                        'на месте с точностью 10 см, совпадение не ниже 90%)'
+                        if ok else 'НЕ ПРОШЛО: подтверждены не все столбы, ошибка больше 10 см или совпадение ниже 90%'))
     return 0 if ok else 1
 
 
