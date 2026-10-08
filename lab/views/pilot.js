@@ -180,9 +180,8 @@ function createMap(arena, onClick, fps = 30) {
 
   function heat(b) {
     if (!b || !b.data) return null;
-    const key = `${b.w}:${b.data.length}:${b.data.slice(0, 48)}:${b.data.slice(-48)}`;
-    if (heatCv && key === heatKey) return heatCv;
-    heatKey = key;
+    if (heatCv && b.data === heatKey) return heatCv;        // карта приходит раз в секунду, а кадры рисуются чаще
+    heatKey = b.data;
     if (!heatCv) heatCv = document.createElement('canvas');
     heatCv.width = b.w;
     heatCv.height = b.h;

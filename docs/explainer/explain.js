@@ -561,6 +561,7 @@
     F['story.seed'] = story.seed;
     for (const arm of ['fixed', 'adaptive']) { const r = story[arm].result; F[`story.${arm}`] = `${r.samples_collected} из ${r.samples_total}`; F[`story.${arm}.score`] = num(r.score, 1); }
     F.route_len = num(D.route.length, 1); F.route_n = D.route.points.length;
+    if (D.code) { F.loc_total = (D.code.py + D.code.js).toLocaleString('ru'); F.loc_py = D.code.py.toLocaleString('ru'); F.loc_js = D.code.js.toLocaleString('ru'); }
     if (D.inq_accuracy) for (const k of ['runs', 'total', 'identified', 'wrong']) F['inq_accuracy.' + k] = D.inq_accuracy[k];
     F.gz_n = D.gazebo.length;
     F.gz_ok = D.gazebo.filter(p => p.gazebo.result.returned && p.gazebo.result.samples_collected >= p.fastsim.result.samples_collected - 1 && p.gazebo.result.penalties <= p.fastsim.result.penalties).length;
@@ -594,6 +595,97 @@
     }
     document.querySelectorAll('[data-truth]').forEach(b => b.onclick = () => { mode = b.dataset.truth; document.querySelectorAll('[data-truth]').forEach(x => x.classList.toggle('on', x === b)); draw(); });
     onResize(draw);
+  })();
+
+  /* ------------------------------------------------------ азбука: лидар */
+
+  (() => {
+    const cv = $('fig-lidar'); if (!cv) return;
+    const st = { robot: [-0.9, 0.35], drag: false };
+    function draw() {
+      const cssW = cv.clientWidth || cv.parentElement.clientWidth || 600, dpr = Math.min(2, window.devicePixelRatio || 1);
+      const mapW = Math.min(cssW * 0.5, 420), H = mapW * ASPECT;
+      cv.width = Math.round(cssW * dpr); cv.height = Math.round(H * dpr); cv.style.height = H + 'px';
+      const g = cv.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cv.width, cv.height);
+      const sc = mapW * dpr / (VIEW.x1 - VIEW.x0);
+      const T = { g, s: sc, dpr, X: x => (x - VIEW.x0) * sc, Y: y => (VIEW.y1 - y) * sc };
+      drawFloor(T);
+      const rays = raycast(st.robot[0], st.robot[1], 360, 6);
+      g.strokeStyle = 'rgba(27,175,122,.30)'; g.lineWidth = 1 * dpr; g.beginPath();
+      rays.forEach(([a, r], k) => { if (k % 3 || r == null) return; g.moveTo(T.X(st.robot[0]), T.Y(st.robot[1])); g.lineTo(T.X(st.robot[0] + r * Math.cos(a)), T.Y(st.robot[1] + r * Math.sin(a))); });
+      g.stroke();
+      g.fillStyle = C.third; rays.forEach(([a, r]) => { if (r == null) return; g.fillRect(T.X(st.robot[0] + r * Math.cos(a)) - dpr, T.Y(st.robot[1] + r * Math.sin(a)) - dpr, 2.4 * dpr, 2.4 * dpr); });
+      drawRobot(T, st.robot[0], st.robot[1], 0, C.adaptive);
+      // справа: те же 360 чисел полоской
+      const x0 = (mapW + 34) * dpr, w = cv.width - x0 - 8 * dpr, y0 = 34 * dpr, h = cv.height - 90 * dpr, rmax = 5;
+      g.fillStyle = C.ink; g.font = `600 ${13 * dpr}px system-ui, sans-serif`; g.textAlign = 'left';
+      g.fillText('obs.scan — 360 чисел, метры до стены', x0, 18 * dpr);
+      g.strokeStyle = C.line; g.lineWidth = dpr; g.beginPath();
+      [0, 1, 2, 3, 4, 5].forEach(v => { const y = y0 + h * (1 - v / rmax); g.moveTo(x0, y); g.lineTo(x0 + w, y); }); g.stroke();
+      g.fillStyle = C.third;
+      rays.forEach(([a, r], k) => { const v = Math.min(r == null ? rmax : r, rmax); g.fillRect(x0 + w * k / 360, y0 + h * (1 - v / rmax), Math.max(1, w / 360 - 0.4), h * v / rmax); });
+      g.font = `${11 * dpr}px system-ui, sans-serif`; g.textAlign = 'right';
+      [1, 2, 3, 4, 5].forEach(v => { const y = y0 + h * (1 - v / rmax); g.fillStyle = 'rgba(255,255,255,.82)'; g.fillRect(x0 + w - 30 * dpr, y - 13 * dpr, 30 * dpr, 13 * dpr); g.fillStyle = C.ink2; g.fillText(v + ' м', x0 + w - 3 * dpr, y - 3 * dpr); });
+      g.textAlign = 'center';
+      [['[0]', 'вперёд', 0], ['[90]', 'слева', 90], ['[180]', 'сзади', 180], ['[270]', 'справа', 270]].forEach(([i, t, k]) => { const x = Math.max(x0 + 20 * dpr, x0 + w * k / 360);
+        g.fillStyle = C.ink; g.font = `${11 * dpr}px ui-monospace, Menlo, monospace`; g.fillText(i, x, y0 + h + 15 * dpr);
+        g.fillStyle = C.ink2; g.font = `${11 * dpr}px system-ui, sans-serif`; g.fillText(t, x, y0 + h + 29 * dpr); });
+      const f = rays[0][1], l = rays[90][1];
+      g.textAlign = 'right'; g.fillStyle = C.ink; g.font = `${12 * dpr}px ui-monospace, Menlo, monospace`;
+      g.fillText(`scan[0] = ${f == null ? '—' : f.toFixed(2)}   scan[90] = ${l == null ? '—' : l.toFixed(2)}`, x0 + w, y0 + h + 29 * dpr + 14 * dpr);
+      st.T = T; st.mapW = mapW;
+    }
+    const move = e => { const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top; if (px > st.mapW) return;
+      const x = VIEW.x0 + px / st.mapW * (VIEW.x1 - VIEW.x0), y = VIEW.y1 - py / st.mapW * (VIEW.x1 - VIEW.x0); if (isFree(x, y)) { st.robot = [x, y]; draw(); } };
+    cv.addEventListener('pointerdown', e => { st.drag = true; cv.setPointerCapture(e.pointerId); move(e); });
+    cv.addEventListener('pointermove', e => { if (st.drag) move(e); });
+    cv.addEventListener('pointerup', () => { st.drag = false; });
+    onResize(draw);
+  })();
+
+  /* ------------------------------------------- азбука: правило Байеса на коридоре */
+
+  (() => {
+    const cv = $('fig-bayes'); if (!cv) return;
+    const N = 24, CELL = 0.1, R = 1.2, SIG = 0.07, note = $('fig-bayes-note');
+    let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-9)) * Math.cos(2 * Math.PI * rnd());
+    const st = { robot: 4, sample: 15, p: null, n: 0, show: false, last: null };
+    const clean = (i, j) => Math.max(0, 1 - Math.abs(i - j) * CELL / R);
+    function hide() { do { st.sample = 2 + Math.floor(rnd() * (N - 4)); } while (Math.abs(st.sample - st.robot) < 5); st.p = Array(N).fill(1 / N); st.n = 0; st.show = false; st.last = null; draw(); }
+    function measure() {
+      const z = Math.max(0, Math.min(1, clean(st.robot, st.sample) + gauss() * SIG));
+      let sum = 0;
+      st.p = st.p.map((p, j) => { const v = p * Math.exp(-0.5 * ((z - clean(st.robot, j)) / SIG) ** 2); sum += v; return v; }).map(v => v / (sum || 1));
+      st.n += 1; st.last = z; draw();
+    }
+    function draw() {
+      const cssW = cv.clientWidth || cv.parentElement.clientWidth || 600, dpr = Math.min(2, window.devicePixelRatio || 1), H = 230;
+      cv.width = Math.round(cssW * dpr); cv.height = H * dpr; cv.style.height = H + 'px';
+      const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
+      const m = 16 * dpr, w = (cv.width - 2 * m) / N, base = 160 * dpr, top = 18 * dpr, pmax = Math.max(...st.p, 0.2);
+      for (let j = 0; j < N; j++) {
+        const h = (base - top) * st.p[j] / pmax;
+        g.fillStyle = '#eef0f2'; g.fillRect(m + j * w + 1.5 * dpr, top, w - 3 * dpr, base - top);
+        g.fillStyle = C.fixed; g.fillRect(m + j * w + 1.5 * dpr, base - h, w - 3 * dpr, h);
+        if (st.p[j] >= 0.08) { g.fillStyle = C.ink; g.font = `${10.5 * dpr}px system-ui, sans-serif`; g.textAlign = 'center'; g.fillText(Math.round(st.p[j] * 100) + '%', m + (j + 0.5) * w, base - h - 4 * dpr); }
+        g.strokeStyle = C.line; g.lineWidth = dpr; g.strokeRect(m + j * w, base + 8 * dpr, w, 26 * dpr);
+      }
+      if (st.show) { g.beginPath(); g.arc(m + (st.sample + 0.5) * w, base + 21 * dpr, 7 * dpr, 0, 2 * Math.PI); g.fillStyle = '#f2b705'; g.fill(); g.lineWidth = 1.5 * dpr; g.strokeStyle = C.ink; g.stroke(); }
+      g.beginPath(); g.arc(m + (st.robot + 0.5) * w, base + 21 * dpr, 9 * dpr, 0, 2 * Math.PI); g.fillStyle = C.adaptive; g.fill(); g.lineWidth = 2 * dpr; g.strokeStyle = '#fff'; g.stroke();
+      g.fillStyle = C.ink2; g.font = `${12 * dpr}px system-ui, sans-serif`; g.textAlign = 'center';
+      g.fillText('робот', m + (st.robot + 0.5) * w, base + 52 * dpr);
+      if (st.show) g.fillText('образец', m + (st.sample + 0.5) * w, base + 52 * dpr + (Math.abs(st.sample - st.robot) < 3 ? 14 * dpr : 0));
+      const best = st.p.indexOf(Math.max(...st.p));
+      note.innerHTML = st.n === 0 ? 'Пока измерений нет: все клетки равновероятны, по 4%. Нажмите «Измерить здесь».'
+        : `Измерений: <b>${st.n}</b>. Последнее показание <b>${num(st.last, 2)}</b> ${st.last < 0.03 ? '→ ближе 1,2 м образца нет: клетки рядом с роботом обнулились' : `→ до образца около <b>${num((1 - st.last) * R * 100, 0)} см</b>, в какую сторону — неизвестно`}. Самая вероятная клетка сейчас — №${best + 1} (${Math.round(st.p[best] * 100)}%)${st.show ? `, образец на самом деле в клетке №${st.sample + 1}` : ''}.`;
+    }
+    $('b1-left').onclick = () => { st.robot = Math.max(0, st.robot - 3); draw(); };
+    $('b1-right').onclick = () => { st.robot = Math.min(N - 1, st.robot + 3); draw(); };
+    $('b1-measure').onclick = measure;
+    $('b1-show').onclick = () => { st.show = !st.show; draw(); };
+    $('b1-new').onclick = hide;
+    hide(); onResize(draw);
   })();
 
   /* ------------------------------------------ рисунок 2: датчик без направления */
@@ -946,12 +1038,80 @@
       rows.map(([k, v]) => `<tr><td>${NAME[k] || k}</td><td>${v.requests}</td><td><b>${pct(v.first_ok_share)}</b></td><td>${pct(v.repaired_share)}</td><td>${pct(v.fallback_share)}</td><td>${num(v.latency_ms.median / 1000, 0)} с</td><td>${num(v.score_mean_complete, 1)} / ${num(v.rule_score_mean_complete, 1)} <small>(${v.complete_runs} прогонов)</small></td></tr>`).join('') + '</tbody>';
   })();
 
+  /* ------------------------------------------------- один такт на настоящих данных */
+
+  (() => {
+    const root = $('tick'); if (!root) return;
+    const tr = prep(story.adaptive), tk = tr.track, n = tk.t.length;
+    root.innerHTML = `<div class="tick-grid"><div><canvas id="tick-cv"></canvas>
+      <input type="range" id="tick-t" min="1" max="${n - 2}" value="${Math.round(n * 0.3)}" style="width:100%">
+      <div class="cap">Сценарий hard № ${story.seed}. Синее — карта вероятностей агента, пунктир — его текущий путь, кольцо — что значит последнее показание датчика.</div></div>
+      <div><h4>1. Что пришло на вход</h4><pre id="tick-obs"></pre>
+      <h4>2. Что агент об этом думает</h4><div id="tick-mind" class="tick-mind"></div>
+      <h4>3. Что ушло роботу</h4><pre id="tick-cmd"></pre></div></div>`;
+    const cv = $('tick-cv'), sl = $('tick-t');
+    const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+    const f = (v, d = 2) => Number(v).toFixed(d);
+    function draw() {
+      const i = +sl.value, t = tk.t[i];
+      drawFrame(cv, tr, t, { belief: true, path: true, ring: true, lidar: true }, C.adaptive);
+      const evs = tr.events.filter(e => e.t > tk.t[i - 1] && e.t <= t);
+      const z = tk.sensor[i], deg = Math.round(tk.th[i] * 180 / Math.PI);
+      $('tick-obs').innerHTML = `Observation(
+    t=${f(t, 1)},              <span class="c"># секунд от старта</span>
+    x=${f(tk.x[i])}, y=${f(tk.y[i])},     <span class="c"># где робот, метры</span>
+    th=${f(tk.th[i])},             <span class="c"># курс: ${deg}°</span>
+    battery=${f(tk.battery[i], 1)},        <span class="c"># заряд из 60</span>
+    sensor=${f(z)},          <span class="c"># ${z > 0.04 ? 'до образца ≈ ' + f((1 - z) * RULES.sensor_range_m, 1) + ' м' : 'ближе 2 м образцов нет'}</span>
+    scan=[…360 чисел…],
+    events=${evs.length ? '[' + evs.map(e => "'" + e.type + "'").join(', ') + ']' : '[]'},${evs.length ? '   <span class="c"># ' + evs.map(e => EVENT_RU[e.type] || e.type).join(', ') + '</span>' : ''}
+)`;
+      const mode = tr.modes[tk.mode[i]], plan = tr.plans[lastIdx(tr.plans, t, 't')], jr = tr.journal[lastIdx(tr.journal, t, 't')];
+      const sg = plan && plan.subgoals && plan.subgoals[0];
+      const SG = { investigate: 'проверить место', explore: 'разведать точку', goto: 'доехать до точки', return_base: 'вернуться на базу' };
+      $('tick-mind').innerHTML = `<div><span>режим</span><b>${MODE_RU[mode] || mode}</b></div>
+        <div><span>подцель</span>${sg ? `${SG[sg.type] || sg.type}${sg.x != null ? ` (${num(sg.x, 1)}; ${num(sg.y, 1)})` : ''}` : '—'}</div>
+        <div><span>почему</span>${plan ? plan.reasoning : '—'}</div>
+        <div><span>последняя запись журнала</span>${jr ? `${num(jr.t, 0)} с · ${KIND_RU[jr.kind] || jr.kind}: ${jr.text}` : '—'}</div>`;
+      const dt = tk.t[i + 1] - t, v = Math.hypot(tk.x[i + 1] - tk.x[i], tk.y[i + 1] - tk.y[i]) / dt, w = wrap(tk.th[i + 1] - tk.th[i]) / dt;
+      const got = tr.events.find(e => e.type === 'sample_collected' && Math.abs(e.t - t) <= dt);
+      const say = mode === 'done' ? 'прогон закончен' : v < 0.02 && Math.abs(w) < 0.1 ? 'стоит на месте' : v < 0.02 ? 'разворот на месте ' + (w > 0 ? 'влево' : 'вправо') : `вперёд ${Math.round(v * 100)} см/с` + (Math.abs(w) > 0.15 ? ', подруливает ' + (w > 0 ? 'влево' : 'вправо') : ', прямо');
+      $('tick-cmd').innerHTML = (got ? `<span class="c"># собрать образец → успех</span>\nio.collect()\n` : '') +
+        `<span class="c"># ${say}</span>\nio.command(v=${f(v)}, w=${f(w)})`;
+    }
+    sl.oninput = draw; onResize(draw);
+  })();
+
+  /* ------------------------------------------------------------- карта кода */
+
+  (() => {
+    const t = $('code-map'); if (!t || !D.code) return;
+    const ROWS = [
+      ['Мир и судья', [['did/config.py', 'Правила: расход, датчик, штрафы, очки; набор «научных» правил'], ['did/arena.py', 'Карта арены из официального пакета: где свободно, сколько до стены, расчёт лучей лидара'],
+        ['did/scenario.py', 'Генератор сценариев: уровень и номер → расстановка образцов, грунтов, опасных зон, расписание событий'], ['did/judge.py', 'Судья: заряд, показание датчика, штрафы, сбои, очки'],
+        ['did/fastsim.py', 'Быстрый симулятор'], ['did/robot_io.py', '«Разъём» между агентом и миром']]],
+      ['Агент', [['did/agent.py', 'Цикл агента и все его решения'], ['did/belief.py', 'Картина мира: образцы, грунт, опасные зоны, здоровье датчика'], ['did/nav.py', 'Самый дешёвый путь по сетке и ведение по нему'],
+        ['did/localize.py', 'Поправка позы по лидару и карте стен'], ['did/planner.py', 'Выбор подцелей: правило и обёртка над языковой моделью'], ['did/journal.py', 'Журнал и гипотезы'], ['did/route.py', 'Маршрут фиксированного агента'],
+        ['did/explore.py', 'Выбор точки разведки по ожидаемой пользе'], ['did/baselines.py', 'Простые стратегии для сравнения: «пока теплее» и спираль']]],
+      ['Исследователь', [['did/energy.py', 'Формула расхода заряда, которую агент уточняет на ходу'], ['did/science.py', 'Расследование как расчёт: объяснения, польза опыта, правило Байеса'], ['did/inquiry.py', 'Сам исследователь: что считать странностью, какие ставить опыты, что делать с выводом'],
+        ['did/memory.py', 'Память между прогонами'], ['did/foresight.py', 'Сравнение будущих маршрутов по риску'], ['did/study.py', 'Исследование по заданию человека: план замеров, оценка с погрешностью'], ['did/study_agent.py', 'Агент, который исполняет такое задание'], ['did/study_law.py', 'Проверка гипотез о законе датчика']]],
+      ['Языковая модель', [['did/llm.py', 'Обращение к модели, проверка ответа, запасное правило'], ['did/llm_roles.py', 'Роли автора и критика в расследованиях'], ['did/llm_codex.py', 'Доступ к GPT по подписке'], ['did/llm_mock.py', 'Имитатор модели с настраиваемыми ошибками'], ['did/llm_eval.py', 'Сравнение моделей на одних сценариях']]],
+      ['Запуск и измерение', [['did/runner.py', 'Один прогон от сценария до файла записи'], ['did/recorder.py', 'Запись прогона'], ['did/metrics.py', 'Метрики, парные разности, сверка выводов исследователя с правдой'], ['did/experiments.py', 'Серии опытов по описаниям из experiments/*.yaml']]],
+      ['ROS 2 и показ', [['did/ros_agent.py', 'Тот же агент, подключённый к топикам ROS'], ['ws/src/did_ros/did_ros/judge_node.py', 'Тот же судья как узел ROS'], ['did/pilot.py', 'Пульт: карта по лидару, маршрут кликами, автономная миссия'], ['did/mapping.py', 'Построение карты по лидару'], ['tools/demo.py', 'Запуск показа одной командой']]],
+      ['Интерфейс', [['did/lab/server.py', 'Веб-сервер Лаборатории'], ['lab/replay.js', 'Проигрыватель прогонов'], ['lab/views/experiment.js', 'Страница опыта'], ['lab/views/pilot.js', 'Страница «Пульт»'], ['lab/views/study.js', 'Конструктор исследования']]],
+    ];
+    t.innerHTML = '<thead><tr><th style="width:30%">Файл</th><th>Что в нём</th><th style="width:9%;text-align:right">Строк</th></tr></thead><tbody>' +
+      ROWS.map(([title, rows]) => `<tr><td colspan="3" class="group">${title}</td></tr>` + rows.map(([file, what]) => `<tr><td><code>${file}</code></td><td>${what}</td><td style="text-align:right">${D.code.files[file] != null ? D.code.files[file].toLocaleString('ru') : '—'}</td></tr>`).join('')).join('') + '</tbody>';
+  })();
+
   /* ------------------------------------------------------------ оглавление */
 
   (() => {
     const toc = $('toc'); if (!toc) return;
     const secs = [...document.querySelectorAll('main section[id]')];
-    secs.forEach((s, i) => { const h = s.querySelector('h2'); if (!h) return; const n = h.querySelector('.n'); if (n) n.textContent = i; const a = el('a', null, h.dataset.short || h.textContent.replace(/^\d+/, '')); a.href = '#' + s.id; toc.appendChild(a); });
+    secs.forEach((s, i) => { const h = s.querySelector('h2'); if (!h) return; const n = h.querySelector('.n'); if (n) n.textContent = i + 1;
+      if (s.dataset.part) { toc.appendChild(el('span', 'part', s.dataset.part)); s.insertBefore(el('div', 'part-mark', s.dataset.part), s.firstChild); }
+      const a = el('a', null, h.dataset.short || h.textContent.replace(/^\d+/, '')); a.href = '#' + s.id; toc.appendChild(a); });
     for (const id of ['E12', 'E13', 'E14']) { const w = $('wrap-' + id); if (w && !E[id]) w.style.display = 'none'; }
     const links = [...toc.querySelectorAll('a')];
     const mark = () => { let cur = secs[0]; for (const sec of secs) if (sec.getBoundingClientRect().top <= 160) cur = sec; links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + cur.id)); };

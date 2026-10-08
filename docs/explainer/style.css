@@ -202,3 +202,16 @@ svg.iq-scale text { font: 11.5px -apple-system, "Segoe UI", Roboto, Arial, sans-
 svg.iq-scale text.cat { fill: var(--ink); font-size: 12px; }
 svg.iq-scale text.val { fill: var(--ink); font-weight: 700; font-size: 12px; }
 @media (max-width: 760px) { .iq-alt { grid-template-columns: 1fr 60px 40px; } .iq-alt .iq-arrow, .iq-alt .iq-bar:nth-of-type(2) { display: none; } }
+
+/* азбука, архитектура, такт */
+pre .c { color: #8fa1b3; }
+nav#toc span.part { display: block; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--accent-ink); margin: 16px 0 5px 10px; }
+.part-mark { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-ink); border-top: 2px solid var(--accent); padding-top: 14px; margin-bottom: 6px; }
+.tick-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 22px; align-items: start; }
+@media (max-width: 900px) { .tick-grid { grid-template-columns: 1fr; } }
+.tick-grid h4 { margin: 0 0 4px; font-size: 14px; }
+.tick-grid pre { margin: 0 0 14px; font-size: 12.5px; }
+.tick-mind { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px; font-size: 14.5px; display: grid; gap: 7px; }
+.tick-mind span { display: block; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
+table.plain td.group { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); background: #fafbfb; }
+.fig > canvas#fig-lidar, .fig > canvas#fig-bayes { max-width: 880px; }

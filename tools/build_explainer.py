@@ -183,6 +183,16 @@ def inquiry_accuracy(exp='E10', arm='scientist', level='hard'):
             'wrong': sum(r['wrong'] for r in rows.values())} if runs else None
 
 
+def code_size():
+    """Сколько строк в проекте: по файлам и всего (Python и JavaScript), без чужого и сгенерированного."""
+    def lines(path):
+        return sum(1 for _ in path.open(encoding='utf-8', errors='ignore'))
+    py = [p for pat in ('did/**/*.py', 'tools/*.py', 'tests/*.py', 'ws/src/**/*.py') for p in ROOT.glob(pat)]
+    js = [p for pat in ('lab/*.js', 'lab/views/*.js', 'docs/explainer/*.js') for p in ROOT.glob(pat)]
+    files = {str(p.relative_to(ROOT)): lines(p) for p in py + js}
+    return {'files': files, 'py': sum(lines(p) for p in py), 'js': sum(lines(p) for p in js)}
+
+
 def trap_table(exp='E14', arm='scientist', level='hard'):
     """Опыт с ловушками: сколько выводов вынесено и сколько из них неверных в каждом условии."""
     spec = experiment(exp)
@@ -235,6 +245,7 @@ def main():
         'science': science_story(),
         'inq_accuracy': inquiry_accuracy(),
         'traps': trap_table(),
+        'code': code_size(),
         'kb': _json(RUNS / '_knowledge' / 'kb.json'),
         'llm_real': {p.name.removesuffix('.summary.json'): {k: v for k, v in _json(p).items() if k not in ('runs',)}
                      for p in sorted((RUNS / 'llm_real').glob('*.summary.json'))},

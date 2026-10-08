@@ -287,6 +287,11 @@ function image(slide, file, box, name, altText) {
   slide.addImage({ path: file, x, y, w, h, objectName: name, altText });
   return { x, y, w, h };
 }
+// Картинка заполняет прямоугольник целиком: лишнее по краям обрезается поровну (кадр остаётся по центру).
+function imageCover(slide, file, box, name, altText) {
+  const { w: pw, h: ph } = imageSize(file);
+  slide.addImage({ path: file, x: box.x, y: box.y, w: box.h * pw / ph, h: box.h, sizing: { type: "cover", w: box.w, h: box.h }, objectName: name, altText });
+}
 function arrow(slide, x1, y, x2, name, color = C.accent5) {
   const left = x2 < x1;
   slide.addShape(pres.shapes.LINE, {
@@ -431,7 +436,7 @@ pres.addSection({ title: SEC_A });
     // (пульт, а пока его снимка нет — проигрыватель веб-лаборатории), справа — итог прогона.
     const cw = 5.9, fw = (CW - cw - 0.5) / 2, fh = fw * 4.79 / 5, last = st.frames.length - 1;
     if (GZ_SHOT) {
-      image(s, GZ_SHOT, { x: X0, y: y0, w: fw, h: fh }, "gazebo-shot", shotCaption(GZ_SHOT));
+      imageCover(s, GZ_SHOT, { x: X0, y: y0, w: fw, h: fh }, "gazebo-shot", shotCaption(GZ_SHOT));
       text(s, "Окно Gazebo", { x: X0 - 0.15, y: y0 + fh + 0.04, w: fw + 0.3, h: 0.28, fontSize: 13, bold: true, align: "center", valign: "middle", objectName: "gazebo-shot-head" });
       text(s, "мир и робот из официальных пакетов; цветом показана скрытая правда", { x: X0 - 0.15, y: y0 + fh + 0.32, w: fw + 0.3, h: 0.36, fontSize: 11, color: C.text2, align: "center", objectName: "gazebo-shot-caption" });
     } else {
@@ -591,17 +596,20 @@ pres.addSection({ title: SEC_B });
     ["Поиск образцов по карте вероятностей", "Оценка грунта по расходу, возврат по запасу заряда", "Журнал гипотез и расследования с выбором опыта",
       "Память между прогонами", `Планировщик на языковой модели: ${llmShare}`, "Веб-лаборатория и запуск одной командой"],
   ];
+  done[0].push("Пульт: карта, цель кликом, миссия в Gazebo");
+  done[1].push("Исследование по заданию человека");
   const qwenItem = QWEN
     ? `Локальная Qwen: счёт ${QWEN.score_mean < QWEN.rule_score_mean ? "пока ниже правила" : "не ниже правила"}`
     : "Локальная модель Qwen";
-  const wip = ["Пульт и показ полного сценария в Gazebo", "Роли модели «автор» и «критик» в расследованиях",
-    qwenItem, "Конструктор исследования", "Построение карты через SLAM (бонус)"];
+  const wip = ["Роли модели «автор» и «критик»: серия на настоящей модели", qwenItem,
+    "Построение карты через SLAM (бонус)", "Сравнение маршрутов по риску: выигрыша пока нет"];
   const open = ["Адаптация к изменениям среды пока не прибавляет очков",
     MEMORY_HELPS ? "Обучение грунтам и память об опасных зонах вклада не показали" : "Обучение грунтам и память — об опасных зонах и между прогонами — вклада не показали",
     "Правила судьи — наши допущения"];
-  const s = content(SEC_B, "Что уже реализовано и что в работе", "Основа работает и проверена опытами; показ в Gazebo и роли модели доделываются", [
+  const s = content(SEC_B, "Что уже реализовано и что в работе", "Стенд, агент и показ в Gazebo работают и проверены опытами; роли модели и SLAM доделываются", [
     `Слева то, что работает и проверено: стенд, навигация, поиск образцов, журнал гипотез, расследования и планировщик на языковой модели — ${TESTS ? nChecks(TESTS) : "автоматические проверки"} и ${nRuns(TOTAL_RUNS)}.`,
-    "В работе — пульт и показ в Gazebo, роли модели, локальная модель и конструктор исследования.",
+    "Сюда же относится показ: пульт строит карту по лидару, принимает цель кликом и запускает автономную миссию в Gazebo; на репетиции собрано пять образцов из пяти.",
+    "В работе — серия с ролями модели на настоящей модели, локальная модель, карта через SLAM и сравнение маршрутов по риску.",
     `И прямо о нерешённом: адаптация к изменениям среды пока не прибавляет очков${MEMORY_HELPS ? "" : ", память между прогонами результата не меняет"}, а правила судьи — наши допущения.`,
   ]);
   const lx = X0, lw = 7.05, lh = BOTTOM - TOP;
@@ -614,7 +622,7 @@ pres.addSection({ title: SEC_B });
     { text: int(TOTAL_RUNS), options: { bold: true, color: C.text1 } },
     { text: ` ${pl(TOTAL_RUNS, "прогон", "прогона", "прогонов")}` },
   ], { x: lx + 5.0, y: TOP + 0.14, w: lw - 5.25, h: 0.66, fontSize: 14, color: C.text2, align: "right", valign: "middle", objectName: "done-stats" });
-  done.forEach((items, i) => bullets(s, items, { x: lx + 0.25 + i * 3.35, y: TOP + 0.95, w: 3.2, h: 3.85, fontSize: 14, paraSpaceAfter: 7, objectName: `done-list-${i + 1}` }));
+  done.forEach((items, i) => bullets(s, items, { x: lx + 0.25 + i * 3.35, y: TOP + 0.92, w: 3.2, h: 3.95, fontSize: 13, paraSpaceAfter: 5, objectName: `done-list-${i + 1}` }));
   const rx = lx + lw + 0.25, rw = X0 + CW - rx, h1 = 2.38, h2 = lh - h1 - 0.25;
   card(s, rx, TOP, rw, h1, "wip-card");
   hexBadge(s, wip.length, rx + 0.25, TOP + 0.2, 0.5, "wip-badge", C.accent1, 15);
