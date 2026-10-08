@@ -304,7 +304,7 @@ class SoilProbe:
                 soils = after
         if soils is self.start:
             return False
-        return changed_distance(self.start, soils, x, y) <= self.NEAR
+        return changed_distance(self.start, soils, x, y) <= self.NEAR + 1e-9      # порог включительно, с запасом на округление
 
     def metrics(self, journal):
         alarms = [(e['t'], e['data']['x'], e['data']['y']) for e in journal.entries
