@@ -1,0 +1,156 @@
+{
+ "inquiry": {
+  "topic": "energy",
+  "anomaly": {
+   "text": "расход вырос: 6,8 ед/м при прогнозе 2,6",
+   "x": 0.4,
+   "y": 1.1,
+   "observed": 6.8,
+   "expected": 2.6,
+   "unit": "ед/м"
+  },
+  "alternatives": [
+   {
+    "id": "soil",
+    "statement": "здесь дорогой грунт",
+    "prior": 0.4,
+    "posterior": 0.03
+   },
+   {
+    "id": "leak",
+    "statement": "батарея теряет заряд сама по себе (сбой)",
+    "prior": 0.3,
+    "posterior": 0.93
+   },
+   {
+    "id": "turn",
+    "statement": "заряд ушёл на повороты",
+    "prior": 0.2,
+    "posterior": 0.02
+   },
+   {
+    "id": "other",
+    "statement": "причина не из этого списка",
+    "prior": 0.1,
+    "posterior": 0.02
+   }
+  ],
+  "tests": [
+   {
+    "id": "rest",
+    "name": "постоять 2 секунды",
+    "cost": 0.05,
+    "duration_s": 2.0,
+    "unit": "ед/с",
+    "gain_bits": 0.9,
+    "predictions": {
+     "soil": {
+      "mean": 0.01,
+      "sigma": 0.02
+     },
+     "leak": {
+      "mean": 0.15,
+      "sigma": 0.03
+     },
+     "turn": {
+      "mean": 0.01,
+      "sigma": 0.02
+     }
+    },
+    "chosen": true,
+    "measured": {
+     "value": 0.14,
+     "sigma": 0.02,
+     "t": 43.4
+    }
+   },
+   {
+    "id": "straight",
+    "name": "проехать прямо 0,3 м",
+    "cost": 0.8,
+    "duration_s": 2.0,
+    "unit": "ед/м",
+    "gain_bits": 0.4,
+    "predictions": {
+     "soil": {
+      "mean": 6.5,
+      "sigma": 0.8
+     },
+     "leak": {
+      "mean": 3.9,
+      "sigma": 0.5
+     },
+     "turn": {
+      "mean": 2.5,
+      "sigma": 0.3
+     }
+    },
+    "chosen": true,
+    "measured": {
+     "value": 4.1,
+     "sigma": 0.4,
+     "t": 46.0
+    }
+   },
+   {
+    "id": "spin",
+    "name": "развернуться на месте на 90°",
+    "cost": 0.3,
+    "duration_s": 1.5,
+    "unit": "ед/рад",
+    "gain_bits": 0.3,
+    "predictions": {
+     "soil": {
+      "mean": 0.12,
+      "sigma": 0.05
+     },
+     "leak": {
+      "mean": 0.25,
+      "sigma": 0.08
+     },
+     "turn": {
+      "mean": 0.5,
+      "sigma": 0.1
+     }
+    },
+    "chosen": false,
+    "measured": null
+   }
+  ],
+  "conclusion": {
+   "status": "identified",
+   "best": "leak",
+   "confidence": 0.93,
+   "text": "батарея теряет заряд сама по себе (сбой) — вероятность 93% после 2 опыт(ов)"
+  },
+  "action": "заложить утечку 0.14 ед/с в запас на возврат и ехать на базу раньше"
+ },
+ "text": "Расход вырос до 6.8 ед/м при прогнозе 2.6 ед/м. Робот проверил, сколько заряда уходит, пока он стоит: при дорогом грунте или тратах на повороты ожидалось 0.01 ед/с, а при сбое батареи — 0.15 ед/с; измерение показало 0.14 ед/с. Расчёт указывает, что батарея теряет заряд сама по себе (сбой). Дальше робот заложит утечку 0.14 ед/с в запас на возврат и поедет на базу раньше.",
+ "source": "llm",
+ "error": null,
+ "exchanges": [
+  {
+   "attempt": 1,
+   "role": "explainer",
+   "request": "Вход: {\"task\": \"explain\", \"inquiry\": {\"topic\": \"energy\", \"anomaly\": {\"text\": \"расход вырос: 6,8 ед/м при прогнозе 2,6\", \"x\": 0.4, \"y\": 1.1, \"observed\": 6.8, \"expected\": 2.6, \"unit\": \"ед/м\"}, \"alternatives\": [{\"id\": \"soil\", \"statement\": \"здесь дорогой грунт\", \"prior\": 0.4, \"posterior\": 0.03}, {\"id\": …",
+   "response": "{\"text\":\"Расход вырос до 6.8 ед/м при прогнозе 2.6 ед/м. Робот проверил, сколько заряда уходит, пока он стоит: при дорогом грунте или тратах на повороты ожидалось 0.01 ед/с, а при сбое батареи — 0.15 ед/с; измерение показало 0.14 ед/с. Расчёт указывает, что батарея теряет заряд сама по себе (сбой). Дальше робот заложит утечку 0.14 ед/с в запас на возврат и поедет на базу раньше.\"}",
+   "ok": true,
+   "errors": [],
+   "latency_ms": 19230,
+   "cached": true,
+   "http_attempts": 0,
+   "usage": {
+    "prompt_tokens": 16359,
+    "completion_tokens": 150,
+    "total_tokens": 16509,
+    "input_tokens": 16359,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 150,
+    "reasoning_output_tokens": 0
+   },
+   "task": "explain"
+  }
+ ],
+ "latency_ms": 19230
+}

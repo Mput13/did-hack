@@ -7,7 +7,11 @@
 __pycache__/
 lab/explain.html
 node_modules/
-runs/
+# Результаты прогонов пересчитываются командой `pixi run exp all`. В репозитории лежит только то, что
+# быстро не пересчитать: сверка с Gazebo (E7) и проверка на настоящих языковых моделях.
+runs/*
+!runs/E7/
+!runs/llm_real/
 ws/build/
 ws/install/
 ws/log/

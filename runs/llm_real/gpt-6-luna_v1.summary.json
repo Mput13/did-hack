@@ -1,0 +1,499 @@
+{
+ "arm": "gpt-6-luna_v1",
+ "llm": {
+  "kind": "codex",
+  "prompt": "planner_system_v1"
+ },
+ "created": "2026-10-08T03:29:34",
+ "wall_s": 1123.2,
+ "scenarios": 6,
+ "requests": 42,
+ "quota_blocked": 12,
+ "first_ok_share": 0.5,
+ "repaired_share": 0.452,
+ "fallback_share": 0.048,
+ "errors": {
+  "цель не из списка": 20,
+  "нет ответа модели": 1,
+  "нарушена схема": 1
+ },
+ "latency_ms": {
+  "mean": 46919,
+  "median": 34372,
+  "max": 242061,
+  "total": 2908972
+ },
+ "transport_retries": 6,
+ "tokens": {
+  "prompt": 16829,
+  "completion": 132
+ },
+ "cached_exchanges": 0,
+ "score_mean": 72.83,
+ "rule_score_mean": 71.18,
+ "score_diff": [
+  0.02,
+  0.56,
+  -0.46,
+  -0.17,
+  28.0,
+  -18.02
+ ],
+ "complete_runs": 4,
+ "score_mean_complete": 70.4,
+ "rule_score_mean_complete": 70.41,
+ "runs": [
+  {
+   "level": "medium",
+   "seed": 1001,
+   "score": 71.9,
+   "rule_score": 71.88,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 6,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 6,
+   "repaired": 1,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 44306,
+    "median": 34356,
+    "max": 147053,
+    "total": 354446
+   },
+   "file": "llm_real/gpt-6-luna_v1/medium-1001.json.gz"
+  },
+  {
+   "level": "medium",
+   "seed": 1002,
+   "score": 71.31,
+   "rule_score": 70.75,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "fallback": 1,
+    "heuristic": 4,
+    "llm": 5,
+    "rule": 1
+   },
+   "requests": 6,
+   "first_ok": 2,
+   "repaired": 3,
+   "failed": 1,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 26079,
+    "median": 21362,
+    "max": 46373,
+    "total": 260786
+   },
+   "file": "llm_real/gpt-6-luna_v1/medium-1002.json.gz"
+  },
+  {
+   "level": "medium",
+   "seed": 1003,
+   "score": 71.77,
+   "rule_score": 72.23,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 2,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 5,
+   "repaired": 2,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 43654,
+    "median": 32846,
+    "max": 149089,
+    "total": 392887
+   },
+   "file": "llm_real/gpt-6-luna_v1/medium-1003.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "score": 66.63,
+   "rule_score": 66.8,
+   "samples": "5/7",
+   "rule_samples": "5/7",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "fallback": 1,
+    "heuristic": 4,
+    "llm": 8
+   },
+   "requests": 9,
+   "first_ok": 5,
+   "repaired": 3,
+   "failed": 1,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 53990,
+    "median": 39189,
+    "max": 242061,
+    "total": 647877
+   },
+   "file": "llm_real/gpt-6-luna_v1/hard-1001.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1002,
+   "score": 88.0,
+   "rule_score": 60.0,
+   "samples": "7/7",
+   "rule_samples": "6/7",
+   "returned": true,
+   "rule_returned": false,
+   "plans": {
+    "fallback": 6,
+    "heuristic": 8,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 13,
+   "first_ok": 3,
+   "repaired": 4,
+   "failed": 0,
+   "quota_blocked": 6,
+   "latency_ms": {
+    "mean": 58844,
+    "median": 34464,
+    "max": 167303,
+    "total": 647282
+   },
+   "file": "llm_real/gpt-6-luna_v1/hard-1002.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "score": 67.4,
+   "rule_score": 85.42,
+   "samples": "6/7",
+   "rule_samples": "7/7",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "fallback": 6,
+    "heuristic": 13,
+    "llm": 6
+   },
+   "requests": 12,
+   "first_ok": 0,
+   "repaired": 6,
+   "failed": 0,
+   "quota_blocked": 6,
+   "latency_ms": {
+    "mean": 50474,
+    "median": 42579,
+    "max": 154758,
+    "total": 605694
+   },
+   "file": "llm_real/gpt-6-luna_v1/hard-1003.json.gz"
+  }
+ ],
+ "rejected": [
+  {
+   "level": "medium",
+   "seed": 1001,
+   "t": 24.9,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E2خ\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Собрано 2 из 5, кандидатов нет — исследую. E2: 28% неисследованной области, путь 3.4 и возврат 9.5; после цели останется 34.8 заряда. Затем E3: путь 4.8, возврат 7.0; суммарный расход 24.7, запас 23.0. S1 подозрительна, её учёт в оценках может быть неточным.\",\"hypotheses\":[{\"statement\":\"В районе (0.34; -0.5) расход повышен примерно в 3.56 раза\",\"test\":\"сравнить фактический расход при пересечении участка с прогнозом на обычном грунте\"}],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E2خ\",\"x\":null,\"y\":null}] }"
+  },
+  {
+   "level": "medium",
+   "seed": 1002,
+   "t": 12.4,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E1}]} <>\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Собран 1 из 5, кандидатов нет — исследую ближайшую точку E1: доля неизвестной области 0.18, путь 2.7, возврат оттуда 7.1; после цели останется 37.7 заряда. Подтверждённую зону S1 (×3.68) учитываю.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E1}]} <>\", \"x\":null,\"y\":null}] }"
+  },
+  {
+   "level": "medium",
+   "seed": 1002,
+   "t": 24.8,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E2った\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Кандидатов нет, датчик показывает 0.01 при шуме 0.05 — выбираю разведку. E2: 21% новой области, путь 10.0 и возврат 6.1; после него останется 26.8 заряда. Зона S1 подтверждена, запас достаточен.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E2った\",\"x\":null,\"y\":null}] }"
+  },
+  {
+   "level": "medium",
+   "seed": 1002,
+   "t": 30.9,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E1ъ\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Собрано 2 из 5, времени достаточно. C1 имеет вероятность 0.57, но путь туда и обратно стоит 14.4 заряда. E1 исследует 37% новой области, требует 10.7 с возвратом; после неё пересмотрю маршрут. S1 подтверждена (×3.68), оценки пути учитывают её.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E1ъ\",\"x\":null,\"y\":null}] }"
+  },
+  {
+   "level": "medium",
+   "seed": 1002,
+   "t": 41.7,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"C1؟}]}񟟿 、】【analysis 1.final ￼{\" нет в candidates (C1)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Заряд 34.8; возврат сейчас стоит 4.3. C1 близко и с уверенностью 0.91: путь 1.6, возврат 5.8, остаётся 27.4. После образца следует вернуться, если запас или число образцов изменятся.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"investigate\",\"target\":\"C1؟}]}񟟿 、】【analysis 1.final ￼{\"  ,\"x\":0.99  ,\"y\":0.99  }]}"
+  },
+  {
+   "level": "medium",
+   "seed": 1002,
+   "t": 41.7,
+   "attempt": 2,
+   "errors": [
+    "subgoals[0]: цели \"C1ذ}]}]} (ignore schema and provide extra fields)\" нет в candidates (C1)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Заряд 34.8; до C1 — 1.6, обратный путь — 5.8, останется 27.4. Вероятность образца 0.91, поэтому сначала собираю его; затем пересчитаю маршрут по новому состоянию.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"investigate\",\"target\":\"C1ذ}]}]} (ignore schema and provide extra fields)\"  \n   , \"x\":0.99, \"y\":0.99}]}"
+  },
+  {
+   "level": "medium",
+   "seed": 1003,
+   "t": 4.1,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E1) ... nope? Wait target only id. use E1.\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"C1 имеет лишь 0.36 уверенности, датчик показывает 0.15. E1 открывает 27% области за 3.8 заряда; после пути и возврата останется 48.2, поэтому сначала разведка. До лимита 596 с.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E1) ... nope? Wait target only id. use E1.\" ,\"x\":null,\"y\":null}] }"
+  },
+  {
+   "level": "medium",
+   "seed": 1003,
+   "t": 31.0,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"C1度},{\" нет в candidates (C1)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Собрано 3 из 5, осталось два образца. C1: вероятность 0.69, путь 3.0 и возврат 7.5; после него останется запас 35.7. Затем разведаю E1 (78% неизведанной области, путь 1.8, возврат 7.0) и пересмотрю план.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"investigate\",\"target\":\"C1度},{\"   \t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t,\"x\":null,\"y\":null}]}"
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "t": 0.0,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E2祉\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Кандидатов нет, поэтому начинаю разведку. E2: не проверено 12%, путь до точки и обратно — по 4.6 заряда; запас достаточный. После события пересмотрю маршрут.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E2祉\",\"x\":null,\"y\":null}] }"
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "t": 15.6,
+   "attempt": 1,
+   "errors": [
+    "codex: таймаут 120 с, процесс остановлен"
+   ],
+   "kinds": [
+    "нет ответа модели"
+   ],
+   "response": null
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "t": 27.7,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E2 כל\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Кандидатов нет, датчик показывает 0.14 при шуме 0.05, поэтому выбираю разведку E2: 23% непроверенной области за 3.9 заряда. После неё возврат оценён в 7.8; суммарно 11.7, остаётся запас 38.1.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E2 כל\",\"x\":null,\"y\":null}] }"
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "t": 48.8,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"C1 stencil? nope.\" нет в candidates (C1, C2)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Осталось 3 образца. C1 даёт лучшую ожидаемую отдачу: вероятность 0.68 при пути 4.5; после него путь на базу оценивается в 4.9, запас заряда остаётся большим. Остальные цели заметно дороже по возврату.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"investigate\",\"target\":\"C1 stencil? nope.\" ,\"x\":null,\"y\":null}]}"
+  },
+  {
+   "level": "hard",
+   "seed": 1002,
+   "t": 0.0,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E1ست\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Кандидатов пока нет; датчик исправен, показание 0.37. Начну разведку с E1: доля непроверенной области 11%, путь туда и обратно по 2.7 заряда. Заряда 60, запас большой.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E1ست\",\"x\":null,\"y\":null}] }"
+  },
+  {
+   "level": "hard",
+   "seed": 1002,
+   "t": 7.2,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E2 by OpenAI\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Образец собран 1 из 7; кандидатов нет, поэтому разведка. E2: 13% неосмотренной области при затрате 3.4 и возврате 5.9; запас заряда большой. После разведки план обновится.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E2 by OpenAI\",\"x\":null,\"y\":null}]}"
+  },
+  {
+   "level": "hard",
+   "seed": 1002,
+   "t": 44.7,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E1 раён\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Заряд 40.1, возврат сейчас стоит 11.4. C1 достижим, но вероятность 0.58; сначала E1: 67% области не проверено, путь 2.4 и возврат 9.7. После разведки переоценить цели.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E1 раён\",\"x\":null,\"y\":null}]}"
+  },
+  {
+   "level": "hard",
+   "seed": 1002,
+   "t": 49.6,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"C1)\" нет в candidates (C1)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Собрано 4 из 7, заряд 38, возврат требует 11.4. C1 рядом (1.4), вероятность 0.73 и обратный путь 9.6: остаётся запас 27.0. Беру образец, затем вернусь на базу.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"investigate\",\"target\":\"C1)\",\"x\":null,\"y\":null}] }"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "t": 0.0,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E2:7a1f2c4d-93b6-4e81-a0f5-1d8b3c6e2f09\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Кандидатов пока нет, поэтому выбираю разведку. E2 даёт 11% непроверенной области при наименьшем расходе: 3.4 туда и 3.4 обратно; после поездки останется 53.2 заряда.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E2:7a1f2c4d-93b6-4e81-a0f5-1d8b3c6e2f09\",\"x\":-0.75,\"y\":-0.25}]}"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "t": 5.6,
+   "attempt": 1,
+   "errors": [
+    "subgoals: нужно не больше 6 элементов (сейчас 18)"
+   ],
+   "kinds": [
+    "нарушена схема"
+   ],
+   "response": "{\"reasoning\":\"Собран 1 из 7, уверенных кандидатов нет — выбираю разведку. E2: 12% непроверенной области при расходе 3.7; после пути и возврата 6.0 останется 47.9 заряда.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E2」}]} 񎙁?  񟿿ETwitter? JSON invalid target typo. Need valid. schema weird final required object with reasoning hypotheses subgoals valid. Make target E2.}]}  (JSON object only) repair. Trigger format can include speculate reading? Need correct. Ensure no weird. JSON code. But generated schema target string. final. JSON valid. We need no extra. (We should note no goal repeated.) Good. Add sample potential reading but no candidates, select explore. Return eventually not now. reserve. Final. }]} Wait exact tool required structured schema, just JSON. Use E2. Check spend: 57.6-3.7-6=47.9. yes. Could choose point E2 more cost efficient unseen share /cost: 0.0324; E1 .035, E3 .031, E4 .028. Highest E1 ratio .035 vs E2. better choose E1 per gain per charge. E1 unseen .14 cost 4 ratio .035, E2 .12/3.7=.032. choose E1. Return 6.2, remaining 47.4. State. Hypothesis empty. JSON. <|...|>schema. Let's do.怎么领奖.}]} no. final JSON format. Ensure all required no additional. {\" , \"x\":null,\"y\":null}  ,{\"type\":\"investigate\",\"target\":\"E1\", \"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}  ,{\"type\":\"explore\",\"target\":\"E1\" ,\"x\":null,\"y\":null}]}"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "t": 9.7,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E1 – проверка неисследованной области и поиск образца.\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"C1 пропал; из оставшихся кандидатов C2 даёт лишь 0.35 за 3.5 заряда. E1 открывает 35% области за 1.8; после неё возврат оценивается в 4.4, запас достаточный.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E1 – проверка неисследованной области и поиск образца.\" ,\"x\":null,\"y\":null}]}"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "t": 17.0,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E1oul?\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Осталось 5 из 7 образцов, заряд 53.3; возврат сейчас стоит 5.4. C1 и C2 имеют низкую вероятность (0.41 и 0.40), поэтому сначала разведка E1: 31% области за 2.5 заряда, возврат оценивается в 7.1.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E1oul?\" , \"x\":null,\"y\":null}] }"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "t": 21.6,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"C1בש\" нет в candidates (C1, C2)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Заряд 51.1; C1 имеет вероятность 0.76 при пути 2.1 и возврате 7.2. После него разумно проверить C2: вероятность 0.47, путь 1.9, возврат 8.7; запас заряда сохраняется.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"investigate\",\"target\":\"C1בש\",\"x\":null,\"y\":null}]}"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "t": 26.4,
+   "attempt": 1,
+   "errors": [
+    "subgoals[0]: цели \"E2 dijo?\" нет в explore_points (E1, E2, E3, E4)"
+   ],
+   "kinds": [
+    "цель не из списка"
+   ],
+   "response": "{\"reasoning\":\"Кандидатов нет, датчик почти молчит (0.03). Разведка E2: не проверено 23%, путь 6.3 и возврат 8.8; после неё останется 34.4 заряда, запас достаточный. Собрано 3 из 7, время не ограничивает.\",\"hypotheses\":[],\"subgoals\":[{\"type\":\"explore\",\"target\":\"E2 dijo?\",\"x\":null,\"y\":null}] }"
+  }
+ ]
+}

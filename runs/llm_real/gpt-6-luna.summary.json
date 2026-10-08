@@ -1,0 +1,235 @@
+{
+ "arm": "gpt-6-luna",
+ "llm": {
+  "kind": "codex"
+ },
+ "created": "2026-10-08T03:29:35",
+ "wall_s": 1209.0,
+ "scenarios": 6,
+ "requests": 58,
+ "quota_blocked": 0,
+ "first_ok_share": 0.966,
+ "repaired_share": 0.0,
+ "fallback_share": 0.034,
+ "errors": {
+  "нет ответа модели": 2
+ },
+ "latency_ms": {
+  "mean": 60244,
+  "median": 40446,
+  "max": 242074,
+  "total": 3494163
+ },
+ "transport_retries": 6,
+ "tokens": {
+  "prompt": 17296,
+  "completion": 138
+ },
+ "cached_exchanges": 0,
+ "score_mean": 76.34,
+ "rule_score_mean": 71.18,
+ "score_diff": [
+  0.01,
+  0.73,
+  0.0,
+  13.6,
+  21.57,
+  -4.94
+ ],
+ "complete_runs": 6,
+ "score_mean_complete": 76.34,
+ "rule_score_mean_complete": 71.18,
+ "runs": [
+  {
+   "level": "medium",
+   "seed": 1001,
+   "score": 71.89,
+   "rule_score": 71.88,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "fallback": 1,
+    "heuristic": 5,
+    "llm": 6,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 6,
+   "repaired": 0,
+   "failed": 1,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 107676,
+    "median": 76046,
+    "max": 242074,
+    "total": 753729
+   },
+   "file": "llm_real/gpt-6-luna/medium-1001.json.gz"
+  },
+  {
+   "level": "medium",
+   "seed": 1002,
+   "score": 71.48,
+   "rule_score": 70.75,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 3,
+    "llm": 8,
+    "rule": 1
+   },
+   "requests": 8,
+   "first_ok": 8,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 94252,
+    "median": 65087,
+    "max": 206342,
+    "total": 754017
+   },
+   "file": "llm_real/gpt-6-luna/medium-1002.json.gz"
+  },
+  {
+   "level": "medium",
+   "seed": 1003,
+   "score": 72.23,
+   "rule_score": 72.23,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "fallback": 1,
+    "heuristic": 1,
+    "llm": 6,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 6,
+   "repaired": 0,
+   "failed": 1,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 104018,
+    "median": 61575,
+    "max": 242073,
+    "total": 728125
+   },
+   "file": "llm_real/gpt-6-luna/medium-1003.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "score": 80.4,
+   "rule_score": 66.8,
+   "samples": "6/7",
+   "rule_samples": "5/7",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 10,
+    "llm": 12,
+    "rule": 1
+   },
+   "requests": 12,
+   "first_ok": 12,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 34391,
+    "median": 31523,
+    "max": 58520,
+    "total": 412688
+   },
+   "file": "llm_real/gpt-6-luna/hard-1001.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1002,
+   "score": 81.57,
+   "rule_score": 60.0,
+   "samples": "6/7",
+   "rule_samples": "6/7",
+   "returned": true,
+   "rule_returned": false,
+   "plans": {
+    "heuristic": 10,
+    "llm": 11
+   },
+   "requests": 11,
+   "first_ok": 11,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 35780,
+    "median": 27521,
+    "max": 69678,
+    "total": 393581
+   },
+   "file": "llm_real/gpt-6-luna/hard-1002.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "score": 80.48,
+   "rule_score": 85.42,
+   "samples": "7/7",
+   "rule_samples": "7/7",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 8,
+    "llm": 13,
+    "rule": 1
+   },
+   "requests": 13,
+   "first_ok": 13,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 34771,
+    "median": 27818,
+    "max": 79711,
+    "total": 452023
+   },
+   "file": "llm_real/gpt-6-luna/hard-1003.json.gz"
+  }
+ ],
+ "rejected": [
+  {
+   "level": "medium",
+   "seed": 1001,
+   "t": 0.0,
+   "attempt": 1,
+   "errors": [
+    "codex: таймаут 120 с, процесс остановлен"
+   ],
+   "kinds": [
+    "нет ответа модели"
+   ],
+   "response": null
+  },
+  {
+   "level": "medium",
+   "seed": 1003,
+   "t": 0.0,
+   "attempt": 1,
+   "errors": [
+    "codex: таймаут 120 с, процесс остановлен"
+   ],
+   "kinds": [
+    "нет ответа модели"
+   ],
+   "response": null
+  }
+ ]
+}

@@ -1,0 +1,317 @@
+{
+ "context": {
+  "topic": "energy",
+  "anomaly": {
+   "text": "расход вырос: 6,8 ед/м при прогнозе 2,6",
+   "x": 0.4,
+   "y": 1.1,
+   "observed": 6.8,
+   "expected": 2.6,
+   "unit": "ед/м"
+  },
+  "state": {
+   "battery": 31.5,
+   "return_cost": 7.2,
+   "carried": 3,
+   "time_s": 41.2,
+   "recent_turning_rad": 5.1,
+   "on_known_ground": true,
+   "last_penalty_s_ago": 6.0
+  },
+  "alternatives": [
+   {
+    "id": "soil",
+    "statement": "здесь дорогой грунт",
+    "prior": 0.4
+   },
+   {
+    "id": "leak",
+    "statement": "батарея теряет заряд сама по себе (сбой)",
+    "prior": 0.3
+   },
+   {
+    "id": "turn",
+    "statement": "заряд ушёл на повороты",
+    "prior": 0.2
+   },
+   {
+    "id": "other",
+    "statement": "причина не из этого списка",
+    "prior": 0.1
+   }
+  ],
+  "tests": [
+   {
+    "id": "rest",
+    "name": "постоять 2 секунды",
+    "cost": 0.05,
+    "duration_s": 2.0,
+    "unit": "ед/с",
+    "gain_bits": 0.9,
+    "predictions": {
+     "soil": {
+      "mean": 0.01,
+      "sigma": 0.02
+     },
+     "leak": {
+      "mean": 0.15,
+      "sigma": 0.03
+     },
+     "turn": {
+      "mean": 0.01,
+      "sigma": 0.02
+     }
+    }
+   },
+   {
+    "id": "straight",
+    "name": "проехать прямо 0,3 м",
+    "cost": 0.8,
+    "duration_s": 2.0,
+    "unit": "ед/м",
+    "gain_bits": 0.4,
+    "predictions": {
+     "soil": {
+      "mean": 6.5,
+      "sigma": 0.8
+     },
+     "leak": {
+      "mean": 3.9,
+      "sigma": 0.5
+     },
+     "turn": {
+      "mean": 2.5,
+      "sigma": 0.3
+     }
+    }
+   },
+   {
+    "id": "spin",
+    "name": "развернуться на месте на 90°",
+    "cost": 0.3,
+    "duration_s": 1.5,
+    "unit": "ед/рад",
+    "gain_bits": 0.3,
+    "predictions": {
+     "soil": {
+      "mean": 0.12,
+      "sigma": 0.05
+     },
+     "leak": {
+      "mean": 0.25,
+      "sigma": 0.08
+     },
+     "turn": {
+      "mean": 0.5,
+      "sigma": 0.1
+     }
+    }
+   }
+  ],
+  "budget": {
+   "energy": 2.0,
+   "max_tests": 3
+  }
+ },
+ "proposal": {
+  "consider": [
+   "soil",
+   "leak",
+   "turn",
+   "other"
+  ],
+  "extra": [],
+  "plan": [
+   {
+    "test": "rest",
+    "distinguishes": [
+     "soil",
+     "leak",
+     "turn"
+    ],
+    "refutes_if": "измерено меньше 0.09 ед/с — leak исключается"
+   },
+   {
+    "test": "spin",
+    "distinguishes": [
+     "soil",
+     "turn"
+    ],
+    "refutes_if": "измерено меньше 0.35 ед/рад — turn исключается"
+   },
+   {
+    "test": "straight",
+    "distinguishes": [
+     "soil",
+     "leak",
+     "turn"
+    ],
+    "refutes_if": "меньше 4.9 ед/м — soil исключается; больше 4.4 ед/м — leak исключается; больше 3.4 ед/м — turn исключается"
+   }
+  ],
+  "rationale": "Пороги для опровержения взяты между предсказаниями с учётом их sigma: rest разделяет leak и остальные, spin — turn и soil, straight даёт различимые пары. Порядок по gain_bits/cost: rest, spin, straight; суммарная стоимость 1.15 ед. при бюджете 2.0.",
+  "source": "llm",
+  "error": null
+ },
+ "critique": {
+  "verdict": "revise",
+  "issues": [
+   {
+    "kind": "no_refutation",
+    "text": "В условии нет результата, который исключает объяснение: около 0.15 ед/с говорит лишь, что leak не опровергнуто, а около 0.01 — что оно не подтверждается.",
+    "fix": "Указать, при каком измеренном расходе в ед/с объяснение leak исключается.",
+    "target": "rest"
+   },
+   {
+    "kind": "no_refutation",
+    "text": "Условие не указывает результат, исключающий объяснение: около 0.12 ед/рад лишь не подтверждает turn, а около 0.5 — не опровергает его.",
+    "fix": "Указать измеренный диапазон ед/рад, при котором turn исключается.",
+    "target": "spin"
+   },
+   {
+    "kind": "no_refutation",
+    "text": "Условия говорят, какие значения поддерживают объяснения, но не задают результат измерения, который исключит soil, leak или turn.",
+    "fix": "Для каждого объяснения указать результат измерения в ед/м, при котором оно исключается.",
+    "target": "straight"
+   }
+  ],
+  "source": "llm",
+  "error": null
+ },
+ "draft": {
+  "consider": [
+   "soil",
+   "leak",
+   "turn",
+   "other"
+  ],
+  "extra": [],
+  "plan": [
+   {
+    "test": "rest",
+    "distinguishes": [
+     "soil",
+     "leak",
+     "turn"
+    ],
+    "refutes_if": "при стоянке около 0.15 ед/с — объяснение leak не опровергнуто; около 0.01 ед/с — leak не подтверждается"
+   },
+   {
+    "test": "spin",
+    "distinguishes": [
+     "soil",
+     "turn"
+    ],
+    "refutes_if": "около 0.12 ед/рад — turn не подтверждается; около 0.5 ед/рад — turn не опровергнуто"
+   },
+   {
+    "test": "straight",
+    "distinguishes": [
+     "soil",
+     "turn",
+     "leak"
+    ],
+    "refutes_if": "около 6.5 ед/м поддерживает soil; около 3.9 ед/м поддерживает leak; около 2.5 ед/м поддерживает turn"
+   }
+  ],
+  "rationale": "Сначала rest: 0.9 бит за 0.05 ед. Затем spin (1.0 бит/ед.) и straight (0.5 бит/ед.) помогают развести оставшиеся объяснения. Все три опыта стоят 1.15 ед. при бюджете 2.0; у other нет предсказаний ни в одном опыте.",
+  "source": "llm",
+  "error": null
+ },
+ "revised": true,
+ "open_issues": [],
+ "exchanges": [
+  {
+   "attempt": 1,
+   "role": "author",
+   "request": "Вход: {\"task\": \"propose\", \"context\": {\"topic\": \"energy\", \"anomaly\": {\"text\": \"расход вырос: 6,8 ед/м при прогнозе 2,6\", \"x\": 0.4, \"y\": 1.1, \"observed\": 6.8, \"expected\": 2.6, \"unit\": \"ед/м\"}, \"state\": {\"battery\": 31.5, \"return_cost\": 7.2, \"carried\": 3, \"time_s\": 41.2, \"recent_turning_rad\": 5.1, \"on_k…",
+   "response": "{\"consider\":[\"soil\",\"leak\",\"turn\",\"other\"],\"extra\":[],\"plan\":[{\"test\":\"rest\",\"distinguishes\":[\"soil\",\"leak\",\"turn\"],\"refutes_if\":\"при стоянке около 0.15 ед/с — объяснение leak не опровергнуто; около 0.01 ед/с — leak не подтверждается\"},{\"test\":\"spin\",\"distinguishes\":[\"soil\",\"turn\"],\"refutes_if\":\"около 0.12 ед/рад — turn не подтверждается; около 0.5 ед/рад — turn не опровергнуто\"},{\"test\":\"straight\",\"distinguishes\":[\"soil\",\"turn\",\"leak\"],\"refutes_if\":\"около 6.5 ед/м поддерживает soil; около 3.9 ед/м поддерживает leak; около 2.5 ед/м поддерживает turn\"}],\"rationale\":\"Сначала rest: 0.9 бит за 0.05 ед. Затем spin (1.0 бит/ед.) и straight (0.5 бит/ед.) помогают развести оставшиеся объяснения. Все три опыта стоят 1.15 ед. при бюджете 2.0; у other нет предсказаний ни в одном опыте.\"}",
+   "ok": true,
+   "errors": [],
+   "latency_ms": 19980,
+   "cached": true,
+   "http_attempts": 0,
+   "usage": {
+    "prompt_tokens": 17113,
+    "completion_tokens": 272,
+    "total_tokens": 17385,
+    "input_tokens": 17113,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 272,
+    "reasoning_output_tokens": 0
+   },
+   "task": "propose"
+  },
+  {
+   "attempt": 1,
+   "role": "critic",
+   "request": "Вход: {\"task\": \"criticize\", \"context\": {\"topic\": \"energy\", \"anomaly\": {\"text\": \"расход вырос: 6,8 ед/м при прогнозе 2,6\", \"x\": 0.4, \"y\": 1.1, \"observed\": 6.8, \"expected\": 2.6, \"unit\": \"ед/м\"}, \"state\": {\"battery\": 31.5, \"return_cost\": 7.2, \"carried\": 3, \"time_s\": 41.2, \"recent_turning_rad\": 5.1, \"on…",
+   "response": "{\"verdict\":\"revise\",\"issues\":[{\"kind\":\"non_discriminating\",\"target\":\"rest\",\"text\":\"rest не различает soil и turn: средние 0.01 и 0.01 ед/с совпадают, сумма σ — 0.04.\",\"fix\":\"Убрать soil и turn из списка distinguishes у rest или не считать rest способом различить эту пару.\"},{\"kind\":\"non_discriminating\",\"target\":\"spin\",\"text\":\"spin не различает soil и leak: средние 0.12 и 0.25 ед/рад расходятся на 0.13, сумма σ — 0.13.\",\"fix\":\"Убрать leak из consider либо добавить в план опыт, различающий soil и leak.\"},{\"kind\":\"unmeasurable\",\"target\":\"straight\",\"text\":\"Условие «поддерживает» для soil, leak и turn не задаёт, какой измеренный результат исключит каждое объяснение.\",\"fix\":\"Переписать refutes_if: указать результаты измерения, при которых каждое из soil, leak и turn исключается.\"},{\"kind\":\"no_refutation\",\"target\":\"spin\",\"text\":\"Условия говорят лишь, когда turn подтверждается или не опровергнуто; проверяемого результата, исключающего объяснение, нет.\",\"fix\":\"Указать измеренный диапазон ед/рад, при котором soil или turn исключается.\"}]}",
+   "ok": false,
+   "errors": [
+    "issues[0]: по predictions каждый опыт плана различает свои объяснения, и каждая пара из consider различима планом — замечание неверно",
+    "issues[1]: по predictions каждый опыт плана различает свои объяснения, и каждая пара из consider различима планом — замечание неверно"
+   ],
+   "latency_ms": 17379,
+   "cached": true,
+   "http_attempts": 0,
+   "usage": {
+    "prompt_tokens": 16941,
+    "completion_tokens": 298,
+    "total_tokens": 17239,
+    "input_tokens": 16941,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 298,
+    "reasoning_output_tokens": 0
+   },
+   "task": "criticize"
+  },
+  {
+   "attempt": 2,
+   "role": "critic",
+   "request": "Ответ не принят. Ошибки: - issues[0]: по predictions каждый опыт плана различает свои объяснения, и каждая пара из consider различима планом — замечание неверно - issues[1]: по predictions каждый опыт плана различает свои объяснения, и каждая пара из consider различима планом — замечание неверно Исп…",
+   "response": "{\"verdict\":\"revise\",\"issues\":[{\"kind\":\"no_refutation\",\"target\":\"rest\",\"text\":\"В условии нет результата, который исключает объяснение: около 0.15 ед/с говорит лишь, что leak не опровергнуто, а около 0.01 — что оно не подтверждается.\",\"fix\":\"Указать, при каком измеренном расходе в ед/с объяснение leak исключается.\"},{\"kind\":\"no_refutation\",\"target\":\"spin\",\"text\":\"Условие не указывает результат, исключающий объяснение: около 0.12 ед/рад лишь не подтверждает turn, а около 0.5 — не опровергает его.\",\"fix\":\"Указать измеренный диапазон ед/рад, при котором turn исключается.\"},{\"kind\":\"no_refutation\",\"target\":\"straight\",\"text\":\"Условия говорят, какие значения поддерживают объяснения, но не задают результат измерения, который исключит soil, leak или turn.\",\"fix\":\"Для каждого объяснения указать результат измерения в ед/м, при котором оно исключается.\"}]}",
+   "ok": true,
+   "errors": [],
+   "latency_ms": 12331,
+   "cached": true,
+   "http_attempts": 0,
+   "usage": {
+    "prompt_tokens": 17362,
+    "completion_tokens": 235,
+    "total_tokens": 17597,
+    "input_tokens": 17362,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 235,
+    "reasoning_output_tokens": 0
+   },
+   "task": "criticize"
+  },
+  {
+   "attempt": 1,
+   "role": "author",
+   "request": "Вход: {\"task\": \"revise\", \"context\": {\"topic\": \"energy\", \"anomaly\": {\"text\": \"расход вырос: 6,8 ед/м при прогнозе 2,6\", \"x\": 0.4, \"y\": 1.1, \"observed\": 6.8, \"expected\": 2.6, \"unit\": \"ед/м\"}, \"state\": {\"battery\": 31.5, \"return_cost\": 7.2, \"carried\": 3, \"time_s\": 41.2, \"recent_turning_rad\": 5.1, \"on_kn…",
+   "response": "{\"consider\":[\"soil\",\"leak\",\"turn\",\"other\"],\"extra\":[],\"plan\":[{\"test\":\"rest\",\"distinguishes\":[\"soil\",\"leak\",\"turn\"],\"refutes_if\":\"измерено меньше 0.09 ед/с — leak исключается\"},{\"test\":\"spin\",\"distinguishes\":[\"soil\",\"turn\"],\"refutes_if\":\"измерено меньше 0.35 ед/рад — turn исключается\"},{\"test\":\"straight\",\"distinguishes\":[\"soil\",\"leak\",\"turn\"],\"refutes_if\":\"меньше 4.9 ед/м — soil исключается; больше 4.4 ед/м — leak исключается; больше 3.4 ед/м — turn исключается\"}],\"rationale\":\"Пороги для опровержения взяты между предсказаниями с учётом их sigma: rest разделяет leak и остальные, spin — turn и soil, straight даёт различимые пары. Порядок по gain_bits/cost: rest, spin, straight; суммарная стоимость 1.15 ед. при бюджете 2.0.\"}",
+   "ok": true,
+   "errors": [],
+   "latency_ms": 14652,
+   "cached": true,
+   "http_attempts": 0,
+   "usage": {
+    "prompt_tokens": 17655,
+    "completion_tokens": 240,
+    "total_tokens": 17895,
+    "input_tokens": 17655,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 240,
+    "reasoning_output_tokens": 0
+   },
+   "task": "revise"
+  }
+ ],
+ "latency_ms": 64346
+}
