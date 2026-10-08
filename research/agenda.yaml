@@ -80,9 +80,12 @@ studies:
   - id: S1
     title: Два слайда о работе с ИИ-агентами
     criterion: Бонус «Команда мечты с AI»; показ — «как использовали ИИ»
-    status: assigned
+    status: published
     owner: Claude Opus 5.5
     why: Требование к показу и бонусный трек. Содержание — из раздела 8 сверки с требованиями.
+    result: >-
+      presentation/ai_process.pptx и .pdf (сборка: node build_ai_process.js), текст доклада на две минуты —
+      presentation/ai_process_speech.md. Числа первого слайда записаны одной константой и обновляются перед финалом.
 
   - id: G3
     title: Побочные эффекты защиты от потери положения
@@ -350,7 +353,7 @@ studies:
   - id: F2
     title: Карта от SLAM Toolbox вместо готовой (бонусный трек)
     criterion: Бонус «SLAM вместо готовой карты»
-    status: assigned
+    status: review
     owner: Claude Opus 5.5
     why: Ключ подключён, но ни разу не проверен; в условии требование — начало координат карты совпадает с мировым.
     note: >-
