@@ -40,6 +40,7 @@ class SampleBelief:
         self.updates = 0
         self._epoch = self.p.copy()     # убеждения на момент последнего сбора
         self._log = []                  # показания с того момента: (x, y, z, sigma)
+        self.replay = None              # P3: другой пересчёт карты после сбора (did/replay.py); None — прежний
 
     def update(self, x, y, z, sigma):
         """Учесть показание z в точке (x, y) при шуме датчика sigma.
@@ -174,6 +175,8 @@ class SampleBelief:
             sx, sy = self.cx[k], self.cy[k]
         else:
             sx, sy = x, y
+        if self.replay is not None:
+            return self.replay(self, sx, sy)
         self.p = self._epoch.copy()
         f_all = None
         for (rx, ry, z, sigma) in self._log:

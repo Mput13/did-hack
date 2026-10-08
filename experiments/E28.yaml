@@ -1,0 +1,63 @@
+title: Результативность — агент v4 (попутный сбор, P3) против v2
+kind: main
+question: Даёт ли попутный сбор — робот собирает образец, оказавшийся в радиусе сбора, когда едет на разведку, к другой цели или на базу, — прибавку счёта на новых сценариях трудного уровня, не ухудшая возврат, ложные сборы и средний уровень?
+hypothesis: >-
+  Статья потерь «образец: причина неясна» — не одна причина. На отладочных сценариях 1–80 в ней: по расчёту
+  самого агента заряда на подъезд не хватало (разбор потерь мерил по дороге оракула), подъезд назначался, но
+  разбор его не засчитал, слабый кандидат пропал после новых показаний — и одна причина, которую можно убрать
+  даром: робот проезжает образец в радиусе сбора при уверенности, с которой он собирает на подъезде, и не
+  собирает, потому что едет к другой цели или уже домой. Таких несобранных образцов на отладочных сценариях
+  4 из 50 (в статьях «неясно», «прерван возвратом», «заряда не хватало»). Попутный сбор вернёт их: ожидаемая
+  прибавка v4 к v2 на трудном уровне — около 0,5 очка на прогон (на отладочных +0,50 [+0,12; +1,00]), без
+  изменений на среднем уровне. Это ниже порога приёмки в 1,5 очка: по разбору причин порог одной маленькой
+  правкой не берётся.
+method: >-
+  Четыре агента (adaptive_v2, adaptive_v4, scientist_v2, scientist_v4) и проба adaptive_v4r (v4 с точным
+  пересчётом карты после сбора, в приёмку не входит) проходят одни и те же сценарии 13001–13040 уровней medium
+  и hard при трёх условиях: базовые правила, «научные» правила и базовые правила без событий среды. Отладка и
+  подбор шли на сценариях 1–80; сценарии 13001–13040 до этого опыта не запускались и не просматривались; код
+  заморожен коммитом до запуска, запуск один. Сравниваются парные разности «v4 − v2».
+expect: >-
+  Критерий приёмки (задан ведущим до работы): трудный уровень, базовые правила — счёт adaptive_v4 выше
+  adaptive_v2 на 1,5 очка и больше, интервал выше нуля; возврат не ниже; ложных сборов не больше; средний
+  уровень — не хуже чем на 1 очко; без событий среды — не хуже.
+refute: >-
+  Приёмка не пройдена, если на hard при базовых правилах парная разность счёта adaptive_v4 − adaptive_v2 меньше
+  1,5 очка или её интервал включает ноль; если возвратов меньше; если ложных сборов больше; если на medium
+  потеря больше 1 очка; если без событий среды потеря больше 1 очка. Сама гипотеза о попутном сборе
+  опровергнута, если разность счёта на hard не выше нуля или ложных сборов у v4 больше, чем у v2.
+arms:
+  - {id: adaptive_v2, label: Адаптивный v2, agent: adaptive_v2}
+  - {id: adaptive_v4, label: Адаптивный v4, agent: adaptive_v4}
+  - {id: scientist_v2, label: Исследователь v2, agent: scientist_v2}
+  - {id: scientist_v4, label: Исследователь v4, agent: scientist_v4}
+  - {id: adaptive_v4r, label: Адаптивный v4 с точным пересчётом карты (проба), agent: adaptive_v4, config: {exact_replay: true}}
+levels: [medium, hard]
+seeds: 40
+seed_start: 13001
+conditions:
+  - {id: base, label: Базовые правила}
+  - id: science
+    label: Научные правила
+    rules: {drain_per_rad: 0.12, load_drain: 0.05, battery_sigma: 0.02, faults: true, hazard_battery_hit: 0.0}
+  - {id: no_events, label: Событий среды нет, scenario: {events: []}}
+metrics: [score, samples_share, returned, penalties, hazard_hits, false_collects, time, distance, battery_used]
+claims:
+  - {metric: score, a: adaptive_v4, b: adaptive_v2, focus: hard, conditions: [base],
+     text: Адаптивный v4 набирает больше v2 на базовых правилах}
+  - {metric: score, a: adaptive_v4, b: adaptive_v2, focus: hard, conditions: [science],
+     text: Адаптивный v4 набирает больше v2 на научных правилах}
+  - {metric: returned, a: adaptive_v4, b: adaptive_v2, focus: hard, better: higher, kind: noninferiority, margin: 0.05,
+     conditions: [base, science], text: Адаптивный v4 возвращается не реже v2}
+  - {metric: false_collects, a: adaptive_v4, b: adaptive_v2, focus: hard, better: lower, kind: noninferiority, margin: 0.05,
+     conditions: [base, science], text: У адаптивного v4 ложных сборов не больше, чем у v2}
+  - {metric: score, a: adaptive_v4, b: adaptive_v2, focus: medium, kind: noninferiority, margin: 1.0,
+     conditions: [base, science], text: Адаптивный v4 не теряет очков на среднем уровне}
+  - {metric: score, a: adaptive_v4, b: adaptive_v2, focus: hard, kind: noninferiority, margin: 1.0,
+     conditions: [no_events], text: Адаптивный v4 не хуже v2 без событий среды}
+  - {metric: score, a: scientist_v4, b: scientist_v2, focus: hard, conditions: [base, science],
+     text: Исследователь v4 набирает больше v2}
+  - {metric: returned, a: scientist_v4, b: scientist_v2, focus: hard, better: higher, kind: noninferiority, margin: 0.05,
+     conditions: [base, science], text: Исследователь v4 возвращается не реже v2}
+  - {metric: score, a: adaptive_v4r, b: adaptive_v4, focus: hard, conditions: [base, science],
+     text: Проба — точный пересчёт карты после сбора добавляет очков к v4}
