@@ -603,3 +603,48 @@ def test_mode_name_says_what_is_guaranteed():
     assert MODES == ('off', 'rule', 'leash')
     with pytest.raises(ValueError):
         Agent(load_arena(), make_config('adaptive_llm', llm_act_while_waiting='safe'), n_samples=5)
+
+
+def test_hung_model_request_does_not_keep_the_process_alive():
+    """Ревью, круг 2: запрос к модели завис навсегда — программа всё равно завершается (поток запросов — демон)."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    code = ("import threading\n"
+            "from did.agent import DaemonPool\n"
+            "f = DaemonPool().submit(threading.Event().wait)\n"
+            "print('submitted', f.done())\n")
+    r = subprocess.run([sys.executable, '-c', code], cwd=Path(__file__).resolve().parents[1],
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and 'submitted False' in r.stdout
+
+
+def test_daemon_pool_runs_requests_one_at_a_time_and_passes_errors():
+    import threading
+    from did.agent import DaemonPool
+    pool, gate, order = DaemonPool(), threading.Event(), []
+
+    def first():
+        gate.wait(5.0)
+        order.append('first')
+        return 1
+
+    def second():
+        order.append('second')
+        raise ValueError('boom')
+    a, b = pool.submit(first), pool.submit(second)
+    assert not a.done() and not b.done()
+    gate.set()
+    assert a.result(timeout=5.0) == 1
+    with pytest.raises(ValueError):
+        b.result(timeout=5.0)
+    assert order == ['first', 'second']
+
+
+def test_answer_first_seen_ready_after_the_deadline_is_not_taken():
+    """Ревью, круг 2: ответ готов, но замечен на такте уже после срока — он просрочен и не исполняется."""
+    stub = Stub(other_point)
+    world, bot, _ = setup(planner=stub, llm_wait_s=15.05, llm_act_while_waiting='rule', llm_wait_deadline_s=15.0)
+    drive(world, bot, 16.0)
+    s = bot.aw.summary()
+    assert s['timeout'] == 1 and s['switched'] == 0 and s['answered'] == 0

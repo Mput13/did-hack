@@ -172,8 +172,13 @@ class ActWhileWaiting:
         if self.busy is not None and self.busy['answer'].ready(obs.t):
             self._expired(obs)
         p = self.pending
-        if p is not None and not p['answer'].ready(obs.t) and obs.t - p['t'] >= a.cfg.llm_wait_deadline_s:
-            self._timeout(obs, p)            # срок не зависит от того, разобран ли повод: стоянка по нему кончается
+        if p is not None:
+            waited = obs.t - p['t']
+            # Срок не зависит от того, разобран ли повод: стоянка по нему кончается. Ответ, замеченный уже после
+            # срока, просрочен, даже если он готов (в ROS готовность видна только на следующем такте).
+            if waited > a.cfg.llm_wait_deadline_s or (
+                    waited >= a.cfg.llm_wait_deadline_s and not p['answer'].ready(obs.t)):
+                self._timeout(obs, p)
         if a._trigger:
             return                           # повод ещё не разобран (пауза после сбора): сначала он
         p = self.pending

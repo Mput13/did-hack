@@ -6,7 +6,9 @@
 """
 import math
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+import queue
+import threading
+from concurrent.futures import Future
 from dataclasses import asdict, dataclass, field, replace
 
 import numpy as np
@@ -144,6 +146,48 @@ def make_config(name, **overrides):
     return replace(PRESETS[name], **overrides)
 
 
+class DaemonPool:
+    """Один фоновый поток для запросов к планировщику, запросы идут по очереди.
+
+    Поток — «демон»: зависший запрос к модели не мешает программе завершиться. У ThreadPoolExecutor
+    интерпретатор при выходе ждёт рабочий поток, и прогон с неответившей моделью не закрывался (R16).
+    """
+
+    def __init__(self):
+        self._queue = queue.SimpleQueue()
+        self._thread = None
+
+    def submit(self, fn, *args):
+        future = Future()
+        self._queue.put((future, fn, args))
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._work, daemon=True, name='did-planner')
+            self._thread.start()
+        return future
+
+    def shutdown(self, wait=True, timeout=5.0):
+        """Остановить поток после уже поставленных запросов. Зависший запрос не ждём дольше timeout."""
+        thread = self._thread
+        if thread is None or not thread.is_alive():
+            return
+        self._queue.put(None)
+        if wait:
+            thread.join(timeout)
+
+    def _work(self):
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            future, fn, args = item
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(fn(*args))
+            except BaseException as e:      # noqa: BLE001 — исключение уходит в Future, поток живёт дальше
+                future.set_exception(e)
+
+
 class Agent:
 
     SLIP_STOP = 0.04      # м: на столько поправка сдвинула позу против хода за секунду — робот упёрся
@@ -191,7 +235,7 @@ class Agent:
         self._returning = False
         self._wait_until = 0.0
         self._future = None
-        self._pool = ThreadPoolExecutor(max_workers=1) if config.async_planner else None
+        self._pool = DaemonPool() if config.async_planner else None
         self._last_llm_t = -1e9
         self._known_cands = []
         self._visited = deque(maxlen=8)                     # недавние точки разведки: [(t, x, y)]
