@@ -173,6 +173,27 @@ class RosIO(Node):
     def collect(self):
         return self._call(self.collect_cli)
 
+    def restart_clock(self):
+        """Попросить судью стенда начать прогон заново: часы сценария пойдут с этой секунды.
+
+        Пока робот оседает на колёса (35 с), часы судьи уже идут, и события трудного уровня (20–70 с) наступают
+        раньше, чем в быстром симуляторе, где агент едет с нулевой секунды. Без этого прогон в Gazebo — другой
+        опыт, а не тот же сценарий. Сервис /did/reset есть только у нашего стенда; нет сервиса — ничего не делаем.
+        """
+        client = self.create_client(Trigger, '/did/reset')
+        if not client.wait_for_service(timeout_sec=1.0):
+            return False
+        ok, _ = self._call(client)
+        if not ok:
+            return False
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not (self.score and self.score.get('t', 99.0) < 2.0):
+            time.sleep(0.02)               # ждём сообщение судьи с новым временем: по нему сдвинутся часы агента
+        with self.lock:
+            self.events = []
+            self.sensor = None
+        return True
+
     def finish(self):
         return self._call(self.finish_cli)
 
@@ -233,6 +254,7 @@ def run(level, seed, agent, experiment, arm=None, llm=None, wait_s=120.0, settle
             last = pose
             io.command(0.0, 0.0)
             time.sleep(0.2)
+        io.restart_clock()
 
         llm_on = make_config(agent).planner == 'llm'
         cfg = make_config(agent, async_planner=llm_on)

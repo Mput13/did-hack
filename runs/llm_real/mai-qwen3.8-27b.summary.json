@@ -1,0 +1,279 @@
+{
+ "arm": "mai-qwen3.8-27b",
+ "llm": {
+  "kind": "http",
+  "model": "qwen3.8-27b",
+  "cache": true,
+  "use_schema": true,
+  "min_tokens": 3000
+ },
+ "created": "2026-10-08T11:33:35",
+ "wall_s": 562.3,
+ "scenarios": 6,
+ "requests": 50,
+ "quota_blocked": 0,
+ "first_ok_share": 0.9,
+ "repaired_share": 0.0,
+ "fallback_share": 0.1,
+ "errors": {
+  "нет ответа модели": 5
+ },
+ "latency_ms": {
+  "mean": 30942,
+  "median": 24638,
+  "max": 93829,
+  "total": 1547097
+ },
+ "transport_retries": 29,
+ "tokens": {
+  "prompt": 2410,
+  "completion": 1163
+ },
+ "cached_exchanges": 0,
+ "score_mean": 71.32,
+ "rule_score_mean": 71.18,
+ "score_diff": [
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.84
+ ],
+ "complete_runs": 6,
+ "score_mean_complete": 71.32,
+ "rule_score_mean_complete": 71.18,
+ "runs": [
+  {
+   "level": "medium",
+   "seed": 1001,
+   "score": 71.88,
+   "rule_score": 71.88,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 5,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 7,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 23842,
+    "median": 18489,
+    "max": 45815,
+    "total": 166893
+   },
+   "file": "llm_real/mai-qwen3.8-27b/medium-1001.json.gz"
+  },
+  {
+   "level": "medium",
+   "seed": 1002,
+   "score": 70.75,
+   "rule_score": 70.75,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 4,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 7,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 22794,
+    "median": 13875,
+    "max": 62257,
+    "total": 159561
+   },
+   "file": "llm_real/mai-qwen3.8-27b/medium-1002.json.gz"
+  },
+  {
+   "level": "medium",
+   "seed": 1003,
+   "score": 72.23,
+   "rule_score": 72.23,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 1,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 7,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 22743,
+    "median": 18750,
+    "max": 62175,
+    "total": 159201
+   },
+   "file": "llm_real/mai-qwen3.8-27b/medium-1003.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "score": 66.8,
+   "rule_score": 66.8,
+   "samples": "5/7",
+   "rule_samples": "5/7",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "fallback": 3,
+    "heuristic": 4,
+    "llm": 7
+   },
+   "requests": 10,
+   "first_ok": 7,
+   "repaired": 0,
+   "failed": 3,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 39674,
+    "median": 41523,
+    "max": 88159,
+    "total": 396744
+   },
+   "file": "llm_real/mai-qwen3.8-27b/hard-1001.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1002,
+   "score": 60.0,
+   "rule_score": 60.0,
+   "samples": "6/7",
+   "rule_samples": "6/7",
+   "returned": false,
+   "rule_returned": false,
+   "plans": {
+    "fallback": 1,
+    "heuristic": 5,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 8,
+   "first_ok": 7,
+   "repaired": 0,
+   "failed": 1,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 36489,
+    "median": 29973,
+    "max": 93829,
+    "total": 291910
+   },
+   "file": "llm_real/mai-qwen3.8-27b/hard-1002.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "score": 86.26,
+   "rule_score": 85.42,
+   "samples": "7/7",
+   "rule_samples": "7/7",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "fallback": 1,
+    "heuristic": 8,
+    "llm": 10,
+    "rule": 1
+   },
+   "requests": 11,
+   "first_ok": 10,
+   "repaired": 0,
+   "failed": 1,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 33890,
+    "median": 25881,
+    "max": 67319,
+    "total": 372788
+   },
+   "file": "llm_real/mai-qwen3.8-27b/hard-1003.json.gz"
+  }
+ ],
+ "rejected": [
+  {
+   "level": "hard",
+   "seed": 1001,
+   "t": 42.2,
+   "attempt": 1,
+   "errors": [
+    "модель не ответила за 3 попыток: нет связи с https://api-ai.mai.ru/v1: RemoteProtocolError: Server disconnected without sending a response."
+   ],
+   "kinds": [
+    "нет ответа модели"
+   ],
+   "response": null
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "t": 66.7,
+   "attempt": 1,
+   "errors": [
+    "модель не ответила за 3 попыток: нет связи с https://api-ai.mai.ru/v1: ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1010)"
+   ],
+   "kinds": [
+    "нет ответа модели"
+   ],
+   "response": null
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "t": 75.7,
+   "attempt": 1,
+   "errors": [
+    "модель не ответила за 3 попыток: нет связи с https://api-ai.mai.ru/v1: ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1010)"
+   ],
+   "kinds": [
+    "нет ответа модели"
+   ],
+   "response": null
+  },
+  {
+   "level": "hard",
+   "seed": 1002,
+   "t": 84.6,
+   "attempt": 1,
+   "errors": [
+    "модель не ответила за 3 попыток: таймаут 30 с"
+   ],
+   "kinds": [
+    "нет ответа модели"
+   ],
+   "response": null
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "t": 80.6,
+   "attempt": 1,
+   "errors": [
+    "модель не ответила за 3 попыток: нет связи с https://api-ai.mai.ru/v1: ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1010)"
+   ],
+   "kinds": [
+    "нет ответа модели"
+   ],
+   "response": null
+  }
+ ]
+}

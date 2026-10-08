@@ -1,0 +1,31 @@
+title: Сила изменений среды и выигрыш адаптации
+kind: adaptation
+question: При какой силе изменений среды механизмы адаптации дают измеримый выигрыш в счёте — и дают ли вообще?
+hypothesis: >-
+  Выигрыш полного агента над агентом без обнаружения изменений и без памяти об опасных зонах растёт с числом и
+  силой изменений: при трёх сменах грунта и трёх новых опасных зонах он отличим от нуля.
+expect: >-
+  При увеличении числа смен грунта и новых зон агент adaptive избегает лишних трат батареи и повторных штрафов,
+  получая преимущество по счёту над no_change и no_hazard.
+refute: >-
+  Если и при самых сильных изменениях парная разность счёта включает ноль — механизмы адаптации к грунту и зонам
+  бесполезны при данных правилах.
+arms:
+  - {id: adaptive, label: Полный адаптивный агент, agent: adaptive}
+  - {id: no_change, label: Без детектора изменений, agent: no_change}
+  - {id: no_hazard, label: Без памяти опасных зон, agent: no_hazard}
+  - {id: fixed, label: Фиксированный маршрут, agent: fixed}
+levels: [hard]
+seeds: 40
+conditions:
+  - {id: none, label: Без событий, scenario: {events: []}}
+  - {id: default, label: 1 смена и 1 зона (как сейчас), scenario: {n_soil_changes: 1, n_new_hazards: 1}}
+  - {id: c2_2, label: 2 смены и 2 зоны, scenario: {n_soil_changes: 2, n_new_hazards: 2}}
+  - {id: c3_3, label: 3 смены и 3 зоны, scenario: {n_soil_changes: 3, n_new_hazards: 3}}
+  - {id: soil_x3, label: Только грунт ×3, scenario: {events: [soil_change], n_soil_changes: 3, n_new_hazards: 0}}
+  - {id: hazard_x3, label: Только зоны ×3, scenario: {events: [new_hazard], n_soil_changes: 0, n_new_hazards: 3}}
+metrics: [score, samples_share, returned, battery_used, penalties, hazard_hits]
+claims:
+  - {metric: score, a: adaptive, b: no_change, text: Адаптивный агент превосходит no_change по счёту}
+  - {metric: score, a: adaptive, b: no_hazard, text: Адаптивный агент превосходит no_hazard по счёту}
+  - {metric: score, a: adaptive, b: fixed, text: Адаптивный агент превосходит fixed по счёту}

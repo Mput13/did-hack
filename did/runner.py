@@ -12,7 +12,7 @@ from .agent import Agent, make_config
 from .arena import load_arena
 from .config import SCIENCE, Rules
 from .fastsim import FastSim
-from .metrics import run_metrics, score_inquiries
+from .metrics import run_metrics, score_hypotheses, score_inquiries
 from .planner import HeuristicPlanner, LLMPlanner
 from .recorder import Recorder, save_trace
 from .scenario import Scenario, generate
@@ -99,6 +99,12 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     judge = world.judge
     score = judge.score()
     metrics = run_metrics(score, rules, bot.journal, judge.world_log, rec.plans, rec.llm)
+    sh = score_hypotheses(bot.journal.hypotheses, scenario, judge.world_log, events=rec.events)
+    metrics['hypotheses_truth'] = sh
+    metrics['hyp_correct_share'] = sh['correct_share']
+    metrics['hyp_confirmed_correct'] = sh['confirmed_correct']
+    metrics['hyp_refuted_correct'] = sh['refuted_correct']
+    metrics['hyp_soil_error'] = sh['soil_error']
     science = bot.inv.export() if getattr(bot, 'inv', None) else {}
     report = None
     if agent == 'study':                            # отчёт исследования и сверка со скрытой правдой сценария
