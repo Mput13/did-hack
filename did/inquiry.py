@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from .energy import EnergyModel
+from .penalty import PenaltyLedger
 from .science import OTHER, Alternative, Inquiry, TestOption
 
 WINDOW_M = 0.12        # окно для оценки расхода в движении, м
@@ -23,7 +24,6 @@ SPIN_RAD = 1.5         # опыт «развернуться на месте»
 BATTERY_NOISE = 0.03   # шум разности двух показаний батареи (уточняется на старте)
 FAULT_S = 25.0         # сколько, по умолчанию, длится сбой (уточняется памятью между прогонами)
 ONSET_S = 5.0          # сколько секунд после штрафа сравниваются две версии карты образцов
-PENALTY_SKIP_S = 0.6   # сколько секунд после штрафа ждать разовую потерю заряда: показание может отстать от события
 SOIL_MAX = 7.0         # самый дорогой грунт, какой агент допускает (то же ограничение, что у оценок для карты)
 BIAS = 0.2             # предполагаемое занижение показаний при сбое
 # Перевес версии «занижает» над версией «исправен» (логарифм отношения правдоподобий) за ONSET_S секунд:
@@ -53,7 +53,12 @@ class Investigator:
         self.reserve_until = (0.0, -1e9)
         self.durations = []            # длительности закончившихся сбоев: [(вид, секунды)]
         self._win = None
-        self._tick = None              # последнее показание батареи и путь после него (см. _penalty_loss)
+        self._held = []                # закрытые окна, которые ждут, пока решится вопрос о потере заряда при штрафе
+        # Разовая потеря заряда при штрафе — не расход на путь (did/penalty.py). Её размер берётся из правил,
+        # в которые верит агент; расход на самом дорогом грунте — из модели расхода.
+        self.penalty = PenaltyLedger(r.hazard_battery_hit, lambda ds, dth, dt, t: self.model.predict(
+            ds, dth, dt, self.a.collected, mult=SOIL_MAX)[0] + self._leak_rate(t) * dt)
+        self._th = None
         self._susp = []                # подряд идущие окна, которых модель не ждала
         self._cusum = 0.0
         self._checkup_at = None        # когда провести проверку после штрафа
@@ -84,7 +89,11 @@ class Investigator:
         if self._trail_xy is None or math.hypot(obs.x - self._trail_xy[0], obs.y - self._trail_xy[1]) >= 0.06:
             self._trail_xy = (obs.x, obs.y)
             a._trail_point(obs.x, obs.y, obs.t)
-        self._penalty_loss(obs)
+        # Потеря заряда при штрафе сопоставляется с событием штрафа; пока вопрос не решён, окна придержаны.
+        self.penalty.reading(obs, self._win if self.run is None else None,
+                             dth=abs(_wrap(obs.th - self._th)) if self._th is not None else 0.0)
+        self._th = obs.th
+        self._release(obs)
         if self._win is None or self.run is not None:
             self._open(obs)            # во время опыта окно не копится: у опыта свой замер
             return
@@ -94,33 +103,22 @@ class Investigator:
         w['x'], w['y'], w['th'] = obs.x, obs.y, obs.th
         dt = obs.t - w['t0']
         if w['ds'] >= WINDOW_M or (dt >= STILL_S and w['ds'] < 0.03) or dt >= 2.0:
-            self._window(w, dt, obs)
+            w.update(t1=obs.t, b1=obs.battery)
+            self._held.append(w)
+            self._release(obs)
             self._open(obs)
 
-    def _penalty_loss(self, obs):
-        """Разовая потеря заряда при штрафе в опасной зоне — не расход на путь: её нужно убрать из окна.
+    def _release(self, obs):
+        """Разобрать закрытые окна по порядку. Обычно окно разбирается в том же такте, в котором закрылось.
 
-        Судья отнимает заряд одним скачком и сообщает о штрафе событием. Сразу после события скачок показания
-        батареи, которого не объяснить даже самым дорогим грунтом, считается этой потерей и вычитается из
-        начального заряда окна. Иначе он уйдёт в тревогу о расходе, в карту грунта и в подбор модели.
-        Размер потери агенту знать не нужно; если скачка нет (правила без потери заряда), ничего не меняется.
+        Задержка бывает только рядом со штрафом, когда показание батареи и событие пришли врозь: тогда окно
+        ждёт не дольше, чем они могут разойтись. Загрязнённое окно (потеря заряда не сошлась с правилами,
+        см. did/penalty.py) в тревогу, карту грунта и модель расхода не идёт.
         """
-        k = self._tick
-        if k is None:
-            self._tick = {'t': obs.t, 'x': obs.x, 'y': obs.y, 'th': obs.th, 'b': obs.battery, 'ds': 0.0, 'dth': 0.0}
-            return
-        k['ds'] += math.hypot(obs.x - k['x'], obs.y - k['y'])
-        k['dth'] += abs(_wrap(obs.th - k['th']))
-        k['x'], k['y'], k['th'] = obs.x, obs.y, obs.th
-        if obs.battery == k['b']:
-            return                     # показание батареи не обновилось: путь копится до следующего показания
-        dt, drop = obs.t - k['t'], k['b'] - obs.battery
-        if self._win is not None and obs.t <= self._penalty_t + PENALTY_SKIP_S:
-            n = self.a.collected
-            most = self.model.predict(k['ds'], k['dth'], dt, n, mult=SOIL_MAX)[0] + self._leak_rate(obs.t) * dt
-            if drop > most + 5 * BATTERY_NOISE:
-                self._win['b0'] -= drop - self.model.predict(k['ds'], k['dth'], dt, n)[0]
-        k.update(t=obs.t, b=obs.battery, ds=0.0, dth=0.0)
+        while self._held and not self.penalty.hold:
+            w = self._held.pop(0)
+            if not w.get('bad'):
+                self._window(w, obs)
 
     def _open(self, obs):
         self._win = {'x0': obs.x, 'y0': obs.y, 'x': obs.x, 'y': obs.y, 'th': obs.th, 't0': obs.t, 'b0': obs.battery,
@@ -132,13 +130,14 @@ class Investigator:
     def _leak_rate(self, t):
         return self.leak['rate'] if self.leak and t <= self.leak['until'] + 6.0 else 0.0
 
-    def _window(self, w, dt, obs):
+    def _window(self, w, obs):
+        """Разбор закрытого окна. Замер — из самого окна; obs — текущий такт (окно могло быть придержано)."""
         a, m = self.a, self.model
-        ds, dth, n = w['ds'], w['dth'], w['n']
+        ds, dth, n, dt = w['ds'], w['dth'], w['n'], w['t1'] - w['t0']
         self._path[0] += ds
         self._path[1] += dth
-        mx, my = (w['x0'] + obs.x) / 2, (w['y0'] + obs.y) / 2
-        spent = w['b0'] - obs.battery - self._leak_rate(obs.t) * dt
+        mx, my = (w['x0'] + w['x']) / 2, (w['y0'] + w['y']) / 2
+        spent = w['b0'] - w['b1'] - self._leak_rate(w['t1']) * dt
         moving = ds >= 0.05
         mult, conf = a.soil.at(mx, my) if (a.cfg.learn_soil and moving) else (1.0, 1.0)
         known = conf >= 0.4 or self._near_site(mx, my)
@@ -147,7 +146,7 @@ class Investigator:
             sd = math.hypot(sd, 0.3 * mult * m.per_meter(n) * ds)        # оценка грунта сама неточна
         z = (spent - mean) / sd
         if self.leak:
-            self._track_leak(w['b0'] - obs.battery, m.predict(ds, dth, dt, n, mult=mult if known else 1.0)[0], dt, obs.t)
+            self._track_leak(w['b0'] - w['b1'], m.predict(ds, dth, dt, n, mult=mult if known else 1.0)[0], dt, obs.t)
         if self.active is not None or obs.t < self._quiet_until:
             return
         # Странность — это либо одно-два резких расхождения, либо слабое, но устойчивое (накопленная сумма).
@@ -579,7 +578,8 @@ class Investigator:
 
     def on_penalty(self, obs):
         """Штраф в опасной зоне: идущий опыт прерывается, а после выезда из зоны стоит проверить, не начался ли сбой."""
-        self._penalty_t = obs.t             # с этого момента observe ждёт разовую потерю заряда (_penalty_loss)
+        self._penalty_t = obs.t
+        self.penalty.event(obs.t)           # потерю заряда при штрафе найдёт и вычтет observe
         self._checkup_at = obs.t + 4.5
         if self.run is not None:
             self.run = None
