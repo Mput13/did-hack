@@ -10,7 +10,7 @@ from scipy import ndimage
 from did.agent import PRESETS, Agent, make_config
 from did.arena import load_arena
 from did.config import Rules
-from did.experiments import summarize_experiment
+from did.experiments import _soil_probe_table, summarize_experiment
 from did.journal import Journal
 from did.judge import Judge
 from did.metrics import SoilProbe, paired, paired_did, verdict
@@ -330,3 +330,38 @@ def test_old_style_summary_is_untouched_by_new_claim_kinds():
         boot = ref.choice(d, size=(4000, 12), replace=True).mean(axis=1)
         assert cell['pair']['ci'] == [round(float(np.percentile(boot, 2.5)), 3), round(float(np.percentile(boot, 97.5)), 3)]
 
+
+# --- доля закрытого разрыва --------------------------------------------------------------------
+
+def _gap_rows(control, oracle, variant):
+    blank = {'soil_dearer_m': 0.0, 'soil_changed_m': 0.0, 'soil_extra_energy': 0.0, 'soil_alarm_delay': None,
+             'soil_alarms_true': 0, 'soil_alarms_false': 0, 'soil_entry_known': None, 'soil_dearer_entries': 0}
+    runs = [{'arm': arm, 'condition': 'route', 'level': 'hard', 'seed': seed, 'metrics': {**blank, 'score': v}}
+            for arm, values in (('control', control), ('oracle', oracle), ('variant', variant))
+            for seed, v in enumerate(values)]
+    spec = {'arms': [{'id': 'control'}, {'id': 'oracle'}, {'id': 'variant'}], 'conditions': [{'id': 'route'}],
+            'soil_probe': {'control': 'control', 'oracle': 'oracle'}}
+    rows = _soil_probe_table(spec, lambda arm, cond: [r for r in runs if r['arm'] == arm and r['condition'] == cond])
+    return {r['arm']: r for r in rows}
+
+
+def test_gap_closed_is_not_reported_when_the_gap_itself_is_not_established():
+    # Оракул лучше контроля в среднем на 0,5, но в четверти бутстреп-выборок разрыв равен −1:
+    # раньше такие выборки молча выбрасывались и получался «95% интервал» доли [0,5; 2,0].
+    row = _gap_rows(control=[0, 0], oracle=[-1, 2], variant=[1, 1])['variant']
+    assert row['gap'] == 0.5 and row['gap_ci'][0] <= 0.0 and row['gap_stable'] is False
+    assert 'gap_closed' not in row and 'gap_closed_ci' not in row
+    rows = _gap_rows(control=[0, 0], oracle=[-1, -2], variant=[1, 1])
+    assert rows['variant']['gap_stable'] is False and 'gap_closed' not in rows['variant']
+    assert 'gap' not in rows['control'] and 'gap' not in rows['oracle']
+
+
+def test_gap_closed_with_interval_when_the_gap_is_stably_positive():
+    rng = np.random.default_rng(5)
+    control = rng.normal(70, 5, 40)
+    oracle = control + rng.normal(8, 2, 40)
+    row = _gap_rows(control, oracle, control + 0.25 * (oracle - control))['variant']
+    assert row['gap_stable'] is True and row['gap_ci'][0] > 0 and row['gap_boot_nonpositive'] == 0.0
+    assert row['gap_closed'] == pytest.approx(0.25) and row['gap_closed_ci'] == pytest.approx([0.25, 0.25])
+    noisy = _gap_rows(control, oracle, control + rng.normal(2, 4, 40))['variant']
+    assert noisy['gap_closed_ci'][0] < noisy['gap_closed'] < noisy['gap_closed_ci'][1]

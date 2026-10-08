@@ -206,8 +206,12 @@ def _soil_probe_table(spec, pick):
     """Разбор смены грунта по условиям и вариантам (метрики did.metrics.SoilProbe).
 
     В описании опыта: soil_probe: {control: вариант без механизма, oracle: вариант, знающий грунты}.
-    gap_closed — какую долю разрыва в счёте между control и oracle закрывает вариант: отношение средних
-    разностей на одних сценариях, интервал — бутстреп по сценариям.
+    gap — средний разрыв в счёте между oracle и control на одних сценариях, gap_ci — его 95% интервал
+    (бутстреп по сценариям), gap_stable — интервал целиком выше нуля. Только тогда даётся gap_closed —
+    какую долю разрыва закрывает вариант (отношение средних разностей) — и её интервал gap_closed_ci.
+    Если разрыв не установлен, доли нет вовсе: делить не на что. Выборки бутстрепа с неположительным
+    разрывом не выбрасываются: отношение в них не ограничено, они делятся поровну между двумя хвостами
+    (их доля — gap_boot_nonpositive; при gap_stable она не больше 0,025).
     """
     names = spec['soil_probe'] if isinstance(spec['soil_probe'], dict) else {}
     rng = np.random.default_rng(10)
@@ -240,12 +244,16 @@ def _soil_probe_table(spec, pick):
                 gap = np.array([high[k] - low[k] for k in keys])
                 idx = rng.integers(len(keys), size=(4000, len(keys)))
                 gaps = gap[idx].mean(axis=1)
-                boot = gain[idx].mean(axis=1)[gaps > 0] / gaps[gaps > 0]
                 row['gap'] = round(float(gap.mean()), 3)
-                if gap.mean() > 0 and len(boot):
+                row['gap_ci'] = [round(float(np.percentile(gaps, 2.5)), 3), round(float(np.percentile(gaps, 97.5)), 3)]
+                row['gap_stable'] = bool(gap.mean() > 0 and np.percentile(gaps, 2.5) > 0)
+                if row['gap_stable']:
+                    lost = float((gaps <= 0).mean())
+                    boot = gain[idx].mean(axis=1)[gaps > 0] / gaps[gaps > 0]
+                    row['gap_boot_nonpositive'] = round(lost, 4)
                     row['gap_closed'] = round(float(gain.mean() / gap.mean()), 3)
-                    row['gap_closed_ci'] = [round(float(np.percentile(boot, 2.5)), 3),
-                                            round(float(np.percentile(boot, 97.5)), 3)]
+                    row['gap_closed_ci'] = [round(float(np.quantile(boot, (q - lost / 2) / (1 - lost))), 3)
+                                            for q in (0.025, 0.975)]
             rows.append(row)
     return rows
 
