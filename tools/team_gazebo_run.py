@@ -24,8 +24,10 @@ MAIN = Path('/Users/a/MAI/DID')
 def busy():
     if (MAIN / 'research' / 'PAUSE').exists() or (ROOT / 'research' / 'PAUSE').exists():
         return 'пауза research/PAUSE'
-    if subprocess.run(['pgrep', '-f', 'gz sim'], stdout=subprocess.DEVNULL).returncode == 0:
-        return 'уже идёт Gazebo'
+    for name, why in (('gz sim', 'уже идёт Gazebo'), ('tools/gazebo_run.py', 'идёт чужой прогон в Gazebo'),
+                      ('tools/gazebo_batch.py', 'идёт чужая серия в Gazebo'), ('tools/demo.py', 'идёт показ')):
+        if subprocess.run(['pgrep', '-f', name], stdout=subprocess.DEVNULL).returncode == 0:
+            return why
     return None
 
 
@@ -52,9 +54,13 @@ def main():
     ap.add_argument('--gui', action='store_true')
     ap.add_argument('--timeout', type=float, default=1500.0, help='предел по часам машины, с')
     args = ap.parse_args()
-    while (why := busy()):
-        print(f'жду: {why}', flush=True)
-        time.sleep(30)
+    free = 0                            # чужие прогоны идут сериями: стартуем, когда тихо две проверки подряд
+    while free < 2:
+        why = busy()
+        free = 0 if why else free + 1
+        if why:
+            print(f'жду: {why}', flush=True)
+        time.sleep(20)
     env = dict(os.environ, ROS_DOMAIN_ID=os.environ.get('ROS_DOMAIN_ID', '37'),
                GZ_PARTITION=os.environ.get('GZ_PARTITION', 'did_m1'),
                PYTHONPATH=f"{ROOT}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")     # библиотека did — из этого дерева
