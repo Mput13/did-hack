@@ -77,10 +77,11 @@ CATEGORIES = {
     'energy': {
         'soil': 'пол в этом месте дороже обычного: грунт, покрытие, зона с повышенным расходом (в том числе '
                 'сменившийся или ещё не нанесённый на карту)',
-        'leak': 'батарея теряет заряд сама по себе: утечка, поломка или сбой батареи/питания, в том числе после '
-                'штрафа или опасной зоны; расход идёт и когда робот стоит',
+        'leak': 'батарея теряет заряд сама по себе, независимо от движения: утечка, паразитный ток, сбой питания '
+                '(в том числе после штрафа); заряд уходит и когда робот стоит',
         'turn': 'заряд ушёл на повороты, развороты, манёвры',
         'load': 'расход вырос из-за груза: робот везёт образцы',
+        'mech': 'механика: трение, проскальзывание колёс, поломка привода или мотора — дороже стало само движение',
         'model': 'ошибка самой модели или оценки робота: неверный прогноз, калибровка, шум измерения заряда, '
                  'погрешность одометрии',
         'none': 'ничего не случилось: батарея и пол в порядке, случайное отклонение',
@@ -158,7 +159,8 @@ def build_cases(source):
                           'drain_per_rad': 0.12, 'sensor_noise': 0.05},
                 'maneuvers': [{'id': x['id'], 'name': x['name'], 'cost': x['cost'], 'unit': x['unit']}
                               for x in q['tests']],
-                'results': [{'id': x['id'], 'name': x['name'], 'value': x['measured']['value'], 'unit': x['unit']}
+                'results': [{'id': x['id'], 'name': x['name'], 'value': x['measured']['value'],
+                             'sigma': x['measured']['sigma'], 'unit': x['unit']}
                             for x in done],
                 'truth': q.get('truth') or [], 'code': {'verdict': q.get('verdict'), 'best': q['conclusion']['best'],
                                                        'status': q['conclusion']['status'],
@@ -257,7 +259,8 @@ def run_case(case, model, llm, judge, out_dir):
     rec['stage1'] = s1
     statements = [str(h['statement']) for h in s1['hypotheses']]
     if case['results']:
-        results = '\n'.join(f"- {r['name']}: {r['value']:g} {r['unit']} ({NORMS.get(r['id'], '')})"
+        results = '\n'.join(f"- {r['name']}: {r['value']:g} ± {r['sigma']:g} {r['unit']} — погрешность этого "
+                            f"измерения указана после ±; {NORMS.get(r['id'], '')}"
                             for r in case['results'])
         talk = messages + [{'role': 'assistant', 'content': json.dumps(s1, ensure_ascii=False)},
                            {'role': 'user', 'content': STAGE2.format(results=results)}]
@@ -420,7 +423,7 @@ def main():
         cases = build_cases(args.source)
         judge = client(MAIN, args.cache_only)
         clients = {m: client(m, args.cache_only) for m in args.models}
-        cells = [(m, i) for m in args.models for i in range(len(cases))]
+        cells = [(m, i) for i in range(len(cases)) for m in args.models]
         print(f'Случаев {len(cases)}, моделей {len(args.models)}', flush=True)
         run_cells(cells, lambda c: bool(run_case(cases[c[1]], c[0], clients[c[0]], judge, RUNS / args.out)), args.jobs,
                   label=lambda c: f'{c[0]} {cases[c[1]]["key"]}')
