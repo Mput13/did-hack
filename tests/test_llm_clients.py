@@ -10,6 +10,7 @@ import pytest
 
 from did.llm import (EXAMPLE_STATE, PLAN_SCHEMA, ChatClient, ChatReply, LLMError, LocalClient, error_kind, llm_stats,
                      make_client, parse_plan, plan_schema, request_plan)
+from did.llm import CacheMiss
 from did.llm_cache import CachedClient, ReplyCache
 from did.llm_codex import CodexCliClient, render_prompt
 from did.llm_mock import MockResponder, mock_plan, start_mock_server
@@ -216,6 +217,64 @@ def test_cached_client_wraps_any_client(tmp_path):
     assert not client.chat(MESSAGES, temperature=0.9).cached and len(seen) == 2
     res = request_plan(client, EXAMPLE_STATE)
     assert res.ok and request_plan(client, EXAMPLE_STATE).exchanges[0]['cached']
+    client.close()
+
+
+def test_cache_only_never_touches_network(tmp_path):
+    """Строгий режим: промах кэша — явная ошибка, настоящий клиент не вызывается, правило её не заменяет."""
+    seen = []
+
+    def responder(messages):
+        seen.append(messages)
+        return PLAN_JSON
+
+    strict = CachedClient(LocalClient(responder), cache_dir=tmp_path / 'cache', strict=True)
+    with pytest.raises(CacheMiss, match='нет сохранённого ответа'):
+        strict.chat(MESSAGES)
+    with pytest.raises(CacheMiss):                       # request_plan «не бросает исключений», но это — не сбой модели
+        request_plan(strict, EXAMPLE_STATE)
+    assert seen == [] and strict.cache.calls() == {}
+    CachedClient(LocalClient(responder), cache_dir=tmp_path / 'cache').chat(MESSAGES)
+    assert strict.chat(MESSAGES).cached and len(seen) == 1
+
+
+def test_cache_keeps_failed_exchanges_for_replay(tmp_path):
+    """Пустой ответ и обрыв связи сохраняются как исход: строгий повтор идёт той же дорогой.
+
+    Обычный режим по-прежнему спрашивает модель заново — его поведение не меняется."""
+    calls = []
+
+    def flaky(messages):                                 # вызовы 1 и 2 — пусто, 3 — обрыв, дальше — план
+        calls.append(1)
+        if len(calls) == 3:
+            raise LLMError('модель не ответила за 3 попыток: нет связи', attempts=3)
+        return '' if len(calls) < 3 else PLAN_JSON
+
+    root = tmp_path / 'cache'
+    live = CachedClient(LocalClient(flaky), cache_dir=root)
+    strict = CachedClient(LocalClient(flaky), cache_dir=root, strict=True)
+    assert live.chat(MESSAGES).text == ''                # 1-й вызов: пустой ответ
+    replay = strict.chat(MESSAGES)
+    assert replay.text == '' and replay.cached and len(calls) == 1
+    assert live.cache.get(live.model, live.cache.key(live.model, MESSAGES, 0.2, 800, None)) is None
+    assert live.chat(MESSAGES).text == '' and len(calls) == 2     # обычный режим пустой ответ не помнит
+    other = MESSAGES + [{'role': 'user', 'content': 'ещё'}]
+    with pytest.raises(LLMError, match='нет связи'):
+        live.chat(other)                                 # 3-й вызов: обрыв
+    with pytest.raises(LLMError, match='модель не ответила за 3 попыток: нет связи') as err:
+        strict.chat(other)
+    assert not isinstance(err.value, CacheMiss) and err.value.attempts == 3 and len(calls) == 3
+    assert live.chat(other).text == PLAN_JSON            # 4-й вызов удался: успех важнее старого отказа
+    assert strict.chat(other).text == PLAN_JSON and len(calls) == 4
+    assert live.cache.saved() == {live.cache.folder(live.model): 1}       # отказы в число ответов не входят
+
+
+def test_make_client_cache_only_needs_no_settings(env):
+    client = make_client('http', cache='only', model='qwen3.8-flash-next', use_schema=True, min_tokens=3000)
+    assert isinstance(client, CachedClient) and client.strict
+    assert (client.model, client.use_schema) == ('qwen3.8-flash-next', True)
+    with pytest.raises(LLMError, match='только кэш'):
+        client.client.chat(MESSAGES)
     client.close()
 
 

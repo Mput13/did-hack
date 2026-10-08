@@ -13,6 +13,7 @@ import json
 import shutil
 import time
 from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -21,8 +22,9 @@ import yaml
 from . import ROOT
 from .config import SCIENCE
 from .memory import KnowledgeBase
-from .metrics import METRICS, paired, summarize, verdict
+from .metrics import METRICS, paired, paired_did, summarize, verdict
 from .runner import RUNS, run_episode
+from .scenario import ROUTE_VERSION
 
 SPECS = ROOT / 'experiments'
 BASE_CONDITION = {'id': 'base', 'label': 'Базовые правила'}
@@ -45,7 +47,7 @@ def list_specs():
     return sorted(p.stem for p in SPECS.glob('*.yaml'))
 
 
-def _job(args, knowledge=None):
+def _job(args, knowledge=None, soil_probe=False):
     spec_id, arm, cond, level, seed = args
     folder = arm['id'] if cond['id'] == 'base' else f"{arm['id']}@{cond['id']}"
     try:
@@ -54,7 +56,8 @@ def _job(args, knowledge=None):
                         config=arm.get('config'), rules=cond.get('rules'),
                         # knows_rules — вариант-ориентир: ему правила мира сообщены, что бы ни значилось в условии
                         agent_rules=None if arm.get('knows_rules') else cond.get('agent_rules'), llm=arm.get('llm'),
-                        sim=cond.get('sim'), knowledge=knowledge, study=arm.get('study'))
+                        sim=cond.get('sim'), knowledge=knowledge, study=arm.get('study'),
+                        soil_probe=soil_probe)
         s.pop('study', None)              # отчёт исследования лежит в записи прогона, в сводку идут только метрики
         s['arm'], s['condition'] = arm['id'], cond['id']
         if knowledge is None:
@@ -84,13 +87,14 @@ def run_experiment(exp_id, seeds=None, jobs=8, progress=None):
             cond['agent_rules'] = base_agent_rules
         conditions.append(cond)
     seeds_range = range(spec['seed_start'], spec['seed_start'] + n_seeds)
+    job = partial(_job, soil_probe=bool(spec.get('soil_probe')))     # разбор смены грунта по скрытой правде
     tasks = [(exp_id, arm, cond, level, seed)
              for arm in spec['arms'] if not arm.get('memory') for cond in conditions
              for level in spec['levels'] for seed in seeds_range]
     t0 = time.perf_counter()
     results = []
     with ProcessPoolExecutor(max_workers=jobs) as pool:
-        for i, res in enumerate(pool.map(_job, tasks, chunksize=2), 1):
+        for i, res in enumerate(pool.map(job, tasks, chunksize=2), 1):
             results.append(res)
             if progress and (i % 10 == 0 or i == len(tasks)):
                 progress(i, len(tasks))
@@ -102,7 +106,7 @@ def run_experiment(exp_id, seeds=None, jobs=8, progress=None):
             for seed in seeds_range:
                 for level in spec['levels']:
                     order += 1
-                    res = _job((exp_id, arm, cond, level, seed), knowledge=kb.priors())
+                    res = job((exp_id, arm, cond, level, seed), knowledge=kb.priors())
                     res['order'] = order
                     kb.learn(res.pop('science', None), res.get('id'))
                     results.append(res)
@@ -140,12 +144,18 @@ def summarize_experiment(spec, results, n_seeds, wall_s):
     claims = []
     for c in spec['claims']:
         better = c.get('better') or METRICS[c['metric']][2]
+        minus = c.get('minus')        # разность разностей: из (a − b) в условии вычесть (a − b) в условии minus
         cells = []
         for cond in spec['conditions']:
+            if cond['id'] == minus or cond['id'] not in c.get('conditions', [cond['id']]):
+                continue
             for level in c.get('levels', spec['levels']) + (['all'] if len(c.get('levels', spec['levels'])) > 1 else []):
                 lv = None if level == 'all' else level
-                pair = paired(pick(c['a'], cond['id'], lv), pick(c['b'], cond['id'], lv), c['metric'], rng)
-                cells.append({'condition': cond['id'], 'level': level, 'pair': pair, 'verdict': verdict(pair, better)})
+                a, b = pick(c['a'], cond['id'], lv), pick(c['b'], cond['id'], lv)
+                pair = (paired_did(a, b, pick(c['a'], minus, lv), pick(c['b'], minus, lv), c['metric'], rng)
+                        if minus else paired(a, b, c['metric'], rng))
+                cells.append({'condition': cond['id'], 'level': level, 'pair': pair,
+                              'verdict': verdict(pair, better, c.get('kind'), c.get('margin'))})
         focus = c.get('focus')        # уровень, по которому судим о гипотезе; иначе — по всем вместе
         headline = [x for x in cells if x['level'] == (focus or ('all' if any(k['level'] == 'all' for k in cells)
                                                                  else cells[0]['level']))]
@@ -180,10 +190,74 @@ def summarize_experiment(spec, results, n_seeds, wall_s):
                                             pick(arm['id'], control, level), m, rng)
                                   for m in spec['metrics']},
                     })
+    extra = {}
+    if spec.get('soil_probe'):
+        extra['soil_probe'] = _soil_probe_table(spec, pick)
+    if any(c.get('scenario', {}).get('soil_change_mode') == 'route' for c in spec['conditions']):
+        extra['generator'] = ROUTE_VERSION      # сценарии «на пути» сравнимы только при одной версии построения
     return {'spec': spec, 'generated': time.strftime('%Y-%m-%dT%H:%M:%S'), 'seeds': n_seeds,
             'wall_s': round(wall_s, 1), 'status': status, 'runs': runs, 'errors': errors, 'groups': groups,
             'claims': claims, **({'control_differences': control_differences} if control is not None else {}),
-            'metrics': {k: {'label': v[0], 'unit': v[1], 'better': v[2]} for k, v in METRICS.items()}}
+            'metrics': {k: {'label': v[0], 'unit': v[1], 'better': v[2]} for k, v in METRICS.items()},
+            **extra}
+
+
+
+def _soil_probe_table(spec, pick):
+    """Разбор смены грунта по условиям и вариантам (метрики did.metrics.SoilProbe).
+
+    В описании опыта: soil_probe: {control: вариант без механизма, oracle: вариант, знающий грунты}.
+    gap — средний разрыв в счёте между oracle и control на одних сценариях, gap_ci — его 95% интервал
+    (бутстреп по сценариям), gap_stable — интервал целиком выше нуля. Только тогда даётся gap_closed —
+    какую долю разрыва закрывает вариант (отношение средних разностей) — и её интервал gap_closed_ci.
+    Если разрыв не установлен, доли нет вовсе: делить не на что. gap_closed_ci — ориентировочный интервал,
+    а не строгий 95%: выборки бутстрепа с неположительным разрывом (их доля — gap_boot_nonpositive, при
+    gap_stable не больше 0,025) не выбрасываются, а условно разносятся поровну по двум хвостам. Это эвристика:
+    покрытие она не гарантирует, и чем больше gap_boot_nonpositive, тем меньше интервалу можно верить.
+    """
+    names = spec['soil_probe'] if isinstance(spec['soil_probe'], dict) else {}
+    rng = np.random.default_rng(10)
+    rows = []
+    for cond in spec['conditions']:
+        score = {arm['id']: {(r['level'], r['seed']): r['metrics']['score'] for r in pick(arm['id'], cond['id'])}
+                 for arm in spec['arms']}
+        low, high = score.get(names.get('control'), {}), score.get(names.get('oracle'), {})
+        for arm in spec['arms']:
+            sel = pick(arm['id'], cond['id'])
+            if not sel:
+                continue
+            m = [r['metrics'] for r in sel]
+            reached = [x for x in m if x['soil_dearer_m'] >= 0.3]
+            delays = [x['soil_alarm_delay'] for x in m if x['soil_alarm_delay'] is not None]
+            row = {'condition': cond['id'], 'arm': arm['id'], 'n': len(sel),
+                   'runs_on_dearer': len(reached),                       # прогонов с ≥0,3 м по подорожавшему полу
+                   'runs_on_dearer_alarmed': sum(x['soil_alarms_true'] > 0 for x in reached),
+                   'runs_entry_known': sum(bool(x['soil_entry_known']) for x in reached),    # въехал по знакомому полу
+                   'runs_reentered': sum(x['soil_dearer_entries'] > 1 for x in reached),     # въезжал больше одного раза
+                   'runs_alarm_true': sum(x['soil_alarms_true'] > 0 for x in m),
+                   'runs_alarm_false': sum(x['soil_alarms_false'] > 0 for x in m),
+                   'alarms_true': sum(x['soil_alarms_true'] for x in m),
+                   'alarms_false': sum(x['soil_alarms_false'] for x in m),
+                   'alarm_delay_median': float(np.median(delays)) if delays else None,
+                   'stats': {k: summarize(sel, k, rng) for k in ('soil_dearer_m', 'soil_changed_m', 'soil_extra_energy')}}
+            keys = sorted(set(score[arm['id']]) & set(low) & set(high))
+            if keys and arm['id'] not in names.values():
+                gain = np.array([score[arm['id']][k] - low[k] for k in keys])
+                gap = np.array([high[k] - low[k] for k in keys])
+                idx = rng.integers(len(keys), size=(4000, len(keys)))
+                gaps = gap[idx].mean(axis=1)
+                row['gap'] = round(float(gap.mean()), 3)
+                row['gap_ci'] = [round(float(np.percentile(gaps, 2.5)), 3), round(float(np.percentile(gaps, 97.5)), 3)]
+                row['gap_stable'] = bool(gap.mean() > 0 and np.percentile(gaps, 2.5) > 0)
+                if row['gap_stable']:
+                    lost = float((gaps <= 0).mean())
+                    boot = gain[idx].mean(axis=1)[gaps > 0] / gaps[gaps > 0]
+                    row['gap_boot_nonpositive'] = round(lost, 4)
+                    row['gap_closed'] = round(float(gain.mean() / gap.mean()), 3)
+                    row['gap_closed_ci'] = [round(float(np.quantile(boot, (q - lost / 2) / (1 - lost))), 3)
+                                            for q in (0.025, 0.975)]
+            rows.append(row)
+    return rows
 
 
 def rebuild_from_traces(exp_id):

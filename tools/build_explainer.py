@@ -8,6 +8,7 @@
 открывается двойным щелчком, сеть и сервер ей не нужны.
 """
 import json
+import re
 import math
 import sys
 import time
@@ -196,12 +197,26 @@ def research():
         report = ROOT / 'research' / 'findings' / f"{st['id']}.md"
         if report.exists():
             text = report.read_text(encoding='utf-8')
-            m = re.search(r'^## Вывод\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M)
+            m = (re.search(r'^## Коротко\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M)      # короткий текст для страницы
+                 or re.search(r'^## Вывод\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M))
             st['conclusion'] = m.group(1).strip() if m else None
             lim = re.search(r'^## Ограничения\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M)
             st['limits'] = lim.group(1).strip() if lim else None
         st['computed'] = bool(st.get('experiment')) and (RUNS / str(st['experiment']) / 'summary.json').exists()
     return {'studies': studies, 'built': time.strftime('%d.%m.%Y %H:%M')}
+
+
+def research_runs():
+    """Сколько прогонов и аварий в опытах исследовательского контура (E15 и дальше)."""
+    runs = errors = 0
+    for p in sorted((ROOT / 'experiments').glob('E*.yaml')):
+        path = RUNS / p.stem / 'summary.json'
+        num = re.match(r'E(\d+)', p.stem)            # E19, E19r, E19s, E19_pilot — всё это опыт 19
+        if num and int(num.group(1)) > 14 and path.exists():
+            s = json.loads(path.read_text(encoding='utf-8'))
+            runs += len(s['runs'])
+            errors += len(s['errors'])
+    return {'runs': runs, 'errors': errors}
 
 
 def shots():
@@ -269,7 +284,11 @@ def main():
         'levels': LEVELS,
         'stories': stories,
         'gazebo': gazebo,
-        'experiments': {p.stem: experiment(p.stem) for p in sorted((ROOT / 'experiments').glob('E*.yaml'))},
+        # Опыты E1–E14 показаны на странице графиками и встраиваются целиком; опыты исследовательского контура
+        # (E15 и дальше) представлены выводами в журнале, от них нужен только счёт прогонов.
+        'experiments': {p.stem: experiment(p.stem) for p in sorted((ROOT / 'experiments').glob('E*.yaml'))
+                        if p.stem[1:].isdigit() and int(p.stem[1:]) <= 14},
+        'research_runs': research_runs(),
         'science': science_story(),
         'inq_accuracy': inquiry_accuracy(),
         'traps': trap_table(),
@@ -281,7 +300,6 @@ def main():
                      for p in sorted((RUNS / 'llm_real').glob('*.summary.json'))},
         'roles': {p.stem: _json(p) for p in sorted((RUNS / 'llm_real' / 'roles').glob('*.json'))},
         'llm_agreement': _json(RUNS / 'llm_real' / 'agreement.json'),
-        'llm_budget': _json(RUNS / '_llm_budget' / 'openrouter.json'),
         'soil_demo': soil_demo(arena),
         'route': fixed_route(arena),
         'llm': llm_example(),

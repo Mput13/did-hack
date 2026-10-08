@@ -20,17 +20,25 @@ from .inquiry import Investigator
 from .journal import Journal
 from .localize import PoseTracker
 from .nav import CostGraph, Follower
-from .planner import HeuristicPlanner, resolve_subgoals
+from .planner import MISSION, HeuristicPlanner, resolve_subgoals
 from .route import survey_route
 
 
 @dataclass(frozen=True)
 class AgentConfig:
     name: str = 'adaptive'
+    mission: str = MISSION            # текст миссии для планировщика; правило его не читает
+    mission_triggers: bool = False    # R13: спрашивать планировщик ещё и после столкновения и на пороге заряда
+    mission_battery_floor: float = 30.0   # порог заряда на базе для этого повода (к нему прибавляется дорога домой)
+    state_penalties: bool = False     # R13: сообщать планировщику число полученных штрафов (поле penalties в сводке)
     search: str = 'belief'            # belief — цели из карты вероятностей; route — фиксированный объезд
     explore: str = 'mass'             # точка разведки: mass — сколько вероятности вокруг; infogain — ожидаемая польза
     learn_soil: bool = True           # оценивать стоимость грунта по расходу батареи и объезжать дорогое
     detect_change: bool = True        # замечать, что модель расхода устарела, и переучиваться
+    fresh_soil: bool = False          # после тревоги стереть местную оценку грунта и заново внести последние отрезки
+    fresh_window_m: float = 0.15      # свежее свидетельство — наименьший набор последних отрезков не короче этого (подбор — E19_pilot)
+    fresh_radius_m: float = 0.7       # в каком радиусе от места тревоги стирается старое
+    fresh_keep_far: float = 0.6       # вес старых данных дальше этого радиуса (как в прежнем забывании)
     avoid_hazards: bool = True        # запоминать опасные зоны по штрафам и объезжать
     sensor_health: bool = True        # следить за шумом датчика и меньше верить шумным показаниям
     dynamic_reserve: bool = True      # возвращаться по оценке стоимости пути домой, а не по жёсткому порогу
@@ -65,6 +73,8 @@ PRESETS = {
                          avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
     # Полный агент.
     'adaptive': AgentConfig(name='adaptive'),
+    # Он же с правкой забывания: тревога «модель устарела» не обесценивает данные, по которым она поднята.
+    'adaptive_fresh': AgentConfig(name='adaptive_fresh', fresh_soil=True),
     # Тот же агент, но точку разведки выбирает по ожидаемой пользе измерений (did/explore.py).
     'adaptive_ig': AgentConfig(name='adaptive_ig', explore='infogain'),
     'adaptive_llm': AgentConfig(name='adaptive_llm', planner='llm'),
@@ -101,7 +111,7 @@ def make_config(name, **overrides):
 class Agent:
 
     def __init__(self, arena, config, n_samples, rules=None, planner=None, recorder=None, knowledge=None,
-                 roles=None):
+                 roles=None, soil_truth=None):
         self.arena = arena
         self.cfg = config
         self.rules = rules or Rules()
@@ -163,6 +173,11 @@ class Agent:
         self._cands = []
         self._slow_t = -1e9
         self._soil_h = []                                   # гипотезы о грунтах: [{'key', 'x', 'y'}]
+        self._fresh = deque()                               # последние отрезки пути: (x, y, длина, множитель); в сумме
+                                                            # не меньше fresh_window_m, без самого старого — уже меньше
+        self._fresh_m = 0.0
+        self._soil_truth = soil_truth                       # оракул (только быстрый симулятор): настоящая карта грунтов
+        self._truth = None
         self._n_sample_h = 0
         self._last_cmd = (0.0, 0.0)
         self._misses = deque(maxlen=6)                      # недавние ложные сборы: (t, x, y)
@@ -170,6 +185,8 @@ class Agent:
         self.inv = Investigator(self, knowledge, roles) if config.science else None
         self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
         self.cal = Calibrator(self) if config.calibrate else None  # проверка допущений о датчике и расходе
+        self._battery_threshold_triggered = False
+        self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
 
     # ======================================================================================
     # один такт цикла
@@ -181,6 +198,7 @@ class Agent:
             obs = replace(obs, x=x, y=y, th=th)
         if obs.done or self.finished:
             io.command(0.0, 0.0)
+            self._wrap_up(obs)
             self._record(obs)
             return
         self._perceive(obs)
@@ -189,10 +207,17 @@ class Agent:
             self._slow_t = obs.t
             self._soil_hypotheses(obs.t)
             self._check_return(obs)
+            if self.cfg.mission_triggers:
+                self._ask_at_battery_floor(obs)
         if self._trigger and obs.t >= self._wait_until:
             self._deliberate(obs)
         self._act(obs, io)
         self._record(obs)
+
+    def _wrap_up(self, obs):
+        """Прогон закончен, восприятия больше не будет: досчитать то, что было отложено."""
+        if self.inv:
+            self.inv.finish(obs)
 
     # ======================================================================================
     # восприятие: события, грунт, датчик образцов
@@ -219,6 +244,8 @@ class Agent:
 
     def _on_event(self, ev, obs):
         kind = ev.get('type')
+        if kind in self._penalties:
+            self._penalties[kind] += 1
         if kind == 'hazard_hit':
             self._skip_soil_until = obs.t + 0.6
             self._anchor = (obs.x, obs.y, obs.battery, obs.t)   # разовая потеря заряда — не свойство грунта
@@ -246,6 +273,8 @@ class Agent:
         elif kind == 'collision':
             self.journal.add(obs.t, 'alarm', f'Штраф: столкновение в ({obs.x:.2f}; {obs.y:.2f})', tag='collision')
             self._escape = {'until': obs.t + 1.5, 'v': 0.10 if self._last_cmd[0] < 0 else -0.10}
+            if self.cfg.mission_triggers:
+                self._request_plan('collision')
 
     def _sync_hazards(self, t, new=False):
         """Пересчитать карту риска и сводку по зонам после нового штрафа или уточнения."""
@@ -287,6 +316,11 @@ class Agent:
             return
         ratio, predicted, conf = self.soil.observe(x0, y0, x1, y1, spent, dt)
         self._cost_dirty = True
+        if self.cfg.fresh_soil:
+            self._fresh.append(((x0 + x1) / 2, (y0 + y1) / 2, ds, ratio))
+            self._fresh_m += ds
+            while self._fresh_m - self._fresh[0][2] >= self.cfg.fresh_window_m:
+                self._fresh_m -= self._fresh.popleft()[2]
         if self.cfg.detect_change:
             verdict = self.change.update(ratio, predicted, conf, ds)
             if verdict:
@@ -301,8 +335,18 @@ class Agent:
             if math.hypot(h['x'] - x, h['y'] - y) <= 0.8:
                 self.journal.close(t, h['key'], 'outdated', 'расход на участке перестал совпадать с оценкой')
         self._soil_h = [h for h in self._soil_h if math.hypot(h['x'] - x, h['y'] - y) > 0.8]
-        # Рядом с местом расхождения старым данным не верим совсем, в остальных местах — меньше.
-        self.soil.forget(x, y, radius=0.7, keep=0.1, keep_elsewhere=0.6)
+        if self.cfg.fresh_soil:
+            # Старое вокруг стирается целиком, а отрезки, на которых расход разошёлся с прогнозом, вносятся
+            # заново с полным весом: оценка сразу показывает новую цену пола, а не возвращается к «обычному».
+            erased = self.soil.forget(x, y, radius=self.cfg.fresh_radius_m, keep=0.0,
+                                      keep_elsewhere=self.cfg.fresh_keep_far)
+            for mx, my, ds, seen in self._fresh:
+                if erased[self.soil.cell(mx, my)]:         # вне круга отрезок и так остался в оценке
+                    self.soil.add(mx, my, ds, seen)
+        else:
+            # Рядом с местом расхождения старым данным не верим совсем, в остальных местах — меньше.
+            # Известная слабость: вместе со старым обесценивается и отрезок, на котором поднята тревога.
+            self.soil.forget(x, y, radius=0.7, keep=0.1, keep_elsewhere=0.6)
         self._cost_dirty = True
         self._cost_t = -1e9
         self._request_plan('model_mismatch')
@@ -372,17 +416,27 @@ class Agent:
     # ======================================================================================
 
     def _refresh_costs(self, obs):
+        if self._soil_truth is not None and self._soil_truth() is not self._truth:
+            first = self._truth is None
+            self._truth = self._soil_truth()               # грунты сменились: оракул узнаёт об этом сразу
+            self._cost_dirty = True
+            self._cost_t = -1e9
+            if not first:
+                self._request_plan('soil_truth')
         if self._grace[1] is not None and obs.t >= self._grace[0]:
             self._grace = (-1e9, None)                     # выезд закончен: зона снова учитывается в маршрутах
             self._sync_hazards(obs.t)
         if not self._cost_dirty or obs.t - self._cost_t < 1.0:
             return
         mult = self.soil.mult_grid() if self.cfg.learn_soil else None
+        if self._truth is not None:
+            mult = self._truth
         # Риск опасной зоны — штраф к стоимости клетки: чем вероятнее зона, тем дальше её объезжать.
         danger = 1.0 + self.cfg.hazard_weight * self._risk if self.hazards else None
         self.graph.set_cost(mult, bias=danger)
         # Домой — по проверенному: там, где робот уже ездил, нет ни опасных зон, ни сюрпризов с грунтом.
-        if self.cfg.learn_soil:
+        # Оракулу грунт известен везде, и надбавка за непроверенный пол ему не нужна.
+        if self.cfg.learn_soil and self._truth is None:
             unknown = 1.0 + self.cfg.unknown_risk * (1.0 - self.soil.confidence_grid())
             danger = unknown if danger is None else danger * unknown
         self.home_graph.set_cost(mult, bias=danger)
@@ -432,6 +486,20 @@ class Agent:
             reason = 'время прогона на исходе'
         if reason:
             self._go_home(obs.t, reason)
+
+    def _ask_at_battery_floor(self, obs):
+        """Один раз за прогон спросить планировщик, когда заряда осталось «порог миссии + дорога домой».
+
+        Сам агент домой по этому порогу не едет: решение остаётся за планировщиком. Повод придерживается,
+        пока модель нельзя спросить (llm_min_interval_s), иначе на него ответило бы правило.
+        """
+        if self._battery_threshold_triggered or self._returning or self._trigger:
+            return
+        if self.cfg.planner == 'llm' and obs.t - self._last_llm_t < self.cfg.llm_min_interval_s:
+            return
+        if obs.battery <= self.cfg.mission_battery_floor + self._home_cost(obs.x, obs.y) * self.cfg.reserve_margin:
+            self._battery_threshold_triggered = True
+            self._request_plan('battery_threshold')
 
     def _go_home(self, t, reason):
         self._returning = True
@@ -502,8 +570,12 @@ class Agent:
                   'status': 'confirmed' if z['evidence_m'] >= 0.3 else 'suspected'}
                  for i, z in enumerate(self.soil.zones())] if self.cfg.learn_soil else []
         alarms = [e['text'] for e in self.journal.entries[-12:] if e['kind'] == 'alarm' and obs.t - e['t'] <= 30.0]
+        penalties = {'penalties': {'total': sum(self._penalties.values()), **self._penalties}} \
+            if self.cfg.state_penalties else {}
         return {
+            'mission': self.cfg.mission,
             'trigger': trigger,
+            **penalties,
             'time_s': round(obs.t, 1), 'time_limit_s': self.rules.time_limit_s,
             'battery': round(battery, 1), 'battery_start': self.rules.battery_start,
             'pose': {'x': round(obs.x, 2), 'y': round(obs.y, 2)},
