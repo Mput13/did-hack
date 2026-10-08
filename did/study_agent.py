@@ -45,7 +45,8 @@ AIM_TOL = 0.02          # рад: точность наведения перед
 SURPRISE_Z = 5.0        # замер, который модель не ждала: в подбор не идёт, сначала проверка
 CONTROL_LIMIT = 0.12    # контрольный участок дороже номинала на столько — это не обычный пол
 CONTROL_DOUBT = 0.04    # дороже на столько — подозрительно: если можно, беру другой участок
-CHANGE_REL = 0.08       # пробеги в области разошлись на столько — пол изменился по ходу исследования
+CHANGE_REL = 0.03       # пробеги в области разошлись на столько — пол изменился по ходу исследования
+MAX_CHANGES = 2         # столько раз можно начать набор заново; дальше расхождение идёт в погрешность
 HOME_MARGIN = 1.15      # запас к оценке дороги домой
 TIME_PRICE = 0.02       # ед. заряда за секунду: чтобы дешёвые, но долгие паузы не вытесняли остальное
 MIN_GAIN = 0.01         # замер, сужающий погрешность меньше чем на 1 %, не стоит заряда
@@ -103,6 +104,7 @@ class StudyAgent(LawMixin, Agent):
         self._leak = 0                  # сколько проверок подряд показали утечку
         self._doubt = None              # контрольный участок, на котором расход вдруг вырос
         self._ctrl_doubt = 0.0          # на сколько принятый контроль дороже номинала, если заменить его нечем
+        self._changes = 0               # сколько раз замечена смена пола в области
         self._noise = [2 * BATTERY_NOISE ** 2 / 2, 2]     # сумма квадратов и число: шум одного показания
         self._b0 = self._t_prev = self._last = None
         self._dt = 0.1
@@ -473,8 +475,8 @@ class StudyAgent(LawMixin, Agent):
     # оценка и её погрешность
     # ======================================================================================
 
-    def _target(self, cov=None, extra=0.0):
-        """(оценка, погрешность 1σ по шуму прибора) искомой величины при ковариации модели cov.
+    def _parts(self, cov=None, extra=0.0):
+        """(оценка, дисперсия от шума пробегов в области, дисперсия от неуверенности модели) при ковариации cov.
 
         extra — добавка информации от ещё одного пробега в области: (длина / шум)².
         """
@@ -482,14 +484,14 @@ class StudyAgent(LawMixin, Agent):
         C = m.cov if cov is None else cov
         mean, n = m.mean, self.collected
         if self.q == 'turn_cost':
-            return (float(mean[2]), math.sqrt(max(C[2, 2], 0.0))) if self._count('test', 'spin') else None
+            return (float(mean[2]), 0.0, max(C[2, 2], 0.0)) if self._count('test', 'spin') else None
         if self.q == 'idle_cost':
-            return (float(mean[3]), math.sqrt(max(C[3, 3], 0.0))) if self._count('test', 'pause') else None
+            return (float(mean[3]), 0.0, max(C[3, 3], 0.0)) if self._count('test', 'pause') else None
         if self.q == 'load_effect':
             if not self._count('test', 'straight') or n <= 0:
                 return None
             g = np.array([-mean[1] / mean[0] ** 2, 1.0 / mean[0], 0.0, 0.0])
-            return float(mean[1] / mean[0]), math.sqrt(max(float(g @ C @ g), 0.0))
+            return float(mean[1] / mean[0]), 0.0, max(float(g @ C @ g), 0.0)
         legs = [t for t in self.tests if t['used']]
         if not legs:
             return None
@@ -501,34 +503,43 @@ class StudyAgent(LawMixin, Agent):
         k = float((w * ds * y).sum()) / (per_m * S)
         g = np.array([-k / per_m, -k * n / per_m, -float((w * ds * dth).sum()) / (per_m * S),
                       -float((w * ds * dt).sum()) / (per_m * S)])
-        return k, math.sqrt(1.0 / (per_m ** 2 * (S + extra)) + max(float(g @ C @ g), 0.0))
+        return k, 1.0 / (per_m ** 2 * (S + extra)), max(float(g @ C @ g), 0.0)
+
+    def _target(self, cov=None, extra=0.0):
+        """(оценка, погрешность 1σ по шуму прибора) — без поправки на разброс повторов: так считается польза замера."""
+        got = self._parts(cov, extra)
+        return None if got is None else (got[0], math.sqrt(got[1] + got[2]))
+
+    @staticmethod
+    def _excess(chi, nu):
+        """Во сколько раз разброс больше шума прибора; 1 — согласуется с шумом (проверка хи-квадрат на уровне 1 %)."""
+        return 1.0 if nu < 1 or chi <= chi2_dist.ppf(0.99, nu) else math.sqrt(chi / nu)
 
     def _birge(self):
-        """Во сколько раз разброс повторов больше шума прибора (1 — согласуется с шумом)."""
-        m, chi, nu = self.model, 0.0, 0
+        """Разброс повторов против шума прибора: (для пробегов в области, для замеров, уточнявших модель)."""
+        m, model, site = self.model, 1.0, 1.0
         if len(self.learned) > 1:
             X = np.array([x for x, _, _ in self.learned])
             y, s = (np.array([v[i] for v in self.learned]) for i in (1, 2))
-            chi += float((((y - X @ m.mean) / s) ** 2).sum())
             fitted = int(((np.abs(X) > np.array([0.05, 0.05, 0.5, 1e-9])).any(axis=0)).sum())
-            nu += max(0, len(self.learned) - fitted)
+            model = self._excess(float((((y - X @ m.mean) / s) ** 2).sum()), len(self.learned) - fitted)
         legs = [t for t in self.tests if t['used']]
         if len(legs) > 1 and self.q == 'soil_cost':
-            k = self._target()[0] * m.per_meter(self.collected)
-            chi += sum(((t['spent'] - m.mean[2] * t['dth'] - m.mean[3] * t['dt'] - k * t['ds']) / t['noise']) ** 2 for t in legs)
-            nu += len(legs) - 1
-        if nu < 1 or chi <= chi2_dist.ppf(0.99, nu):
-            return 1.0
-        return math.sqrt(chi / nu)
+            k = self._parts()[0] * m.per_meter(self.collected)
+            site = self._excess(sum(((t['spent'] - m.mean[2] * t['dth'] - m.mean[3] * t['dt'] - k * t['ds']) / t['noise']) ** 2
+                                    for t in legs), len(legs) - 1)
+        return site, model
 
     def estimate(self):
         """Текущая оценка: value, sigma (1σ), ci95, rel (полуширина 95% интервала в долях оценки), spread."""
-        got = self._target()
+        got = self._parts()
         if got is None:
             return None
-        value, sigma = got
-        spread = self._birge()
-        sigma = math.hypot(sigma * spread, abs(value) * self._ctrl_doubt)      # сомнительный контроль — тоже погрешность
+        value, var_site, var_model = got
+        b_site, b_model = self._birge()            # каждая часть погрешности растёт от разброса своих повторов
+        spread = max(b_site, b_model)
+        sigma = math.sqrt(b_site ** 2 * var_site + b_model ** 2 * var_model
+                          + (value * self._ctrl_doubt) ** 2)             # сомнительный контроль — тоже погрешность
         half = 1.96 * sigma
         return {'value': value, 'sigma': sigma, 'ci95': [value - half, value + half],
                 'rel': half / abs(value) if abs(value) > 1e-9 else math.inf, 'spread': spread}
@@ -766,7 +777,8 @@ class StudyAgent(LawMixin, Agent):
         old = [x for x in self.tests if x['used']]
         if old:
             prev = float(np.mean([x['per_m'] for x in old]))
-            if abs(per_m - prev) > max(CHANGE_REL * prev, 6.0 * rec['noise_m']):
+            if self._changes < MAX_CHANGES and abs(per_m - prev) > max(CHANGE_REL * prev, 6.0 * rec['noise_m']):
+                self._changes += 1
                 for x in old:
                     x.update(used=False, note='до изменения пола')
                 self._warn('change', f'на {t:.0f}-й секунде расход в области изменился: было {prev:.2f} ед/м, стало {per_m:.2f}. '

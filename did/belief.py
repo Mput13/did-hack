@@ -179,6 +179,26 @@ class SampleBelief:
         var = float((w * f * f).sum()) - mean * mean
         return mean, math.sqrt(max(var, 0.0) + (0.4 * self.res / self.range) ** 2)
 
+    def loglik(self, x, y, z, sigma, p=None):
+        """Логарифм правдоподобия показания z в точке (x, y) при карте p (с точностью до общей константы).
+
+        Нужен, чтобы сравнивать две версии происходящего: каждая ведёт свою карту, и побеждает та,
+        чья карта лучше предсказывает показания (did/inquiry.py, сравнение «исправен» — «занижает»).
+        """
+        p = self.p if p is None else p
+        sigma = math.hypot(sigma, 0.4 * self.res / self.range)
+        none = math.exp(-0.5 * (z / sigma) ** 2)
+        f = 1.0 - np.hypot(self.cx - x, self.cy - y) / self.range
+        idx = np.nonzero(f > 0.0)[0]
+        if len(idx) == 0:
+            return math.log(max(none, 1e-300))
+        order = idx[np.argsort(-f[idx], kind='stable')]
+        q, f = p[order], f[order]
+        cum = np.cumsum(np.log1p(-q))
+        closer_empty = np.exp(np.concatenate(([0.0], cum[:-1])))
+        total = float((q * closer_empty * np.exp(-0.5 * ((z - f) / sigma) ** 2)).sum()) + math.exp(cum[-1]) * none
+        return math.log(max(total, 1e-300))
+
     def prob_within(self, x, y, r):
         near = np.hypot(self.cx - x, self.cy - y) <= r
         return float(1.0 - np.exp(np.log1p(-self.p[near]).sum())) if near.any() else 0.0

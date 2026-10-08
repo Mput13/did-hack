@@ -257,7 +257,7 @@ function meansTable(m, metrics) {
         infos.map((info) => {
           const st = m.statOf(a.id, g, info.id);
           return h('td', { class: 'lb-table__num' }, st
-            ? [h('span', { text: info.mean(st.mean) }), h('span', { class: 'lb-table__ci', text: ` от ${info.mean(st.ci[0])} до ${info.mean(st.ci[1])}` })]
+            ? [h('span', { text: info.mean(st.mean) }), h('span', { class: 'lb-table__ci', text: ` от ${info.mean(st.ci[0]).replace(/\s%$/, '')} до ${info.mean(st.ci[1]).replace(/\s%$/, '')}` })]
             : '—');
         })));
     });

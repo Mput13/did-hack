@@ -22,6 +22,11 @@ STRAIGHT_M = 0.30      # опыт «проехать прямо»
 SPIN_RAD = 1.5         # опыт «развернуться на месте»
 BATTERY_NOISE = 0.03   # шум разности двух показаний батареи (уточняется на старте)
 FAULT_S = 25.0         # сколько, по умолчанию, длится сбой (уточняется памятью между прогонами)
+ONSET_S = 5.0          # сколько секунд после штрафа сравниваются две версии карты образцов
+BIAS = 0.2             # предполагаемое занижение показаний при сбое
+# Перевес версии «занижает» над версией «исправен» (логарифм отношения правдоподобий) за ONSET_S секунд:
+# чего ждать при каждом состоянии датчика. Измерено на отладочных сценариях 1–40 (tools/onset_calibration.py).
+ONSET = {'ok': (-13.3, 3.5), 'bias': (6.1, 6.1), 'noise': (-8.3, 9.1), 'stuck': (-2.6, 7.9)}
 
 
 def _wrap(a):
@@ -56,7 +61,7 @@ class Investigator:
         self._path = [0.0, 0.0]        # пройдено метров и накручено радиан: сколько поворотов приходится на метр
         self._wait_from = None         # с какого времени робот стоит и ждёт, пока оживёт залипший датчик
         self._pre_penalty = 0.0        # среднее показание датчика перед штрафом
-        self._pre_belief = None        # карта образцов на момент штрафа: (карта, сколько образцов было собрано)
+        self._onset = None             # сравнение двух версий карты образцов после штрафа (см. _track_onset)
         self._doubt_until = -1e9       # до какого времени к датчику остаётся вопрос, который закроет сверка у образца
         self._quiet_until = 0.0
         self._penalty_t = -1e9
@@ -393,6 +398,9 @@ class Investigator:
         kind = r['test'].action['kind']
         zs = np.array(r['zs'])
         heard = len(zs) >= 5                    # меньше пяти показаний — о датчике судить нельзя
+        frozen = heard and float(zs.std()) < 1e-9
+        if frozen and not 0.0 < float(zs.mean()) < 1.0:
+            heard = False                       # показание упёрлось в край шкалы: одинаковые нули ни о чём не говорят
         values = {'rest': (spent / dt, BATTERY_NOISE / dt)}
         if kind == 'straight' and r['ds'] >= 0.15:
             values['straight'] = ((spent - per_rad * r['dth'] - per_s * dt) / (per_m * r['ds']),
@@ -400,7 +408,8 @@ class Investigator:
         if kind == 'spin' and r['dth'] >= 0.6:
             values['spin'] = ((spent - per_s * dt) / r['dth'], BATTERY_NOISE / r['dth'])
         if heard:
-            values['listen_std'] = (float(zs.std()), 0.012)
+            # одинаковые до последнего знака показания посреди шкалы у исправного датчика невозможны
+            values['listen_std'] = (float(zs.std()), 0.001 if frozen else 0.012)
             values['listen_shift'] = (float(zs.mean()), 0.02)
         if kind == 'pause' and values['rest'][0] < per_s + 0.05:
             self._rest_ok_t = obs.t
@@ -548,9 +557,13 @@ class Investigator:
             self.a.journal.add(obs.t, 'inquiry', 'Опыт прерван штрафом: измерение не учитываю, сначала выезжаю из зоны')
         zs = [v for _, _, _, v in self._z][-5:]
         self._pre_penalty = float(np.mean(zs)) if zs else 0.0
-        if self._pre_belief is None or obs.t - self._pre_belief[2] > 6.0 or self._pre_belief[1] != self.a.collected:
-            # Показания после штрафа могут быть испорчены сбоем, поэтому прогноз строится по карте «до».
-            self._pre_belief = (self.a.belief.p.copy(), self.a.collected, obs.t)
+        b = self.a.belief
+        if self._onset is None or obs.t - self._onset['t0'] > 12.0 or self._onset['col'] != self.a.collected:
+            # С этого момента показания могут быть испорчены сбоем. Две версии — «датчик исправен» и «показания
+            # занижены» — ведут каждая свою карту образцов от общей исходной; чья карта лучше предсказывает
+            # показания, та версия и правдоподобнее.
+            self._onset = {'t0': obs.t, 'ok': b.p.copy(), 'bias': b.p.copy(), 'lbf': 0.0, 'n': 0,
+                           'col': self.a.collected, 'log': len(b._log), 'done': False}
 
     def _open_checkup(self, obs):
         """Проверка после штрафа. Батарея и датчик проверяются одной паузой, но как два отдельных вопроса:
@@ -576,11 +589,17 @@ class Investigator:
             return
         # Что датчик должен показывать здесь, если он исправен: прогноз по карте образцов, какой она была до штрафа.
         # Прежнее показание для сравнения не годится: робот успел отъехать, и оно изменилось бы само.
-        snap = self._pre_belief
-        mu, spread = a.belief.predict(obs.x, obs.y, snap[0]) if snap and snap[1] == a.collected else (0.0, 1.0)
+        on = self._onset
         self._doubt_until = obs.t + 40.0
-        if mu > 0.25:
-            self.companion = self._open_sensor(obs, 'checkup', ref=mu, jump=0.2, spread=spread, activate=False)
+        if on and on['col'] == a.collected and on['n'] >= 5:
+            on['done'] = True
+            c = self.companion = self._open_sensor(obs, 'checkup', ref=self._pre_penalty, jump=BIAS, activate=False)
+            c.record('onset', on['lbf'], 1.0, obs.t, cost=0.0, maneuver=False)
+            c.onset = on
+            a.journal.add(obs.t, 'inquiry', f"{c.id}. Измерено: перевес версии «занижает» {on['lbf']:+.1f} по "
+                          f"{on['n']} показаниям после штрафа. Теперь: "
+                          + '; '.join(f"«{x.statement.split(',')[0]}» {c.posterior[x.id]:.0%}" for x in c.alternatives),
+                          inquiry=c.id)
         else:
             # Сигнал у нуля: шум, залипание и занижение сейчас неотличимы от нормы. Проверим, когда появится сигнал.
             self._recheck_until = obs.t + 25.0
@@ -666,13 +685,33 @@ class Investigator:
                 a.health.degraded = False
         self._conclude(obs)
 
+    def _track_onset(self, z, obs):
+        """После штрафа: какая версия лучше предсказывает очередное показание — «исправен» или «занижает»."""
+        on, b = self._onset, self.a.belief
+        if on is None or on['done'] or on['col'] != self.a.collected:
+            return
+        if obs.t - on['t0'] > ONSET_S:
+            on['done'] = True
+            return
+        if not 0.03 < z < 1.0 - BIAS - 0.03:
+            return                              # у края шкалы показание обрезано и версии не различает
+        nominal = self.a.health.nominal
+        on['lbf'] += b.loglik(obs.x, obs.y, z + BIAS, nominal, on['bias']) - b.loglik(obs.x, obs.y, z, nominal, on['ok'])
+        on['n'] += 1
+        on['ok'] = b.trial(obs.x, obs.y, z, nominal, p=on['ok'])[0]
+        on['bias'] = b.trial(obs.x, obs.y, z + BIAS, nominal, p=on['bias'])[0]
+
     def reading(self, z, obs, sigma):
         """Показание датчика → (показание для карты образцов или None, шум). Здесь же ищутся сбои датчика."""
         a, s, t = self.a, self.sensor, obs.t
         self._z.append((t, obs.x, obs.y, z))
+        self._track_onset(z, obs)
         if s['mode'] == 'stuck':
             if abs(z - s['value']) > 1e-9:
                 self._recovered('stuck', t, 'датчик снова меняет показания')
+                self._z.clear()                 # прежние одинаковые показания со скачком сравнивать нельзя
+                self._z.append((t, obs.x, obs.y, z))
+                return z, sigma
             else:
                 return None, sigma
         elif s['mode'] == 'bias':
@@ -700,7 +739,12 @@ class Investigator:
                 return None, sigma
             prev, last = np.mean(vals[:5]), np.mean(vals[-3:])
             step = math.hypot(zs[-1][1] - zs[-8][1], zs[-1][2] - zs[-8][2])
-            if prev - last > max(0.13, step / a.rules.sensor_range_m + 0.1) and prev > 0.2:
+            if max(vals[:5]) - min(vals[:5]) < 1e-9 and abs(prev - last) > 0.1:
+                # До скачка показания были одинаковыми до последнего знака: датчик был залипшим и ожил.
+                a.journal.add(t, 'inquiry', 'Показания датчика были одинаковыми и вдруг изменились: похоже, датчик '
+                              'был залипшим и ожил; скачок сбоем не считаю', tag='sensor_recovered')
+                self._z.clear()
+            elif prev - last > max(0.13, step / a.rules.sensor_range_m + 0.1) and prev > 0.2:
                 self._open_sensor(obs, 'shift', ref=float(prev), jump=float(prev - last))
         return z, sigma
 
@@ -711,9 +755,9 @@ class Investigator:
         elif self.sensor['mode'] == 'ok':
             self._open_sensor(obs, 'noise', ref=float(np.mean([v for _, _, _, v in self._z])) if self._z else 0.0)
 
-    def _open_sensor(self, obs, trigger, ref=0.0, jump=0.0, activate=True, spread=0.1):
+    def _open_sensor(self, obs, trigger, ref=0.0, jump=0.0, activate=True):
         a = self.a
-        nominal, est = a.health.nominal, max(a.health.sigma, 2.5 * a.health.nominal)
+        nominal, est = a.health.nominal, max(a.health.sigma, 4.0 * a.health.nominal)
         penalty = obs.t - self._penalty_t < 45.0
         base = {'stuck': {'stuck': 0.75, 'noise': 0.03, 'bias': 0.02, 'ok': 0.1},
                 'shift': {'bias': 0.4, 'noise': 0.2, 'stuck': 0.02, 'ok': 0.28},
@@ -736,20 +780,19 @@ class Investigator:
                             predictions={'noise': (est, 0.4 * est), 'stuck': (0.0, 0.004), 'bias': (nominal, 0.4 * nominal),
                                          'ok': (nominal, 0.4 * nominal)},
                             action={'kind': 'pause'}, sigma=0.012)]
-        if trigger in ('shift', 'checkup'):
-            tests.append(TestOption('listen_shift', 'там же сравнить среднее показание с ожидаемым по карте образцов'
-                                    if trigger == 'checkup' else 'там же сравнить среднее показание с прежним',
+        if trigger == 'shift':
+            tests.append(TestOption('listen_shift', 'там же сравнить среднее показание с прежним',
                                     cost=0.0, duration_s=PAUSE_S, unit='сдвиг',
-                                    # после штрафа сравнение идёт с прогнозом по карте образцов; его
-                                    # разброс честно говорит, насколько карта здесь уверена
-                                    predictions=({'bias': (-min(jump, ref), math.hypot(spread, 0.03)),
-                                                  'ok': (0.0, math.hypot(spread, 0.03)),
-                                                  'noise': (0.0, math.hypot(spread, 0.1)),
-                                                  'stuck': (self._pre_penalty - ref, 0.08)}
-                                                 if trigger == 'checkup' else
-                                                 {'bias': (-jump, 0.05), 'ok': (0.0, 0.04), 'noise': (0.0, 0.12),
-                                                  'stuck': (-jump, 0.2)}),
+                                    # при шуме «прежнее» значение завышено самим отбором: тревогу поднял выброс
+                                    predictions={'bias': (-jump, 0.05), 'ok': (0.0, 0.04), 'noise': (-0.5 * jump, 0.15),
+                                                 'stuck': (-jump, 0.2)},
                                     action={'kind': 'pause'}, sigma=0.02))
+        if trigger == 'checkup':
+            # Робот успел отъехать, прежнее показание для сравнения не годится. Сравниваются две версии карты.
+            tests.append(TestOption('onset', 'по показаниям с момента штрафа сравнить две версии карты образцов: '
+                                    '«датчик исправен» и «показания занижены»',
+                                    cost=0.0, duration_s=ONSET_S, unit='перевес версии «занижает»',
+                                    predictions=dict(ONSET), action={'kind': 'none'}, sigma=1.0))
         q = Inquiry(self._qid(), obs.t, 'sensor', {'text': text, 'x': round(obs.x, 2), 'y': round(obs.y, 2),
                                                   'observed': round(jump or a.health.sigma, 3),
                                                   'expected': round(nominal, 3), 'unit': 'показание',
@@ -781,6 +824,15 @@ class Investigator:
             self.sensor = {'mode': 'stuck', 'value': value, 't0': q.t_open, 'until': until}
             return 'показания датчика не учитываю, пока они не начнут меняться; образцы не собираю вслепую'
         shift = next((x.measured['value'] for x in q.tests if x.id == 'listen_shift' and x.measured), -q.jump)
+        on = getattr(q, 'onset', None)
+        if on and on['col'] == a.collected and len(a.belief._log) >= on['log']:
+            # Показания с момента штрафа уже попали в карту заниженными: поправить их задним числом.
+            log = a.belief._log
+            log[on['log']:] = [(x, y, min(1.0, z + abs(shift)), sg) for x, y, z, sg in log[on['log']:]]
+            a.belief.p = a.belief._epoch.copy()
+            for x, y, z, sg in log:
+                a.belief._apply(x, y, z, sg)
+            a.belief._normalize()
         self.sensor = {'mode': 'bias', 'bias': abs(shift), 't0': q.t_open, 'until': until}
         return f'прибавляю к показаниям {abs(shift):.2f}, пока они не вернутся на прежний уровень'
 

@@ -529,7 +529,7 @@ class Advisor:
         home, r = by_id['home'], a.rules
         loss = r.pts_return + r.pts_battery_left * home['battery_p50']
         for row in rows:
-            row['worth'] = bool(row['id'] == 'home' or r.pts_sample * row['samples'] >= (row['risk'] - home['risk']) * loss)
+            row['worth'] = bool(row is home or r.pts_sample * row['samples'] >= (row['risk'] - home['risk']) * loss)
         for tg in state['candidates'] + state['explore_points']:
             tg['feasible'] = tg['id'] in by_id and by_id[tg['id']]['ok'] and by_id[tg['id']]['worth']
         self._p = {tg['id']: p for tg, _, p in targets}
@@ -609,7 +609,10 @@ class Advisor:
 
     def _text(self, rows, best):
         s = self.s
-        text = (f"Сравнил {len(rows)} вариантов при {s.worlds} возможных состояниях среды: выбрал «{best['label']}» — "
+        n = len(rows)
+        word = 'вариант' if n % 10 == 1 and n != 11 else 'варианта' if n % 10 in (2, 3, 4) and n not in (12, 13, 14) \
+            else 'вариантов'
+        text = (f"Сравнил {n} {word} при {s.worlds} возможных состояниях среды: выбрал «{best['label']}» — "
                 f"ожидаю {best['samples']:.1f} образца, счёт {best['score']:.0f}, риск не вернуться {best['risk']:.1%}, "
                 f"в худшем случае на базе останется {best['battery_p5']:.0f} ед.")
         if not best['ok']:
@@ -617,6 +620,9 @@ class Advisor:
         bad = [r for r in rows if not r['ok'] and r is not best]
         if bad:
             text += ' Отклонены по риску: ' + ', '.join(f"«{r['label']}» {r['risk']:.0%}" for r in bad[:4]) + '.'
+        weak = [r for r in rows if r['ok'] and not r.get('worth', True) and r is not best]
+        if weak:
+            text += ' Не окупают прибавку риска: ' + ', '.join(f"«{r['label']}»" for r in weak[:4]) + '.'
         home = next((r for r in rows if r['id'] == 'home' and r is not best), None)
         if home:
             text += f" Сразу домой дало бы счёт {home['score']:.0f}."

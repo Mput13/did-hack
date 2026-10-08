@@ -56,10 +56,10 @@
 .pl-dot { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--blue); color: #fff; font: 700 15px/1 var(--font); }
 .pl-dot--done { background: #9aa3ab; }
 
-.pl-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; flex: none; }
-.pl-tile { display: flex; flex-direction: column; gap: 3px; padding: 11px 14px; background: var(--surface); min-width: 0; }
+.pl-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; flex: none; }
+.pl-tile { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; background: var(--surface); min-width: 0; }
 .pl-tile__label { font-size: 13px; font-weight: 650; color: var(--ink-2); }
-.pl-tile__value { font-size: 28px; font-weight: 680; line-height: 1.15; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pl-tile__value { font-size: 26px; font-weight: 680; line-height: 1.15; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pl-tile__value--text { font-size: 17px; line-height: 1.3; padding: 5px 0 4px; white-space: normal; }
 .pl-tile__bar { min-height: 6px; }
 .pl-tile__sub { font-size: 13px; color: var(--ink-2); line-height: 1.3; }

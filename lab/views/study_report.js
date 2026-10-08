@@ -373,18 +373,20 @@ function measureTable(report) {
 // --- отчёт целиком --------------------------------------------------------------------------------
 
 async function copyText(text) {
+  // Сначала старый надёжный способ: он срабатывает сразу, пока браузер считает нажатие действием человека.
+  const ta = h('textarea', { style: { position: 'fixed', left: '-9999px', top: '0' }, readonly: true });
+  ta.value = text;
+  document.body.append(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  if (ok) return true;
   try {
-    await navigator.clipboard.writeText(text);
+    await Promise.race([navigator.clipboard.writeText(text), new Promise((_, no) => setTimeout(() => no(new Error('нет ответа')), 1500))]);
     return true;
   } catch {
-    const ta = h('textarea', { style: { position: 'fixed', left: '-9999px' } });
-    ta.value = text;
-    document.body.append(ta);
-    ta.select();
-    let ok = false;
-    try { ok = document.execCommand('copy'); } catch { ok = false; }
-    ta.remove();
-    return ok;
+    return false;
   }
 }
 
@@ -436,10 +438,12 @@ export function renderReport(host, ctx) {
   const truth = ctx.truth ? report.truth : null;
   const copied = h('span', { class: 'st-copied', role: 'status' });
   const copyBtn = h('button', { class: 'lb-btn', type: 'button' }, 'Скопировать отчёт');
+  let copyTimer = null;
   copyBtn.addEventListener('click', async () => {
     const ok = await copyText((ctx.truth && report.markdown_truth) || report.markdown || '');
     copied.textContent = ok ? 'Отчёт в буфере обмена: это текст в разметке Markdown, его можно вставить в документ или на слайд' : 'Не получилось скопировать: браузер не дал доступ к буферу';
-    setTimeout(() => { copied.textContent = ''; }, 6000);
+    clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => { copied.textContent = ''; }, 6000);
   });
 
   const share = e.budget ? Math.min(1, Math.max(0, e.spent / e.budget)) : 0;

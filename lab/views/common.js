@@ -290,9 +290,11 @@ export function metricInfo(id, metas, hint) {
     info.diffUnit = 'п. п.';
     info.value = (v) => (v == null ? '—' : `${num(v * 100, 0)} %`);          // один прогон
     info.mean = (v) => (v == null ? '—' : `${num(v * 100, 0)} %`);           // среднее
-    info.tick = (v) => num(v * 100, 0);
+    // деления оси бывают и дробными (шаг 0,5 п. п.) — тогда один знак после запятой, иначе подписи повторяются
+    const whole = (v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6;
+    info.tick = (v) => num(v * 100, whole(v) ? 0 : 1);
     info.diff = (v) => (v == null ? '—' : `${signed(v * 100, 0)} п. п.`);
-    info.diffTick = (v) => signed(v * 100, 0);
+    info.diffTick = (v) => signed(v * 100, whole(v) ? 0 : 1);
     info.diffBare = (v) => signed(v * 100, 0);
   } else if (view.kind === 'count') {
     info.unit = 'шт.';
@@ -399,6 +401,7 @@ export const AGENT_LABELS = {
   adaptive_llm: 'С адаптацией, планирует языковая модель',
   scientist: 'Исследователь: ведёт расследования',
   scientist_llm: 'Исследователь с языковой моделью',
+  study: 'Исследование по заданию',
   scientist_fs: 'Исследователь, сравнивает будущие маршруты',
   adaptive_fs: 'С адаптацией, сравнивает будущие маршруты',
   spiral: 'Спираль',

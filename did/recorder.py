@@ -25,9 +25,10 @@
              track) минус поза по одометрии; поля нет в записях без локализации
   llm        обмены с языковой моделью: [{t, ok, latency_ms, request, response, errors}]
   foresight  сравнения будущих маршрутов (did/foresight.py): [{t, trigger, worlds, risk_limit, battery, chosen,
-             route, ms, unknowns, columns: [{key, label, unit}], rows: [{id, label, route, samples, score, value,
-             risk, battery_p5, battery_p50, battery_p95, cost, hits, unknown_m, ok, chosen}]}]; поля нет в
-             записях агентов без такого сравнения
+             ms, unknowns, columns: [{key, label, unit}], rows: [{id, label, samples, score,
+             risk, battery_p5, battery_p50, battery_p95, cost, hits, unknown_m, ok, worth, chosen}]}]; ok — риск
+             не выше порога, worth — ожидаемые образцы окупают прибавку риска; поля нет в записях агентов без
+             такого сравнения
 """
 import base64
 import gzip

@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-08T05:15:05",
+ "generated": "2026-10-08T05:58:45",
  "task": {
   "truth": "task_truth.png",
   "robot_view": "task_robot_view.png",
@@ -150,7 +150,8 @@
      "collisions": 0,
      "false_collects": 0,
      "hazard_hits": 0,
-     "distance": 8.674
+     "distance": 8.674,
+     "wall_s": 1.42
     },
     "agent_err_cm": {
      "median": 1.7,
@@ -190,7 +191,8 @@
      "collisions": 0,
      "false_collects": 0,
      "hazard_hits": 0,
-     "distance": 14.491
+     "distance": 14.491,
+     "wall_s": 2.01
     },
     "agent_err_cm": {
      "median": 1.9,
@@ -230,7 +232,8 @@
      "collisions": 0,
      "false_collects": 0,
      "hazard_hits": 1,
-     "distance": 16.515
+     "distance": 16.515,
+     "wall_s": 2.46
     },
     "agent_err_cm": {
      "median": 1.7,
@@ -476,18 +479,19 @@
    "odom_median_cm": 83.5,
    "odom_max_cm": 219.3
   },
-  "settle_until_s": 35.0
+  "settle_until_s": 35.0,
+  "tick_s": 0.1
  },
  "tests": {
-  "collected": 289,
-  "when": "2026-10-08T05:15:07",
-  "passed": 288,
-  "line": "288 passed, 1 skipped in 44.51s",
+  "collected": 301,
+  "when": "2026-10-08T05:58:55",
+  "passed": 300,
+  "line": "300 passed, 1 skipped in 74.52s (0:01:14)",
   "ok": true,
-  "run_when": "2026-10-08T05:15:07",
   "failed": 0,
   "skipped": 1,
-  "errors": 0
+  "errors": 0,
+  "run_when": "2026-10-08T05:47:30"
  },
  "rules": {
   "battery_start": 60.0,
@@ -501,16 +505,28 @@
   "easy": {
    "samples": 3,
    "soils": 1,
+   "soil_mult": [
+    3.0,
+    3.0
+   ],
    "events": []
   },
   "medium": {
    "samples": 5,
    "soils": 3,
+   "soil_mult": [
+    2.0,
+    4.0
+   ],
    "events": []
   },
   "hard": {
    "samples": 7,
    "soils": 4,
+   "soil_mult": [
+    2.0,
+    4.0
+   ],
    "events": [
     "soil_change",
     "new_hazard",

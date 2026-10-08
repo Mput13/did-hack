@@ -379,6 +379,7 @@ def gazebo_numbers():
         row['fastsim'] = {k: fm.get(k) for k in ('samples_collected', 'samples_total', 'returned', 'score',
                                                  'battery_used', 'time', 'collisions', 'false_collects',
                                                  'hazard_hits', 'distance')}
+        row['fastsim']['wall_s'] = fast.get('wall_s')        # сколько секунд считался этот прогон
         if pfile.exists():
             st = gz_pose_log.report(str(pfile), str(tfile), out=io.StringIO())
             cm = lambda s: {k: round(v * 100, 1) for k, v in s.items()}   # noqa: E731
@@ -412,9 +413,13 @@ def gazebo_numbers():
         err = np.hypot(d['ox'] - d['gx'], d['oy'] - d['gy']) * 100
         out['before_fix'] = {'file': str(base.relative_to(ROOT)), 'odom_median_cm': round(float(np.median(err)), 1),
                              'odom_max_cm': round(float(err.max()), 1)}
-    m = re.search(r'^SETTLE_UNTIL_S\s*=\s*([\d.]+)', (ROOT / 'did' / 'ros_agent.py').read_text(), re.M)
+    src = (ROOT / 'did' / 'ros_agent.py').read_text()
+    m = re.search(r'^SETTLE_UNTIL_S\s*=\s*([\d.]+)', src, re.M)
     if m:                   # до этой секунды агент в Gazebo стоит: робот оседает на колёса
         out['settle_until_s'] = float(m.group(1))
+    m = re.search(r'^TICK_S\s*=\s*([\d.]+)', src, re.M)
+    if m:                   # такт агента: раз в столько секунд уходит команда колёсам
+        out['tick_s'] = float(m.group(1))
     return out
 
 
@@ -477,6 +482,7 @@ def main():
         if f.exists():
             scn = load(f)['scenario']
             data['levels'][level] = {'samples': len(scn['samples']), 'soils': len(scn['soils']),
+                                     'soil_mult': [min(z['mult'] for z in scn['soils']), max(z['mult'] for z in scn['soils'])],
                                      'events': [e['type'] for e in scn['events']]}
     DATA.parent.mkdir(parents=True, exist_ok=True)
     DATA.write_text(json.dumps(data, ensure_ascii=False, indent=1))

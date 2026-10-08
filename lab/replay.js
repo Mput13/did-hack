@@ -139,7 +139,7 @@ const KIND_RU = {
 const HYP_RU = { open: 'открыта', confirmed: 'подтверждена', refuted: 'опровергнута', outdated: 'устарела' };
 const SOURCE_RU = {
   heuristic: 'собственный расчёт', llm: 'языковая модель', fallback: 'запасной вариант',
-  fixed: 'маршрут, заданный заранее', rule: 'жёсткое правило',
+  fixed: 'маршрут, заданный заранее', rule: 'жёсткое правило', foresight: 'сравнение вариантов',
 };
 const TRIGGER_RU = {
   start: 'старт', candidate_found: 'появилось место для проверки', candidate_lost: 'место не подтвердилось',
