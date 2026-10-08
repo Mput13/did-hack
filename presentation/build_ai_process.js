@@ -42,7 +42,7 @@ const COMMITS = (() => {
   const n = parseInt((r.stdout || "").trim(), 10);
   return Number.isFinite(n) ? n : 260;
 })();
-const N = { span: "1,5 суток", tasks: 85, works: 20, returned: 19, rounds: 32, commits: COMMITS, checks: "982", runs: "24\u00A0000+", messages: 70 };
+const N = { span: "1,5 суток", tasks: 90, works: 20, returned: 19, rounds: 34, commits: COMMITS, checks: "1022", runs: "30\u00A0000+", messages: 70 };
 // «32 круга», «35 кругов»: число кругов ревью с верным окончанием
 const ROUNDS = `${N.rounds} ${N.rounds % 10 >= 2 && N.rounds % 10 <= 4 && (N.rounds % 100 < 12 || N.rounds % 100 > 14) ? "круга" : N.rounds % 10 === 1 && N.rounds % 100 !== 11 ? "круг" : "кругов"}`;
 // Итоги исследований: отчёты research/findings и поле result в research/agenda.yaml.
