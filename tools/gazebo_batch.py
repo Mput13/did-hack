@@ -11,6 +11,7 @@ import argparse
 import gzip
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -41,6 +42,21 @@ def lagged(path):
     return sum(1 for g in gaps if g > 0.45) / max(1, len(gaps))
 
 
+RUN_LIMIT_S = 480.0          # прогон идёт 2–3,5 минуты; дольше — сервер Gazebo завис (бывает: взаимная блокировка в gz-transport)
+
+
+def run_one(cmd, env):
+    """Один прогон с потолком по времени. Зависший прогон прерывается так же, как Ctrl+C: стенд убирает gazebo_run.py."""
+    proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        out, err = proc.communicate(timeout=RUN_LIMIT_S)
+    except subprocess.TimeoutExpired:
+        proc.send_signal(signal.SIGINT)
+        out, err = proc.communicate()
+        err += f'\nпрогон прерван: не закончился за {RUN_LIMIT_S:.0f} с'
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--level', default='hard')
@@ -61,8 +77,8 @@ def main():
             stale = ROOT / 'runs' / args.exp / arm / f'{args.level}-{seed}.json.gz'
             stale.unlink(missing_ok=True)       # запись прежней попытки не должна сойти за новую
             t0 = time.time()
-            r = subprocess.run([sys.executable, str(ROOT / 'tools' / 'gazebo_run.py'), '--level', args.level, '--seed', str(seed),
-                                '--agent', args.agent, '--exp', args.exp], cwd=ROOT, env=env, capture_output=True, text=True)
+            r = run_one([sys.executable, str(ROOT / 'tools' / 'gazebo_run.py'), '--level', args.level, '--seed', str(seed),
+                         '--agent', args.agent, '--exp', args.exp], env)
             tail = [line for line in r.stdout.strip().splitlines() if line.strip()][-1:] or ['нет вывода']
             lag = lagged(ROOT / 'runs' / args.exp / arm / f'{args.level}-{seed}.json.gz')
             note = '' if lag is None else f', опоздавших тактов {lag:.0%}'

@@ -1,0 +1,75 @@
+Analysis of sampling ruby (pid 82828) every 1 millisecond
+Process:         ruby [82828]
+Path:            /Users/USER/*/ruby
+Load Address:    0x100998000
+Identifier:      ruby
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  python3.12 [82826]
+Target Type:     live task
+
+Date/Time:       2026-10-08 22:18:50.444 +0300
+Launch Time:     2026-10-08 22:01:54.762 +0300
+OS Version:      macOS 26.3.1 (25D2128)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         329.0M
+Physical footprint (peak):  473.1M
+Idle exit:                  untracked
+----
+
+Call graph:
+    865 Thread_2622444   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 865 start  (in dyld) + 7184  [0x1946b9d54]
+    +   865 main  (in ruby) + 104  [0x10099bec8]
+    +     865 ruby_run_node  (in libruby.3.4.dylib) + 64  [0x1014387ec]
+    +       865 rb_ec_exec_node  (in libruby.3.4.dylib) + 152  [0x1014388d0]
+    +         865 rb_vm_exec  (in libruby.3.4.dylib) + 364  [0x1015c748c]
+    +           865 vm_exec_core  (in libruby.3.4.dylib) + 7612  [0x1015ca4e0]
+    +             865 vm_call_cfunc_with_frame_  (in libruby.3.4.dylib) + 220  [0x1015e6048]
+    +               865 function_call  (in fiddle.bundle) + 1396  [0x100f4f2b0]  function.c:385
+    +                 865 rb_nogvl  (in libruby.3.4.dylib) + 360  [0x101591030]
+    +                   865 nogvl_ffi_call  (in fiddle.bundle) + 28  [0x100f4f8ac]  function.c:214
+    +                     865 ffi_call_int  (in libffi.8.dylib) + 1516  [0x100f6988c]
+    +                       865 ffi_call_SYSV  (in libffi.8.dylib) + 80  [0x100f6c050]
+    +                         865 runServer  (in libgz-sim8-gz.8.10.0.dylib) + 6012  [0x1011f7304]
+    +                           865 gz::sim::v8::ServerPrivate::Run(unsigned long long, std::optional<std::condition_variable*>)  (in libgz-sim8.8.10.0.dylib) + 280  [0x11d392ac8]
+    +                             865 gz::sim::v8::SimulationRunner::Run(unsigned long long)  (in libgz-sim8.8.10.0.dylib) + 4340  [0x11d3a5dd4]
+    +                               865 gz::sim::v8::SimulationRunner::Step(gz::sim::v8::UpdateInfo const&)  (in libgz-sim8.8.10.0.dylib) + 68  [0x11d3a107c]
+    +                                 865 gz::sim::v8::SimulationRunner::PublishStats()  (in libgz-sim8.8.10.0.dylib) + 588  [0x11d3a383c]
+    +                                   865 gz::transport::v13::Node::Publisher::Publish(google::protobuf::Message const&)  (in libgz-transport13.13.5.0.dylib) + 604  [0x11c30d1d4]
+    +                                     865 gz::transport::v13::NodeShared::CheckSubscriberInfo(std::basic_string<char> const&, std::basic_string<char> const&) const  (in libgz-transport13.13.5.0.dylib) + 76  [0x11c32bf78]
+    +                                       865 std::recursive_mutex::lock()  (in libc++.1.0.dylib) + 12  [0x1010f9130]
+    +                                         865 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 220  [0x194a7e868]
+    +                                           865 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x194a80e3c]
+    +                                             865 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x194a439c8]
+    865 Thread_2622445
+    + 865 thread_start  (in libsystem_pthread.dylib) + 8  [0x194a7eba8]
+    +   865 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x194a83c08]
+    +     865 timer_thread_func  (in libruby.3.4.dylib) + 940  [0x10159bc68]
+    +       865 kevent  (in libsystem_kernel.dylib) + 8  [0x194a46f30]
+    865 Thread_2622492
+    + 865 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x194a7eb9c]
+    +   865 _pthread_wqthread  (in libsystem_pthread.dylib) + 368  [0x194a7fe98]
+    +     865 __workq_kernreturn  (in libsystem_kernel.dylib) + 8  [0x194a429dc]
+    865 Thread_2622494: ZMQbg/Reaper
+    + 865 thread_start  (in libsystem_pthread.dylib) + 8  [0x194a7eba8]
+    +   865 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x194a83c08]
+    +     865 thread_routine(void*)  (in libzmq.5.dylib) + 92  [0x1313cba00]
+    +       865 zmq::kqueue_t::loop()  (in libzmq.5.dylib) + 196  [0x13139f420]
+    +         865 kevent  (in libsystem_kernel.dylib) + 8  [0x194a46f30]
+    865 Thread_2622495: ZMQbg/IO/0
+    + 865 thread_start  (in libsystem_pthread.dylib) + 8  [0x194a7eba8]
+    +   865 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x194a83c08]
+    +     865 thread_routine(void*)  (in libzmq.5.dylib) + 92  [0x1313cba00]
+    +       864 zmq::kqueue_t::loop()  (in libzmq.5.dylib) + 196  [0x13139f420]
+    +       ! 864 kevent  (in libsystem_kernel.dylib) + 8  [0x194a46f30]
+    +       1 zmq::kqueue_t::loop()  (in libzmq.5.dylib) + 116  [0x13139f3d0]
+    +         1 zmq::poller_base_t::execute_timers()  (in libzmq.5.dylib) + 112  [0x1313aea78]
+    +           1 zmq::tcp_connecter_t::start_connecting()  (in libzmq.5.dylib) + 40  [0x1313cabd8]
+    +             1 zmq::tcp_connecter_t::open()  (in libzmq.5.dylib) + 336  [0x1313cae9c]
+    +               1 __connect  (in libsystem_kernel.dylib) + 8  [0x194a4534c]
+    865 Thread_2622498
+    + 865 thread_start  (in libsystem_pthread.dylib) + 8  [0x194a7eba8]

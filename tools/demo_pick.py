@@ -115,7 +115,16 @@ def summarize(tr):
     soil = None
     if s_ev:
         before, after = tr['scenario'].get('soils', []), s_ev.get('soils', [])
-        alarms = [(t, s) for t, k, s, g in texts if g == 'model_mismatch' and t >= s_ev['t']]
+        # Тревога о расходе считается с момента, когда вопрос возник: вывод по вопросу, начатому до смены
+        # грунта, — это найденный дорогой участок, а не замеченное изменение.
+        asked = {}
+        for j in journal:
+            q = (j.get('data') or {}).get('inquiry')
+            if q:
+                asked.setdefault(q, j['t'])
+        alarms = sorted((asked.get((j.get('data') or {}).get('inquiry'), j['t']), j['text']) for j in journal
+                        if (j.get('data') or {}).get('tag') == 'model_mismatch')
+        alarms = [(t, s) for t, s in alarms if t >= s_ev['t']]
         on_changed = [(t, s) for t, s in alarms if changed_near(before, after, *pose_at(track, t))]
         on_path = [tt for tt, xx, yy in zip(track['t'], track['x'], track['y'])
                    if tt >= s_ev['t'] and changed_near(before, after, xx, yy, 0.0)]
@@ -153,7 +162,7 @@ def line(row):
 def showy(row):
     """Годится ли прогон для показа адаптации: вернулся, ничего не задел, и на экране есть реакция на изменение."""
     f, h, s = row['fault'] or {}, row['hazard'] or {}, row['soil'] or {}
-    clean = row['returned'] and row['collisions'] == 0 and row['false_collects'] == 0 and row['stuck'] + row['blocked'] == 0
+    clean = row['returned'] and row['collisions'] == 0 and row['hazard_hits'] == 0 and row['false_collects'] == 0 and row['stuck'] + row['blocked'] == 0
     reacted = sum([bool(f.get('wait_s')), bool(h.get('hypothesis_t')), s.get('noticed_after') is not None])
     return clean, reacted
 
