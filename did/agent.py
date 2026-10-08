@@ -175,6 +175,7 @@ class Agent:
             obs = replace(obs, x=x, y=y, th=th)
         if obs.done or self.finished:
             io.command(0.0, 0.0)
+            self._wrap_up(obs)
             self._record(obs)
             return
         self._perceive(obs)
@@ -189,6 +190,11 @@ class Agent:
             self._deliberate(obs)
         self._act(obs, io)
         self._record(obs)
+
+    def _wrap_up(self, obs):
+        """Прогон закончен, восприятия больше не будет: досчитать то, что было отложено."""
+        if self.inv:
+            self.inv.finish(obs)
 
     # ======================================================================================
     # восприятие: события, грунт, датчик образцов

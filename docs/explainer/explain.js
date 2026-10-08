@@ -562,7 +562,6 @@
     F['story.seed'] = story.seed;
     for (const arm of ['fixed', 'adaptive']) { const r = story[arm].result; F[`story.${arm}`] = `${r.samples_collected} из ${r.samples_total}`; F[`story.${arm}.score`] = num(r.score, 1); }
     F.route_len = num(D.route.length, 1); F.route_n = D.route.points.length;
-    F.jev_cost = D.llm_budget ? num(D.llm_budget.spent_usd, 2) : '—';
     if (D.code) { F.loc_total = (D.code.py + D.code.js).toLocaleString('ru'); F.loc_py = D.code.py.toLocaleString('ru'); F.loc_js = D.code.js.toLocaleString('ru'); }
     if (D.inq_accuracy) for (const k of ['runs', 'total', 'identified', 'wrong']) F['inq_accuracy.' + k] = D.inq_accuracy[k];
     F.gz_n = D.gazebo.length;
@@ -1048,12 +1047,11 @@
     const AG = D.llm_agreement || {};
     if (!rows.length) { t.outerHTML = '<p class="warn">Прогонов с настоящей моделью на момент сборки нет.</p>'; return; }
     const NAME = { 'gpt-6-luna_v1': 'GPT-6 Luna, первый вариант запроса', 'gpt-6-luna': 'GPT-6 Luna, доработанный запрос и схема ответа',
-      'jev-router_800': 'Jev Router, лимит ответа 800 токенов', 'jev-router': 'Jev Router, запас на рассуждение и схема ответа',
       'mai-qwen3.8-flash-next': 'МАИ: qwen3.8-flash-next', 'mai-qwen3.8-27b': 'МАИ: qwen3.8-27b', 'mai-qwen3.6-35b-a3b': 'МАИ: qwen3.6-35b-a3b',
       'mai-qwen3.5-122b-a10b': 'МАИ: Qwen3.5-122B-A10B', 'mai-deepseek-v4.1-flash': 'МАИ: deepseek-v4.1-flash', 'mai-deepseek-v4-flash': 'МАИ: DeepSeek-V4-Flash',
       'qwen2.5-3b': 'Qwen 2.5 (3 млрд), локально — больше не используется' };
     const ORDER = ['mai-qwen3.8-flash-next', 'mai-qwen3.6-35b-a3b', 'mai-qwen3.8-27b', 'mai-qwen3.5-122b-a10b', 'mai-deepseek-v4.1-flash', 'mai-deepseek-v4-flash',
-      'jev-router', 'jev-router_800', 'gpt-6-luna', 'gpt-6-luna_v1', 'qwen2.5-3b'];
+      'gpt-6-luna', 'gpt-6-luna_v1', 'qwen2.5-3b'];
     const rank = k => { const i = ORDER.indexOf(k); return i < 0 ? 99 : i; };
     rows.sort((a, b) => rank(a[0]) - rank(b[0]));
     const same = v => { const d = v.score_diff || []; return d.length ? `${d.filter(x => Math.abs(x) < 0.05).length} из ${d.length}` : '—'; };
