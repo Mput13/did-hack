@@ -51,6 +51,7 @@ from .fastsim import FastSim
 from .judge import Judge
 from .mapping import LIDAR_OFFSET, OccupancyMapper
 from .metrics import run_metrics
+from .mission_agents import MISSION_AGENTS         # агенты, которым не нужна языковая модель
 from .nav import ESCAPE_STOP, INFLATE, CostGraph, Follower, corridor_room, escape_plan, moved_since, path_length
 from .recorder import Recorder, encode_grid, save_trace
 from .runner import RUNS, make_planner
@@ -80,11 +81,11 @@ PROGRESS_M, NO_PROGRESS_S = 0.05, 10.0     # робот не сдвинулся 
 LEG_BASE_S, LEG_S_PER_M = 30.0, 15.0       # срок одного подъезда: 30 с и по 15 с на метр пути (вдвое медленнее обычного)
 SNAP_MAX = 0.15                # м: дальше цель после смены карты не передвигается — оператор ставит её заново
 BASE_NEAR = 0.25               # м: ближе — робот «на базе»
-# Агенты, которым не нужна языковая модель: их можно запускать с пульта.
-MISSION_AGENTS = {'adaptive': 'С адаптацией', 'scientist': 'Исследователь', 'fixed': 'Фиксированный план',
-                  # Те же два агента с пережиданием сбоя датчика образцов (P1): умолчание страницы — прежнее.
-                  'adaptive_v2': 'С адаптацией, пережидает сбой датчика',
-                  'scientist_v2': 'Исследователь, пережидает сбой датчика'}
+# Новый прогон судьи перед миссией: сколько ждать подтверждения после вызова сброса и сколько раз вызывать.
+# Машина на показе бывает медленной: ложный отказ хуже лишних секунд ожидания.
+RESET_WAIT_S, RESET_TRIES = 10.0, 2
+RESET_T_MAX = 5.0              # с: время судьи в только что начатом прогоне не больше (см. fresh_score)
+RESET_BATTERY_GAP = 2.0        # ед.: заряд «полный», если отличается от начального не больше
 # Уход одометрии в быстром симуляторе, чтобы поправка по лидару была видна и на репетиции: около 14 см
 # на 10 м пути. В Gazebo на спокойной езде выходит 3–8 см, на резких разворотах — больше.
 FAST_DRIFT = dict(odom_turn_slip=0.12, odom_turn_scale=0.006, odom_path_scale=0.006)
@@ -95,6 +96,88 @@ REASONS = {'finish': 'миссия завершена', 'battery': 'села б�
 
 class Refuse(Exception):
     """Команду оператора выполнить нельзя; текст показывается на странице."""
+
+
+# =================================================================================================
+# новый прогон судьи с подтверждением
+# =================================================================================================
+
+def fresh_score(score, battery, before, battery_start, answered=False):
+    """Счёт судьи — уже нового прогона: сообщение новое, прогон идёт, заряд полный, часы судьи пошли заново.
+
+    before — счёт, который был до вызова сброса; answered — судья уже ответил на вызов «сделано».
+    Часы пошли заново, если время судьи стало меньше прежнего (в пределах одного прогона оно только растёт;
+    так новый прогон узнаётся, даже когда ответ на вызов потерялся, а первые сообщения пульт пропустил).
+    Если прежний прогон сам только начался, меньше прежнего время может и не стать: тогда нужен ответ судьи
+    и время не больше RESET_T_MAX.
+    """
+    if not score or score is before or score.get('finished') or battery is None:
+        return False
+    t, t_before = score.get('t'), (before or {}).get('t')
+    if t is None:
+        return False
+    restarted = (t_before is not None and t < t_before) or (answered and t < RESET_T_MAX)
+    return restarted and battery > battery_start - RESET_BATTERY_GAP
+
+
+class RunReset:
+    """Сброс судьи, который считается удавшимся только когда новый прогон подтверждён его счётом.
+
+    Не блокирует: poll() вызывается раз за разом (из такта пульта) и возвращает None, пока ответа нет,
+    затем (True, сообщение) или (False, причина). На подтверждение даётся wait_s секунд по часам машины;
+    не подтвердилось — сброс вызывается ещё раз (всего tries раз), и только потом отказ.
+
+    send() отправляет вызов сброса и возвращает функцию «что ответил судья»: None — ответа ещё нет, иначе
+    (успех, сообщение). Если отправить нельзя (сервис ещё не виден), send() возвращает None — попробуем
+    на следующем опросе. read() возвращает (последний счёт судьи, заряд).
+    """
+
+    def __init__(self, send, read, battery_start, wait_s=RESET_WAIT_S, tries=RESET_TRIES, clock=time.monotonic):
+        self._send, self._read, self._battery_start = send, read, battery_start
+        self._wait_s, self._tries, self._clock = wait_s, tries, clock
+        self.attempt = 0                    # какой по счёту вызов сброса идёт
+        self._t0 = self._before = self._reply = self._answer = None
+        self._sent = False                  # в этой попытке вызов удалось отправить
+        self.result = None
+
+    def poll(self):
+        if self.result is not None:
+            return self.result
+        now = self._clock()
+        if self._t0 is None:                # начало попытки
+            self.attempt += 1
+            self._t0, self._before, self._reply, self._answer, self._sent = now, self._read()[0], None, None, False
+        if self._reply is None and not self._sent:
+            self._reply = self._send()
+            self._sent = self._reply is not None
+        if self._reply is not None and self._answer is None:
+            self._answer = self._reply()
+        score, battery = self._read()
+        answered = self._answer is not None and self._answer[0]
+        if self._sent and fresh_score(score, battery, self._before, self._battery_start, answered):
+            self.result = (True, (self._answer or (True, ''))[1] or 'судья начал прогон заново')
+            return self.result
+        refused = self._answer is not None and not self._answer[0]
+        if not refused and now - self._t0 < self._wait_s:
+            return None
+        if self.attempt < self._tries:
+            self._t0 = None                 # следующий опрос вызовет сброс ещё раз
+            return None
+        self.result = (False, self._why(score, battery, refused))
+        return self.result
+
+    def _why(self, score, battery, refused):
+        n = f'{self.attempt} {_plural(self.attempt, "вызов", "вызова", "вызовов")} сброса'
+        if not self._sent:
+            return f'у судьи нет сервиса /did/reset ({n})'
+        if refused:
+            return f'судья отказал: {self._answer[1]} ({n})'
+        if self._answer is None:
+            return f'судья не ответил на сброс за {self._wait_s:.0f} с ({n})'
+        s = score or {}
+        seen = (f"время судьи {s.get('t', '?')} с" + (', прогон закончен' if s.get('finished') else '')
+                + ('' if battery is None else f', заряд {_num(battery)}'))
+        return f'судья ответил на сброс, но счёт нового прогона за {self._wait_s:.0f} с не пришёл: {seen} ({n})'
 
 
 # =================================================================================================
@@ -140,14 +223,24 @@ class FastWorld:
 
     # --- стенд -------------------------------------------------------------------------------
 
-    def new_run(self):
+    def reset_begin(self):
         """Новый прогон судьи с того места, где стоит робот: время, заряд и образцы — с начала."""
         s = self.sim
         s.judge = Judge(self.scenario, self.arena, self.rules, seed=self.seed)
         s.t = 0.0
         s._next_sensor = s._next_lidar = 0.0
         s.judge.step(0.0, s.x, s.y)
+
+    def reset_poll(self):
+        """Тот же договор, что у стенда: успех — только когда новый прогон подтверждён счётом судьи."""
+        j = self.sim.judge
+        if j.done or j.t > RESET_T_MAX or j.battery <= self.rules.battery_start - RESET_BATTERY_GAP:
+            return False, 'судья быстрого симулятора не начал прогон заново'
         return True, 'судья начал прогон заново'
+
+    def new_run(self):
+        self.reset_begin()
+        return self.reset_poll()
 
     def linked(self):
         return True
@@ -203,6 +296,7 @@ class Pilot:
         self._progress = None               # срок текущего подъезда: {'leg', 't0', 'limit', 'x', 'y', 'still'}
         self._explore = None                # объезд границ увиденного: {'visited', 'dead', 'done', 't0'}
         self.mode = 'idle'                  # settle | idle | drive | home | mission
+                                            # (mission без self.bot — миссия ждёт нового прогона судьи)
         self.route = []                     # [{'x', 'y', 'done', 'pts'}]: точки оператора и путь до каждой
         self.zones = []                     # ограничения оператора, не скрытые свойства среды
         self._zone_blocked = np.zeros(arena.free.shape, dtype=bool)
@@ -229,6 +323,7 @@ class Pilot:
         self._nav_cache = (-1, None)
         self._belief_cache = (-1e9, None)
         self._finish_at = None
+        self._reset = None                  # агент миссии, которая ждёт подтверждения нового прогона судьи
         self._last_odom = None
         self._rerun_at = 0.0
         self._gaps = deque(maxlen=300)      # (время по часам машины, сколько времени симуляции прошло между тактами)
@@ -276,7 +371,7 @@ class Pilot:
 
         if self.slam_nav:
             self._watch_slam()
-            if self.mode != 'mission':
+            if self.mode != 'mission' or self.bot is None:
                 self._grid_bad = False      # вне миссии пригодность сетки проверяет _refresh_nav
                 self._refresh_nav()         # в миссии агент едет по снимку карты, сделанному на её старте
 
@@ -894,7 +989,7 @@ class Pilot:
         self.mode = 'idle'
         self.route, self.trail, self.arrivals = [], [], []
         self.mission = self.bot = self.rec = self._after_home = self._escape = self._stuck = self._explore = None
-        self._progress = None
+        self._progress = self._reset = None
         self.follower.set_path([])
         self.mapper.reset()
         self.distance = 0.0
@@ -944,12 +1039,44 @@ class Pilot:
             self.note = {'tone': 'info', 'text': 'Миссия начнётся с базы: сначала возвращаюсь'}
             return 'Сначала на базу, затем миссия'
         self._start_mission(agent)
-        return 'Миссия запущена'
+        if self.mission.get('state') == 'refused':
+            raise Refuse(self.note['text'])
+        return 'Миссия запущена' if self.bot else 'Жду новый прогон судьи, затем миссия'
 
     def _start_mission(self, agent):
-        w = self.world
+        """Чистый прогон судьи (полный заряд, время с нуля, все образцы на месте) — и только затем агент.
+
+        Сброс подтверждается счётом судьи; пока подтверждения нет, пульт остаётся в режиме миссии без агента
+        (_reset_tick): робот стоит, старый счёт и старый признак «прогон закончен» ни на что не влияют.
+        """
         self._command(0.0, 0.0)
-        ok, msg = w.new_run()                       # чистый прогон: полный заряд, время с нуля, все образцы на месте
+        self.bot = self.rec = None                  # агент прошлой миссии не должен получить ни одного такта
+        self.follower.set_path([])
+        self.mode = 'mission'
+        self._finish_at = None
+        self._reset = agent
+        self.mission = {'agent': agent, 'label': MISSION_AGENTS[agent], 'state': 'reset',
+                        'total': LEVELS[self.level]['samples'], 'collected': 0}
+        self.world.reset_begin()
+        self._say('info', 'Жду, пока судья начнёт новый прогон: миссия стартует сразу после этого')
+        self._reset_tick()                          # быстрый симулятор подтверждает сразу
+
+    def _reset_tick(self):
+        """Ждём подтверждения нового прогона. Подтверждён — запускаем агента; нет — миссия не начинается."""
+        self._command(0.0, 0.0)
+        res = self.world.reset_poll()
+        if res is None:
+            return
+        agent, self._reset = self._reset, None
+        if res[0]:
+            return self._launch_mission(agent)
+        # Без нового прогона агент получил бы остаток заряда и времени после ручной езды: не запускаем.
+        self.mode = 'idle'
+        self.mission.update(state='refused', fresh_run=False, reason=res[1])
+        self._say('bad', f'Судья не начал новый прогон: {res[1]}. Миссия не запущена — '
+                  'нажмите «Запустить миссию» ещё раз')
+
+    def _launch_mission(self, agent):
         cfg = make_config(agent)
         self.rec = Recorder()
         # В режиме карты SLAM агент получает снимок арены, собранной из сетки SLAM на эту секунду.
@@ -964,12 +1091,15 @@ class Pilot:
         self.mode = 'mission'
         self._finish_at = None
         self.mission = {'agent': agent, 'label': MISSION_AGENTS[agent], 'state': 'running',
-                        'total': LEVELS[self.level]['samples'], 'collected': 0, 'fresh_run': bool(ok)}
-        self._say('info', f'Автономная миссия: агент «{MISSION_AGENTS[agent]}» ищет образцы'
-                  + ('' if ok else f'. Судья прогон заново не начал ({msg}): заряд и время — какие остались'))
+                        'total': LEVELS[self.level]['samples'], 'collected': 0, 'fresh_run': True}
+        self._say('info', f'Автономная миссия: агент «{MISSION_AGENTS[agent]}» ищет образцы')
 
     def _mission_tick(self, obs):
+        if self._reset is not None:
+            return self._reset_tick()               # obs.done здесь — ещё от прежнего прогона: миссию не завершает
         bot = self.bot
+        if bot is None:
+            return self._command(0.0, 0.0)
         if self._finish_at is None and (obs.done or bot.finished):
             self._finish_at = time.monotonic() + self.world.score_delay     # дождаться итогового счёта судьи
         if self._finish_at is not None and time.monotonic() >= self._finish_at:
@@ -979,6 +1109,9 @@ class Pilot:
         if self.mode != 'mission':
             raise Refuse('Миссия не запущена')
         self._command(0.0, 0.0)
+        if self.bot is None:                        # миссия ещё ждёт нового прогона судьи: завершать у судьи нечего
+            self._end_mission('aborted', 'Миссия отменена оператором до старта')
+            return 'Миссия отменена'
         ok, msg = self.world.finish()
         self._end_mission('finished', f'Миссия завершена оператором: {msg}')
         return f'Миссия завершена: {msg}'
@@ -987,7 +1120,7 @@ class Pilot:
         w, bot = self.world, self.bot
         self._command(0.0, 0.0)
         self.mode = 'idle'
-        self._finish_at = None
+        self._finish_at = self._reset = None
         score = dict(w.score() or {})
         m = self.mission or {}
         m.update(state=state, collected=score.get('samples_collected', bot.collected if bot else 0))
@@ -1434,6 +1567,7 @@ def run_ros(level, seed, rules='base', wait_s=600.0, slam_nav=False):
             self._still = None                  # (поза, с какого времени симуляции она не меняется)
             self._settled = False
             self._t_spawn = None                # время симуляции, когда судья увидел робота
+            self._reset = None                  # идущий сброс судьи (RunReset)
 
         observe = property(lambda self: self.io.observe)
         command = property(lambda self: self.io.command)
@@ -1459,23 +1593,47 @@ def run_ros(level, seed, rules='base', wait_s=600.0, slam_nav=False):
             self._settled = left <= 0.0
             return left
 
-        def new_run(self):
+        def _reset_send(self):
+            """Отправить вызов /did/reset, не дожидаясь ответа. None — сервис судьи пока не виден."""
+            cli = self.io.reset_cli
+            if not cli.service_is_ready():
+                return None
+            future = cli.call_async(Trigger.Request())
+
+            def answer():
+                if not future.done():
+                    return None
+                try:
+                    r = future.result()
+                except Exception as e:          # noqa: BLE001 — причина уходит оператору
+                    return False, f'вызов /did/reset не удался ({type(e).__name__}: {e})'
+                if r is None:
+                    return False, 'вызов /did/reset не удался'
+                return bool(r.success), r.message
+
+            return answer
+
+        def reset_begin(self):
+            """Начать новый прогон судьи; подтверждение — через reset_poll(), основной цикл пульта не ждёт."""
             io = self.io
-            if not io.reset_cli.wait_for_service(timeout_sec=1.0):
+            self._reset = RunReset(self._reset_send, lambda: (io.score, io.battery), self.rules.battery_start)
+
+        def reset_poll(self):
+            res = self._reset.poll()
+            if res is not None and res[0]:
+                self.io.observe()               # события и показания прежнего прогона новому не нужны
+            return res
+
+        def new_run(self):
+            """То же, но с ожиданием на месте (ручной сброс и новый прогон во время ручной езды)."""
+            if not self.io.reset_cli.wait_for_service(timeout_sec=1.0):
                 return False, 'у судьи нет сервиса /did/reset'
-            before = io.score
-            ok, msg = io._call(io.reset_cli)
-            if not ok:
-                return False, msg
-            deadline = time.monotonic() + 3.0   # дождаться счёта нового прогона: по нему идут часы агента
-            while time.monotonic() < deadline:
-                s = io.score
-                if s is not before and not s.get('finished') and s.get('t', 1e9) < 3.0 \
-                        and (io.battery or 0.0) > self.rules.battery_start - 2.0:
-                    break
+            self.reset_begin()
+            while True:
+                res = self.reset_poll()
+                if res is not None:
+                    return res
                 time.sleep(0.02)
-            io.observe()                        # события и показания прежнего прогона новому не нужны
-            return True, msg
 
         def score(self):
             return self.io.score or {}
