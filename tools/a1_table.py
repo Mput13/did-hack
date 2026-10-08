@@ -72,7 +72,7 @@ def main():
                                                                                 np.random.default_rng(0))
                     diff = f"{signed(p['mean'])} [{signed(p['ci'][0])}; {signed(p['ci'][1])}]"
                 print(f"| {labels[arm['id']]} (`{arm['id']}`) | {num(mean(sel, 'score'))} | {diff} | "
-                      f"{mean(sel, 'samples_share'):.0%} | {mean(sel, 'returned'):.1%} | {back} | "
+                      f"{mean(sel, 'samples_share'):.0%} | {num(100 * mean(sel, 'returned'))}% | {back} | "
                       f"{num(mean(sel, 'penalties'), 2)} | {num(mean(sel, 'battery_used'))} |")
             print()
 
