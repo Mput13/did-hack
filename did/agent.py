@@ -6,7 +6,9 @@
 """
 import math
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+import queue
+import threading
+from concurrent.futures import Future
 from dataclasses import asdict, dataclass, field, replace
 
 import numpy as np
@@ -25,6 +27,7 @@ from .nav import (ESCAPE_ROOM, ESCAPE_STOP, ESCAPE_V, FRONT_STOP, CostGraph, Fol
 from .planner import MISSION, HeuristicPlanner, resolve_subgoals
 from .route import survey_route
 from .sensorguard import SensorGuard
+from .waiting import ActWhileWaiting, answer_delay
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,14 @@ class AgentConfig:
     llm_min_interval_s: float = 4.0   # не дёргать модель чаще
     llm_wait_s: float = 0.0           # быстрый симулятор: сколько секунд робот стоит, «ожидая ответ модели»
     async_planner: bool = False       # Gazebo: модель думает в отдельном потоке, робот в это время стоит
+    llm_act_while_waiting: str = 'off'   # R16, пока модель думает: off — стоять; rule — ехать по плану правила;
+                                         # leash — без сбора и не дальше llm_wait_leash_m от места вопроса (did/waiting.py)
+    llm_wait_leash_m: float = 0.5     # leash: как далеко от места вопроса можно отъехать до ответа модели
+    llm_wait_deadline_s: float = 45.0    # rule и leash: ответа нет дольше — вопрос снят, решает правило (did/waiting.py)
+    llm_wait_give_up: int = 2         # столько сроков истекло подряд — модель до конца прогона не спрашивается
+    llm_wait_superseded: str = 'apply'   # ответ не совпал с правилом, а план с тех пор уже сменился: apply — перейти
+                                         # на план модели, если он выполним сейчас; drop — отбросить (кроме возврата на базу)
+    llm_wait_measured: bool = False   # быстрый симулятор: ждать столько, сколько модель отвечала на деле, а не llm_wait_s
     localize: bool = True             # поправлять позу одометрии по лидару и карте (did/localize.py)
     guard: bool = True                # не давить в преграду и не ехать вслепую: отъезд по лидару, остановка при
     #                                   проскальзывании колёс и при потере положения (False — как до исследования G2)
@@ -159,6 +170,48 @@ def make_config(name, **overrides):
     return replace(PRESETS[name], **overrides)
 
 
+class DaemonPool:
+    """Один фоновый поток для запросов к планировщику, запросы идут по очереди.
+
+    Поток — «демон»: зависший запрос к модели не мешает программе завершиться. У ThreadPoolExecutor
+    интерпретатор при выходе ждёт рабочий поток, и прогон с неответившей моделью не закрывался (R16).
+    """
+
+    def __init__(self):
+        self._queue = queue.SimpleQueue()
+        self._thread = None
+
+    def submit(self, fn, *args):
+        future = Future()
+        self._queue.put((future, fn, args))
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._work, daemon=True, name='did-planner')
+            self._thread.start()
+        return future
+
+    def shutdown(self, wait=True, timeout=5.0):
+        """Остановить поток после уже поставленных запросов. Зависший запрос не ждём дольше timeout."""
+        thread = self._thread
+        if thread is None or not thread.is_alive():
+            return
+        self._queue.put(None)
+        if wait:
+            thread.join(timeout)
+
+    def _work(self):
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            future, fn, args = item
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(fn(*args))
+            except BaseException as e:      # noqa: BLE001 — исключение уходит в Future, поток живёт дальше
+                future.set_exception(e)
+
+
 class Agent:
 
     SLIP_STOP = 0.04      # м: на столько поправка сдвинула позу против хода за секунду — робот упёрся
@@ -207,7 +260,7 @@ class Agent:
         self._returning = False
         self._wait_until = 0.0
         self._future = None
-        self._pool = ThreadPoolExecutor(max_workers=1) if config.async_planner else None
+        self._pool = DaemonPool() if config.async_planner else None
         self._last_llm_t = -1e9
         self._known_cands = []
         self._visited = deque(maxlen=8)                     # недавние точки разведки: [(t, x, y)]
@@ -260,6 +313,8 @@ class Agent:
         self.frugal = Frugal(self) if Frugal.wanted(config) else None   # правки P2: бережный расход (did/frugal.py)
         self._battery_threshold_triggered = False
         self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
+        # R16: пока модель думает, робот действует по правилу, а ответ сверяет с тем, что уже делает.
+        self.aw = ActWhileWaiting(self) if config.planner == 'llm' and config.llm_act_while_waiting != 'off' else None
         self.tour = None
         if config.scheme != 'rule':                         # A1: другая схема выбора целей и возврата
             from .tour import TourScheme
@@ -297,6 +352,8 @@ class Agent:
                 self._ask_at_battery_floor(obs)
         if self._trigger and obs.t >= self._wait_until:
             self._deliberate(obs)
+        if self.aw is not None:
+            self.aw.poll(obs)
         self._waiting = True               # снимается в _act: наследник со своим исполнителем сторожу не подотчётен
         self._act(obs, io)
         self._watch_idle(obs)
@@ -782,6 +839,8 @@ class Agent:
             if self.tour is not None:
                 ahead = self.tour.plan(obs, state)                               # порядок обхода всех целей сразу
             use_llm =self.cfg.planner == 'llm' and obs.t - self._last_llm_t >= self.cfg.llm_min_interval_s
+            if self.aw is not None and ahead is None and self.aw.decide(obs, state, trigger, use_llm):
+                return
             planner = self.planner if use_llm or self.cfg.planner != 'llm' else HeuristicPlanner()
             if use_llm:
                 self._last_llm_t = obs.t
@@ -790,8 +849,8 @@ class Agent:
                 self._future = self._pool.submit(planner.plan, state)
                 return
             plan = ahead or planner.plan(state)
-            if use_llm and self.cfg.llm_wait_s:
-                self._wait_until = obs.t + self.cfg.llm_wait_s
+            if use_llm and (self.cfg.llm_wait_s or self.cfg.llm_wait_measured):
+                self._wait_until = obs.t + answer_delay(self.cfg, plan)
             if self.cfg.guard_wait and plan.get('wait_s'):
                 self._wait_until = obs.t + plan['wait_s']
         else:
@@ -865,6 +924,10 @@ class Agent:
             self._escape = None
             self._path_goal = None
             self._stuck = None
+        if self.aw is not None and self.aw.hold(obs):
+            self._waiting = True               # ожидание ответа модели: у него свой срок, сторожу простоя не подотчётно
+            self.mode = 'think'                # leash: до ответа модели дальше не еду и не собираю
+            return self._command(io, 0.0, 0.0)
         if self.inv and self.inv.act(obs, io):
             self._waiting = True
             return                             # такт занят опытом расследования

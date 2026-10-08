@@ -239,13 +239,15 @@ def find_query(messages):
 class MockResponder:
     """Ответчик для LocalClient и HTTP-сервера. Сбои выпадают по вероятностям, детерминированно по seed.
 
+    deviate — с такой вероятностью план называет другую достижимую цель, а не ту, что по правилу.
     faults — {имя из FAULTS: вероятность}; script — виды первых ответов по порядку, например
     ['http_500', 'ok'], потом снова работают вероятности. На запрос исправления (в переписке уже
     есть ответ модели) приходит корректный план: сбои содержимого на него не действуют.
     """
 
-    def __init__(self, seed=0, faults=None, script=None, temperament=None):
+    def __init__(self, seed=0, faults=None, script=None, temperament=None, deviate=0.0):
         self.faults = dict(faults or {})
+        self.deviate = float(deviate or 0.0)   # доля планов, где первая подцель — не та, что по правилу (R16)
         self.script = list(script or [])
         if temperament not in (None, *TEMPERAMENTS):
             raise ValueError(f"неизвестный характер «{temperament}»; есть: {', '.join(TEMPERAMENTS)}")
@@ -301,6 +303,12 @@ class MockResponder:
             plan = reply['plans'][0]
         else:
             reply = plan = temper_plan(data, self.temperament, self.rng)
+            if self.deviate and self.rng.random() < self.deviate:
+                # Другая достижимая цель вместо выбранной: так настоящая модель расходится с правилом.
+                others = [sg for sg in _targets(data) if sg != plan['subgoals'][0]]
+                if others:
+                    plan['subgoals'] = [self.rng.choice(others)]
+                    plan['reasoning'] = 'Беру другую достижимую цель, не ту, что по правилу.'
         if kind == 'invalid_target':
             plan['subgoals'][0] = {'type': 'investigate', 'target': 'C99'}
         elif kind == 'out_of_arena':
