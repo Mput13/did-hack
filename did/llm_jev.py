@@ -14,12 +14,21 @@ score (оценка по шкале). Текста модель не пишет.
      резервирует в журнале наибольшую возможную стоимость запроса (max_cost_usd); если «учтено + неизвестно +
      зарезервировано» с новым резервом превысило бы BUDGET_STOP_USD, запрос не отправляется. После ответа резерв
      заменяется стоимостью из ответа; попытка, которая могла дойти до сервера, а стоимости не сообщила (таймаут,
-     обрыв, ответ без поля cost), остаётся в журнале по оценке сверху в отдельном поле unknown_cost_usd;
+     обрыв, ответ без поля cost), остаётся в журнале по оценке сверху в отдельном поле unknown_cost_usd.
+     Журнал перед резервом проверяется по всей схеме (_check_journal): неполный, с неверным типом или
+     отрицательным числом — отказ до отправки. Ошибки файловой системы при работе с журналом — тоже ошибка
+     клиента (JevJournalError), а не сбой процесса.
+     ПОТОЛОК УСЛОВНЫЙ: он держится, пока цена ответа не больше резерва. Резерв — оценка сверху, а не обещание
+     сервера: ответ дороже резерва оплачен раньше, чем клиент об этом узнал. Такой ответ клиент не отдаёт
+     (JevCostOverrun) и останавливает работу отметкой halted, а между порогом остановки и потолком оставлен
+     запас, но денег это не возвращает. Строгий потолок даёт только предел оплаты на ключ у поставщика;
   3. в ответе проверяется, какая модель ответила; не Jev 1.13 — ошибка и отметка halted в журнале: все
      следующие обращения отвергаются, пока человек не разберётся;
-  4. ключ читается из файла только на время одного запроса; в объект клиента, кэш, журнал, записи прогонов и
-     сообщения об ошибках он не попадает. Ответ сервера (и успешный тоже) очищается от ключа, пока ключ ещё
-     доступен, и наружу отдаётся только проверенная схема: известные поля известных типов. Адрес сервера задан
+  4. ключ читается из файла только на время одного запроса и только после удачного резерва (запрос, которому
+     журнал отказал, ключа не читает); в объект клиента, кэш, журнал, записи прогонов и сообщения об ошибках он
+     не попадает. Ответ сервера (и успешный тоже) очищается от ключа, пока ключ ещё доступен, и наружу отдаётся
+     только проверенная схема: известные поля известных типов. Любое исключение транспорта заменяется ошибкой
+     клиента с вымаранным текстом и без цепочки исключений (__cause__ и __context__ пусты). Адрес сервера задан
      константой и из окружения не берётся.
 
 Ответы лежат в runs/_jev_cache/<хэш>.json (ключ — хэш от модели, состояния и вопросов). strict=True — режим
@@ -54,7 +63,10 @@ KEY_FILE_ENV = 'DID_JEV_KEY_FILE'
 KEY_NAME = 'OPENROUTER_API_KEY'
 PRICE_PER_TOKEN = 0.042e-6                         # доллара за входной токен; выходные бесплатны
 BUDGET_CAP_USD = 1.00                              # потолок владельца проекта
-BUDGET_STOP_USD = 0.95                             # «учтено + зарезервировано» выше этой суммы не поднимается
+# «Учтено + зарезервировано» выше этой суммы не поднимается. Запас до потолка — 0,40: резерв есть оценка сверху,
+# и ответ дороже резерва оплачивается раньше, чем клиент это увидит. На 3 963 записанных ответах настоящая цена
+# не превышала 14 % резерва; запас покрывает ошибку оценки, но не заменяет лимит на ключ у поставщика.
+BUDGET_STOP_USD = 0.60
 BUDGET_FILE_ENV = 'DID_JEV_BUDGET_FILE'
 BUDGET_DEFAULT = ('.did', 'jev_budget.json')       # относительно домашнего каталога
 CACHE_ONLY_ENV = 'DID_JEV_CACHE_ONLY'
@@ -65,10 +77,19 @@ RESERVE_PRICE_FACTOR = 2.0
 CACHE_DIR = ROOT / 'runs' / '_jev_cache'
 QUESTION_TYPES = ('noul', 'choice', 'score')
 IDENT_CHARS = frozenset('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/:-*')
+# Закрытый список причин отказа (JevError.code): по нему сторож пишет причину отключения, не трогая текст ошибки.
+REASON_CODES = ('network', 'timeout', 'server', 'budget', 'journal', 'wrong_model', 'bad_reply', 'key', 'other')
+JOURNAL_COUNTERS = ('calls', 'failed_calls', 'input_tokens', 'output_tokens', 'cost_from_response', 'unknown_attempts')
 
 
 class JevError(LLMError):
-    """Сбой обращения к Jev: сеть, сервер, формат ответа."""
+    """Сбой обращения к Jev: сеть, сервер, формат ответа. code — причина из REASON_CODES."""
+    code = 'other'
+
+    def __init__(self, message, attempts=0, code=None):
+        super().__init__(message, attempts)
+        if code is not None:
+            self.code = code
 
 
 class JevModelRefused(JevError):
@@ -77,10 +98,23 @@ class JevModelRefused(JevError):
 
 class JevBudgetExceeded(JevError):
     """Потолок расходов достигнут, журнала расходов нет или он остановлен отметкой halted: запрос не отправлен."""
+    code = 'budget'
+
+
+class JevJournalError(JevBudgetExceeded):
+    """Журнала расходов нет, он не по схеме или файловая система отказала. До резерва — запрос не отправлен;
+    после ответа — резерв остаётся в журнале (занятым), ответ наружу не отдаётся."""
+    code = 'journal'
+
+
+class JevCostOverrun(JevError):
+    """Ответ стоил больше резерва: он оплачен, но не возвращается; работа с платной моделью остановлена."""
+    code = 'budget'
 
 
 class JevWrongModel(JevError):
     """Ответила не Jev 1.13: работа с платной моделью остановлена."""
+    code = 'wrong_model'
 
 
 @dataclass
@@ -106,18 +140,21 @@ def budget_path():
 def _read_key(path):
     """Ключ из файла строк KEY=VALUE. Вызывается только на время одного запроса."""
     if not path:
-        raise JevError(f'ключ не задан: укажите путь к файлу с {KEY_NAME} в переменной {KEY_FILE_ENV}')
+        raise JevError(f'ключ не задан: укажите путь к файлу с {KEY_NAME} в переменной {KEY_FILE_ENV}', code='key')
+    lines = None
     try:
         lines = Path(path).read_text(encoding='utf-8-sig').splitlines()
-    except OSError:
-        raise JevError(f'файл с ключом, заданный в {KEY_FILE_ENV}, не читается') from None
+    except (OSError, ValueError):                      # ValueError — не UTF-8: в исключении лежит содержимое файла
+        pass
+    if lines is None:                                  # вне обработчика: исходное исключение в цепочку не попадает
+        raise JevError(f'файл с ключом, заданный в {KEY_FILE_ENV}, не читается', code='key')
     for line in lines:
         name, _, value = line.strip().partition('=')
         if name.strip().removeprefix('export ').strip() == KEY_NAME:
             value = value.strip().strip('"\'')
             if value:
                 return value
-    raise JevError(f'в файле, заданном в {KEY_FILE_ENV}, нет строки {KEY_NAME}=…')
+    raise JevError(f'в файле, заданном в {KEY_FILE_ENV}, нет строки {KEY_NAME}=…', code='key')
 
 
 def _scrub(text, key):
@@ -201,6 +238,29 @@ def max_cost_usd(body):
     return round((len(body) + RESERVE_OVERHEAD_TOKENS) * PRICE_PER_TOKEN * RESERVE_PRICE_FACTOR, 9)
 
 
+def _check_journal(d):
+    """Журнал по всей схеме, которой пользуется клиент: поля, типы, неотрицательные числа, модель, потолок."""
+    def whole(v):
+        return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+    if not isinstance(d, dict) or d.get('model') != MODEL:
+        return False
+    if not isinstance(d.get('initialized'), str) or not d['initialized']:
+        return False
+    cap, stop = _number(d.get('cap_usd'), 0.0, BUDGET_CAP_USD), _number(d.get('stop_usd'), 0.0, BUDGET_CAP_USD)
+    if cap is None or stop is None or cap <= 0 or stop > cap:
+        return False
+    if any(_number(d.get(k), 0.0) is None for k in ('cost_usd', 'unknown_cost_usd')):
+        return False
+    if not all(whole(d.get(k)) for k in JOURNAL_COUNTERS):
+        return False
+    if 'halted' not in d or not (d['halted'] is None or isinstance(d['halted'], str)):
+        return False
+    reserved = d.get('reserved')
+    return isinstance(reserved, dict) and all(
+        isinstance(rid, str) and isinstance(r, dict) and _number(r.get('usd'), 0.0) is not None
+        for rid, r in reserved.items())
+
+
 class Budget:
     """Журнал расходов на Jev: один файл на все рабочие деревья, процессы и потоки.
 
@@ -223,29 +283,26 @@ class Budget:
         return round(Budget.spent(d) + sum(float(r['usd']) for r in d['reserved'].values()), 9)
 
     def _not_initialized(self):
-        return JevBudgetExceeded(
+        return JevJournalError(
             f'журнала расходов на Jev нет ({self.path}): платный вызов запрещён. Журнал создаёт человек, называя уже '
             f'потраченную сумму: python -m did.llm_jev --init-budget --spent <долларов> --calls <обращений>')
 
     def _load(self):
-        """Журнал как словарь; None — файла нет. Нечитаемый или чужой файл — отказ: это не «нулевой расход»."""
+        """Журнал как словарь; None — файла нет. Нечитаемый, неполный или чужой файл — отказ: это не «нулевой
+        расход». Схема проверяется целиком здесь, то есть до резерва и до отправки."""
         try:
             raw = self.path.read_text(encoding='utf-8')
         except FileNotFoundError:
             return None
-        except OSError:
-            raise JevBudgetExceeded(f'журнал расходов {self.path} не читается: платный вызов запрещён') from None
+        except (OSError, ValueError):
+            raise JevJournalError(f'журнал расходов {self.path} не читается: платный вызов запрещён') from None
         try:
             d = json.loads(raw)
-            ok = (isinstance(d, dict) and d.get('model') == MODEL and d.get('initialized')
-                  and isinstance(d.get('reserved'), dict)
-                  and all(_number(d.get(k), 0) is not None for k in ('cost_usd', 'unknown_cost_usd'))
-                  and all(_number(r.get('usd'), 0) is not None for r in d['reserved'].values()))
-        except (ValueError, AttributeError):
-            ok = False
-        if not ok:
-            raise JevBudgetExceeded(f'журнал расходов {self.path} пуст или испорчен: платный вызов запрещён, '
-                                    f'исправьте файл вручную')
+        except (ValueError, RecursionError):
+            d = None
+        if not _check_journal(d):
+            raise JevJournalError(f'журнал расходов {self.path} пуст, неполон или испорчен: платный вызов '
+                                  f'запрещён, исправьте файл вручную')
         return d
 
     def _write(self, d):
@@ -272,18 +329,24 @@ class Budget:
         return fd
 
     def _update(self, change):
-        if not self.path.is_file():
-            raise self._not_initialized()              # ни каталога, ни файла блокировки не создаём
-        fd = self._lock()
+        """Изменить журнал под блокировкой. Отказ файловой системы (нет прав, диск, блокировка) — JevJournalError:
+        журнал при этом остаётся прежним, то есть несостоявшийся резерв не занят, а неснятый — занят."""
         try:
-            d = self._load()
-            if d is None:
-                raise self._not_initialized()
-            out = change(d)
-            self._write(d)
-            return out
-        finally:
-            os.close(fd)
+            if not self.path.is_file():
+                raise self._not_initialized()          # ни каталога, ни файла блокировки не создаём
+            fd = self._lock()
+            try:
+                d = self._load()
+                if d is None:
+                    raise self._not_initialized()
+                out = change(d)
+                self._write(d)
+                return out
+            finally:
+                os.close(fd)
+        except OSError as e:
+            failed = type(e).__name__
+        raise JevJournalError(f'журнал расходов {self.path} недоступен ({failed}): платный вызов запрещён')
 
     def read(self):
         """Журнал (словарь) или None, если его нет. Ничего не пишет."""
@@ -294,12 +357,14 @@ class Budget:
         spent_usd = _number(spent_usd, 0.0)
         if spent_usd is None:
             raise ValueError('уже потраченная сумма должна быть неотрицательным числом')
+        if min(int(calls), int(input_tokens), int(output_tokens), int(failed_calls)) < 0:
+            raise ValueError('счётчики обращений и токенов должны быть неотрицательными')
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd = self._lock()
         try:
             if self.path.exists():
                 raise FileExistsError(f'журнал расходов {self.path} уже есть; обнулять или пересоздавать его нельзя')
-            d = {'model': MODEL, 'cap_usd': BUDGET_CAP_USD, 'stop_usd': BUDGET_STOP_USD,
+            d = {'model': MODEL, 'cap_usd': BUDGET_CAP_USD, 'stop_usd': min(BUDGET_STOP_USD, BUDGET_CAP_USD),
                  'initialized': time.strftime('%Y-%m-%dT%H:%M:%S'),
                  'carried': {'cost_usd': spent_usd, 'calls': int(calls)},      # перенесено из прежнего учёта
                  'calls': int(calls), 'failed_calls': int(failed_calls), 'input_tokens': int(input_tokens),
@@ -322,10 +387,11 @@ class Budget:
             if d.get('halted'):
                 raise JevBudgetExceeded(f"работа с Jev остановлена: {d['halted']}")
             busy = self.committed(d)
-            if busy + max_usd > self.stop_usd + 1e-12:
+            allowed = min(self.stop_usd, float(d['stop_usd']))     # порог из журнала тоже обязателен
+            if busy + max_usd > allowed + 1e-12:
                 raise JevBudgetExceeded(f'потолок расходов на Jev: занято {busy:.6f} долл. (потрачено '
                                         f'{self.spent(d):.6f}), запрос может стоить до {max_usd:.6f}, разрешено '
-                                        f'{self.stop_usd:.2f}')
+                                        f'{allowed:.2f}')
             rid = uuid.uuid4().hex
             d['reserved'][rid] = {'usd': round(max_usd, 9), 'pid': os.getpid(), 'at': time.strftime('%Y-%m-%dT%H:%M:%S')}
             return rid
@@ -341,6 +407,10 @@ class Budget:
         cost — стоимость из ответа; None — стоимость неизвестна: в unknown_cost_usd остаётся оценка сверху
         (сам резерв). Стоимость выше резерва означает, что оценка сверху неверна: работа останавливается.
         """
+        return self._settle(rid, input_tokens, output_tokens, cost, failed)[0]
+
+    def _settle(self, rid, input_tokens=0, output_tokens=0, cost=None, failed=False):
+        """(записанная сумма, стоимость оказалась выше резерва)."""
         def done(d):
             reserved = float((d['reserved'].pop(rid, None) or {'usd': 0.0})['usd'])
             d['calls'] += 1
@@ -350,12 +420,13 @@ class Budget:
             if cost is None:
                 d['unknown_attempts'] += 1
                 d['unknown_cost_usd'] = round(float(d['unknown_cost_usd']) + reserved, 9)
-                return reserved
+                return reserved, False
             d['cost_from_response'] += 1
             d['cost_usd'] = round(float(d['cost_usd']) + float(cost), 9)
-            if float(cost) > reserved + 1e-12 and not d.get('halted'):
+            over = float(cost) > reserved + 1e-12
+            if over and not d.get('halted'):
                 d['halted'] = 'стоимость ответа выше оценки сверху: проверьте цену модели и RESERVE_* в did/llm_jev.py'
-            return float(cost)
+            return float(cost), over
         return self._update(done)
 
     def halt(self, reason):
@@ -448,7 +519,7 @@ class JevClient:
             self.budget.halt(reason)
             raise JevWrongModel(reason + '; работа с Jev остановлена')
         if data['answers'] is None:
-            raise JevError('ответ Jev не по схеме: нет ответов на все вопросы или типы полей не те')
+            raise JevError('ответ Jev не по схеме: нет ответов на все вопросы или типы полей не те', code='bad_reply')
         usage = {'input_tokens': data['input_tokens'] or len(body) // 2,     # нет счётчика — оценка с запасом
                  'output_tokens': data['output_tokens']}
         self._cache_put(key, {'model': model, 'answered_by': data['model'], 'created': time.strftime('%Y-%m-%dT%H:%M:%S'),
@@ -464,29 +535,58 @@ class JevClient:
         сначала резервирует в журнале свою наибольшую стоимость, а после — заменяет резерв итогом: связь не
         установилась или сервер отказал (4xx) — денег не стоило; ответ со стоимостью — стоимость из ответа;
         всё остальное (таймаут чтения, обрыв, 5xx, ответ без стоимости) — оценка сверху.
+
+        Ключ читается после первого удачного резерва: запрос, которому журнал отказал, ключа не трогает; ключ не
+        прочитался — резерв снимается. Исключение транспорта (любое, кроме прерывания процесса) наружу не
+        выходит: в обработчике из него берётся только вымаранный текст, а учёт в журнале и ошибка клиента — уже
+        после обработчика, чтобы исходное исключение (в нём может быть заголовок с ключом) не осталось ни в
+        __cause__, ни в __context__.
         """
         if self.strict:
             raise CacheMiss('только кэш: сеть не трогаю')
         limit = max_cost_usd(body)
-        key = _read_key(self.key_file)
-        headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
-        spent_ms, failures, last = 0.0, 0, ''
+        key = headers = r = None
+        spent_ms, failures, last, code = 0.0, 0, '', 'other'
         try:
             while True:
                 pause = min(0.5 * 2 ** failures, 8.0)
                 rid = self.budget.reserve(limit)                   # JevBudgetExceeded — попытка не отправляется
+                if key is None:
+                    failed = None
+                    try:
+                        key = _read_key(self.key_file)
+                    except JevError as e:
+                        failed = e
+                    if failed is not None:
+                        self.budget.release(rid)                   # ключа нет: отправки не будет
+                        raise failed
+                    headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
                 t0 = time.monotonic()
+                r, outcome, fatal = None, None, None
                 try:
                     r = self._http.post(ENDPOINT, content=body, headers=headers)
                 except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-                    self.budget.release(rid)                       # связь не установилась: запрос не дошёл
+                    outcome, code = 'not_sent', 'network'          # связь не установилась: запрос не дошёл
                     last = _short(f'{type(e).__name__}: {e}', key)
                 except httpx.HTTPError as e:
-                    self.budget.settle(rid, failed=True)           # мог дойти: стоимость неизвестна
+                    outcome = 'unknown'                            # мог дойти: стоимость неизвестна
+                    code = 'timeout' if isinstance(e, httpx.TimeoutException) else 'network'
                     last = _short(f'{type(e).__name__}: {e}', key)
-                except BaseException:
-                    self.budget.settle(rid, failed=True)
+                except Exception as e:                             # транспорт бросил что-то своё: не повторяем
+                    outcome = 'unknown'
+                    fatal = 'сбой транспорта: ' + _short(f'{type(e).__name__}: {e}', key)
+                except BaseException:                              # прерывание процесса не перехватывается
+                    try:
+                        self.budget.settle(rid, failed=True)
+                    except JevError:
+                        pass                                       # резерв остался в журнале занятым
                     raise
+                if outcome == 'not_sent':
+                    self.budget.release(rid)
+                elif outcome == 'unknown':
+                    self.budget.settle(rid, failed=True)
+                    if fatal:
+                        raise JevError(fatal, code='other')
                 else:
                     spent_ms += (time.monotonic() - t0) * 1000
                     if 200 <= r.status_code < 300:
@@ -496,30 +596,37 @@ class JevClient:
                             data = None
                         if isinstance(data, dict):
                             data = _clean_response(data, questions, key)
-                            spent = self.budget.settle(rid, data['input_tokens'] or len(body) // 2,
-                                                       data['output_tokens'], data['cost'])
+                            spent, over = self.budget._settle(rid, data['input_tokens'] or len(body) // 2,
+                                                              data['output_tokens'], data['cost'])
+                            if over:
+                                # Деньги уже списаны и записаны; ответом, цена которого вышла за оценку сверху,
+                                # пользоваться нельзя, а остановка должна быть видна сразу.
+                                raise JevCostOverrun(f'ответ Jev стоил {spent:.6f} долл. — больше резерва '
+                                                     f'{limit:.6f}: ответ отброшен, работа с Jev остановлена')
                             return data, int(round(spent_ms)), spent
                         self.budget.settle(rid, failed=True)
-                        last = 'ответ не JSON-объект'
+                        last, code = 'ответ не JSON-объект', 'bad_reply'
                     elif r.status_code == 408 or r.status_code >= 500:
                         self.budget.settle(rid, failed=True)
-                        last = f'HTTP {r.status_code}: ' + _short(r.text, key)
+                        last, code = f'HTTP {r.status_code}: ' + _short(r.text, key), 'server'
                     else:
                         self.budget.settle(rid, cost=0.0, failed=True)     # сервер отказал: не оплачивается
-                        last = f'HTTP {r.status_code}: ' + _short(r.text, key)
+                        last, code = f'HTTP {r.status_code}: ' + _short(r.text, key), 'server'
                         if r.status_code != 429:
-                            raise JevError(last)
+                            raise JevError(last, code=code)
                     try:
                         pause = max(pause, min(float(r.headers.get('retry-after', 0)), 8.0))
                     except ValueError:
                         pass
                 failures += 1
                 if failures > self.max_retries:
-                    raise JevError(f'Jev не ответил за {failures} попыток: {last}')
+                    raise JevError(f'Jev не ответил за {failures} попыток: {last}', code=code)
                 time.sleep(pause)
                 spent_ms += pause * 1000
         finally:
-            del key, headers
+            # В кадре не остаётся ни ключа, ни ответа с запросом (в заголовках запроса — ключ): кадр виден из
+            # traceback любого исключения, вышедшего отсюда.
+            del key, headers, r
 
 
 def main(argv=None):

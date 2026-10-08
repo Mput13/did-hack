@@ -5,21 +5,23 @@
 import importlib.util
 import json
 import os
-import re
 import stat
 import subprocess
 import sys
 import threading
+import traceback
 from pathlib import Path
 
 import httpx
 import pytest
 
 import did.llm_jev as llm_jev
+import did.runner as runner
 from did.llm import CacheMiss
-from did.llm_jev import (BUDGET_STOP_USD, CACHE_ONLY_ENV, ENDPOINT, MODEL, Budget, JevBudgetExceeded, JevClient,
-                         JevError, JevModelRefused, JevReply, JevWrongModel, max_cost_usd)
-from did.mission_guard import GuardedPlanner, build_request, make_guarded
+from did.llm_jev import (BUDGET_CAP_USD, BUDGET_STOP_USD, CACHE_ONLY_ENV, ENDPOINT, MODEL, REASON_CODES, Budget,
+                         JevBudgetExceeded, JevClient, JevCostOverrun, JevError, JevJournalError, JevModelRefused,
+                         JevReply, JevWrongModel, max_cost_usd)
+from did.mission_guard import DISABLE_REASONS, GuardedPlanner, build_request, make_guarded
 from did.runner import run_episode
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -159,27 +161,33 @@ def test_init_command_carries_over_spent_money_and_never_resets_the_journal(tmp_
 
 
 def test_reservation_keeps_spent_plus_reserved_under_the_cap(tmp_path, monkeypatch):
-    monkeypatch.setattr(llm_jev, 'max_cost_usd', lambda body: 0.3)
-    client, seen = _client(tmp_path, _ok(cost=0.25))
+    assert BUDGET_STOP_USD == 0.60 and BUDGET_CAP_USD - BUDGET_STOP_USD == pytest.approx(0.40)   # запас до потолка
+    monkeypatch.setattr(llm_jev, 'max_cost_usd', lambda body: 0.2)
+    client, seen = _client(tmp_path, _ok(cost=0.15))
     for state in ('s1', 's2', 's3'):
         client.ask(state, Q)
     b = client.budget.read()
-    assert Budget.spent(b) == pytest.approx(0.75) and b['reserved'] == {} and b['calls'] == 3
-    with pytest.raises(JevBudgetExceeded):                        # 0,75 + 0,30 > 0,95: запрос не отправлен
+    assert Budget.spent(b) == pytest.approx(0.45) and b['reserved'] == {} and b['calls'] == 3
+    with pytest.raises(JevBudgetExceeded):                        # 0,45 + 0,20 > 0,60: запрос не отправлен
         client.ask('s4', Q)
-    assert len(seen) == 3 and Budget.committed(client.budget.read()) == pytest.approx(0.75)
+    assert len(seen) == 3 and Budget.committed(client.budget.read()) == pytest.approx(0.45)
     assert client.ask('s1', Q).cached and len(seen) == 3          # кэш отдаёт и после потолка, денег не тратит
-    # Случай из ревью: потрачено 0,949, запрос может стоить 0,04 — раньше проходил, теперь нет.
-    near, seen2 = _client(tmp_path / 'near', _ok(cost=0.04), budget=_budget(tmp_path / 'near', spent=0.949))
+    # Случай из ревью: до порога остаётся 0,001, запрос может стоить 0,04 — раньше проходил, теперь нет.
+    near, seen2 = _client(tmp_path / 'near', _ok(cost=0.04), budget=_budget(tmp_path / 'near', spent=0.599))
     monkeypatch.setattr(llm_jev, 'max_cost_usd', lambda body: 0.04)
     with pytest.raises(JevBudgetExceeded):
         near.ask('s', Q)
-    assert seen2 == [] and Budget.spent(near.budget.read()) == 0.949
+    assert seen2 == [] and Budget.spent(near.budget.read()) == 0.599
+    # Порог, записанный в журнале, обязателен и для клиента, которому в коде задали порог выше.
+    loose, seen3 = _client(tmp_path / 'near', _ok(cost=0.04), budget=Budget(near.budget.path, stop_usd=1.0))
+    with pytest.raises(JevBudgetExceeded):
+        loose.ask('s', Q)
+    assert seen3 == []
 
 
 def test_concurrent_clients_cannot_both_take_the_last_money(tmp_path, monkeypatch):
     monkeypatch.setattr(llm_jev, 'max_cost_usd', lambda body: 0.04)
-    budget = _budget(tmp_path, spent=0.90)
+    budget = _budget(tmp_path, spent=0.55)
     in_flight = []
 
     def slow(request):
@@ -201,13 +209,13 @@ def test_concurrent_clients_cannot_both_take_the_last_money(tmp_path, monkeypatc
     for t in threads:
         t.join()
     assert sorted(outcomes) == ['ok', 'refused', 'refused', 'refused']
-    assert sum(len(seen) for _, seen in clients) == 1 and in_flight == [pytest.approx(0.94)]
+    assert sum(len(seen) for _, seen in clients) == 1 and in_flight == [pytest.approx(0.59)]
     b = budget.read()
-    assert Budget.spent(b) == pytest.approx(0.94) and Budget.spent(b) <= BUDGET_STOP_USD and b['reserved'] == {}
+    assert Budget.spent(b) == pytest.approx(0.59) and Budget.spent(b) <= BUDGET_STOP_USD and b['reserved'] == {}
 
 
 def test_separate_processes_share_one_journal_and_stop_at_the_cap(tmp_path):
-    budget = _budget(tmp_path, spent=0.5)
+    budget = _budget(tmp_path, spent=0.15)
     code = ('import sys\nfrom did.llm_jev import Budget, JevBudgetExceeded\nb = Budget(sys.argv[1])\nn = 0\n'
             'for _ in range(30):\n    try:\n        b.settle(b.reserve(0.01), cost=0.01)\n        n += 1\n'
             '    except JevBudgetExceeded:\n        pass\nprint(n)')
@@ -215,9 +223,9 @@ def test_separate_processes_share_one_journal_and_stop_at_the_cap(tmp_path):
     procs = [subprocess.Popen([sys.executable, '-c', code, str(budget.path)], cwd=ROOT, env=env, text=True,
                               stdout=subprocess.PIPE) for _ in range(2)]
     done = [int(p.communicate(timeout=120)[0]) for p in procs]
-    assert sum(done) == 45                                        # 0,5 + 45 × 0,01 = 0,95 и ни запросом больше
+    assert sum(done) == 45                                        # 0,15 + 45 × 0,01 = 0,60 и ни запросом больше
     b = budget.read()
-    assert Budget.spent(b) == pytest.approx(0.95) and b['calls'] == 45 and b['reserved'] == {}
+    assert Budget.spent(b) == pytest.approx(0.60) and b['calls'] == 45 and b['reserved'] == {}
 
 
 def test_every_possibly_delivered_attempt_is_counted_even_before_a_success(tmp_path):
@@ -270,14 +278,32 @@ def test_unknown_cost_is_kept_apart_and_counted_by_the_upper_bound(tmp_path):
     assert client.budget.read()['unknown_attempts'] == 5
 
 
-def test_cost_above_the_reservation_is_recorded_and_stops_the_work(tmp_path):
+def test_cost_above_the_reservation_is_recorded_stops_the_work_and_is_never_returned(tmp_path):
     client, seen = _client(tmp_path, _ok(cost=0.4))               # сервер насчитал больше оценки сверху
-    assert client.ask('s1', Q).cost_usd == pytest.approx(0.4)
+    with pytest.raises(JevCostOverrun) as err:                    # ответ оплачен, но как успех не возвращается
+        client.ask('s1', Q)
+    assert err.value.code == 'budget' and not isinstance(err.value, JevBudgetExceeded)
     b = client.budget.read()
     assert b['cost_usd'] == pytest.approx(0.4) and 'оценки сверху' in b['halted']
-    with pytest.raises(JevBudgetExceeded):
-        client.ask('s2', Q)
+    assert b['calls'] == 1 and b['cost_from_response'] == 1 and b['reserved'] == {}      # деньги учтены
+    assert not list((tmp_path / 'cache').glob('*.json'))          # и в кэш такой ответ не попал
+    for state in ('s2', 's1'):                                    # дальше — отказ без сети, в том числе на тот же вопрос
+        with pytest.raises(JevBudgetExceeded):
+            client.ask(state, Q)
     assert len(seen) == 1
+    # Случай из ревью: журнал у самого порога, обычный небольшой запрос, сервер насчитал 0,06.
+    near, seen2 = _client(tmp_path / 'near', _ok(cost=0.06),
+                          budget=_budget(tmp_path / 'near', spent=round(BUDGET_STOP_USD - 0.001, 9)))
+    assert max_cost_usd(_body('s')) < 0.001
+    with pytest.raises(JevCostOverrun):
+        near.ask('s', Q)
+    b = near.budget.read()
+    assert len(seen2) == 1 and b['halted'] and not list((tmp_path / 'near' / 'cache').glob('*.json'))
+    assert Budget.spent(b) == pytest.approx(BUDGET_STOP_USD + 0.059) and Budget.spent(b) < BUDGET_CAP_USD
+    # На показе сторож от такого ответа отключается, а не пользуется им.
+    shown, _ = _client(tmp_path / 'показ', _ok(cost=0.4), budget=_budget(tmp_path / 'показ'))
+    guard = GuardedPlanner(shown, fallback=True)
+    assert guard.plan(_state())['guard']['reason'] == 'budget' and guard.calls == 0
 
 
 def test_journal_is_replaced_atomically_and_reading_never_writes(tmp_path, monkeypatch):
@@ -289,10 +315,10 @@ def test_journal_is_replaced_atomically_and_reading_never_writes(tmp_path, monke
 
     def crash(src, dst):
         raise OSError('диск отвалился посреди записи')
-    monkeypatch.setattr(llm_jev.os, 'replace', crash)
-    with pytest.raises(OSError):
-        budget.reserve(0.01)
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(llm_jev.os, 'replace', crash)
+        with pytest.raises(JevJournalError):
+            budget.reserve(0.01)
     assert budget.path.read_bytes() == before                     # прежний журнал цел, счёт не потерян
     assert sorted(p.name for p in budget.path.parent.iterdir()) == ['jev_budget.json', 'jev_budget.json.lock']
     assert Budget.spent(budget.read()) == pytest.approx(0.304)
@@ -391,6 +417,277 @@ def test_only_the_checked_schema_leaves_the_client(tmp_path):
     assert SECRET not in _all_files(tmp_path)
 
 
+# --- третья правка по ревью: схема журнала, порядок чтения ключа, исключения транспорта ---------
+
+JOURNAL_FIELDS = ('model', 'cap_usd', 'stop_usd', 'initialized', 'calls', 'failed_calls', 'input_tokens',
+                  'output_tokens', 'cost_usd', 'cost_from_response', 'unknown_cost_usd', 'unknown_attempts',
+                  'reserved', 'halted')
+JOURNAL_DAMAGE = (
+    [(f'нет поля {k}', lambda d, k=k: d.pop(k)) for k in JOURNAL_FIELDS]
+    + [(f'{k} = {v!r}', lambda d, k=k, v=v: d.update({k: v})) for k, v in [
+        # неверный тип
+        ('calls', '3'), ('calls', 1.5), ('calls', True), ('calls', None), ('failed_calls', []),
+        ('input_tokens', '0'), ('cost_from_response', 0.5), ('unknown_attempts', {}), ('cost_usd', None),
+        ('cost_usd', True), ('unknown_cost_usd', '0'), ('reserved', []), ('reserved', None),
+        ('reserved', {'a': 5}), ('reserved', {'a': {'usd': '0.01'}}), ('reserved', {'a': {}}), ('halted', 0),
+        ('halted', False), ('initialized', None), ('initialized', ''), ('initialized', True), ('model', None),
+        ('cap_usd', '1'), ('stop_usd', None),
+        # отрицательное значение
+        ('calls', -1), ('failed_calls', -1), ('input_tokens', -5), ('output_tokens', -1),
+        ('cost_from_response', -1), ('unknown_attempts', -2), ('cost_usd', -0.1), ('unknown_cost_usd', -0.001),
+        ('reserved', {'a': {'usd': -0.01}}), ('stop_usd', -0.1), ('cap_usd', -1.0),
+        # не число, чужая модель, потолок выше разрешённого или порог выше потолка
+        ('cost_usd', float('nan')), ('unknown_cost_usd', float('inf')), ('model', 'typesafe/jev-router'),
+        ('cap_usd', 2.0), ('cap_usd', 0), ('stop_usd', 1.5)]]
+    + [('порог выше потолка', lambda d: d.update(cap_usd=0.5, stop_usd=0.6))])
+JOURNAL_TEXT = [('пустой файл', lambda text: ''), ('пробелы', lambda text: ' \n'),
+                ('усечённый JSON', lambda text: text[:len(text) // 2]),
+                ('без последней скобки', lambda text: text.rstrip()[:-1]),
+                ('список', lambda text: '[' + text + ']'), ('null', lambda text: 'null'),
+                ('не UTF-8', lambda text: None)]
+
+
+@pytest.fixture
+def key_reads(monkeypatch):
+    """Сколько раз клиент читал файл с ключом."""
+    reads, real = [], llm_jev._read_key
+    monkeypatch.setattr(llm_jev, '_read_key', lambda path: reads.append(path) or real(path))
+    return reads
+
+
+@pytest.mark.parametrize('damage', [d for _, d in JOURNAL_DAMAGE], ids=[n for n, _ in JOURNAL_DAMAGE])
+def test_incomplete_or_wrong_journal_forbids_sending(tmp_path, monkeypatch, key_reads, damage):
+    client, seen = _client(tmp_path, _ok())
+    d = json.loads(client.budget.path.read_text(encoding='utf-8'))
+    damage(d)
+    text = json.dumps(d)
+    client.budget.path.write_text(text, encoding='utf-8')
+    with pytest.raises(JevBudgetExceeded) as err:                 # отказ до резерва и до отправки
+        client.ask('state', Q)
+    assert isinstance(err.value, JevJournalError) and err.value.code == 'journal'
+    assert seen == [] and key_reads == []                         # ни запроса, ни чтения ключа
+    assert client.budget.path.read_text(encoding='utf-8') == text  # негодный журнал клиент не «чинит»
+    with pytest.raises(JevJournalError):
+        client.budget.read()
+    for call in (lambda: client.budget.settle('нет', cost=0.01), lambda: client.budget.release('нет'),
+                 lambda: client.budget.halt('стоп')):
+        with pytest.raises(JevJournalError):                      # KeyError и подобное наружу не выходят
+            call()
+    monkeypatch.setenv(llm_jev.BUDGET_FILE_ENV, str(client.budget.path))
+    assert llm_jev.main([]) == 2                                  # и просмотр журнала отвечает отказом
+
+
+@pytest.mark.parametrize('spoil', [f for _, f in JOURNAL_TEXT], ids=[n for n, _ in JOURNAL_TEXT])
+def test_empty_or_truncated_journal_forbids_sending(tmp_path, key_reads, spoil):
+    client, seen = _client(tmp_path, _ok())
+    raw = spoil(client.budget.path.read_text(encoding='utf-8'))
+    raw = b'\xff\xfe{' if raw is None else raw.encode('utf-8')
+    client.budget.path.write_bytes(raw)
+    with pytest.raises(JevJournalError):
+        client.ask('state', Q)
+    assert seen == [] and key_reads == [] and client.budget.path.read_bytes() == raw
+
+
+def test_complete_journal_is_accepted_and_unused_fields_are_not_required(tmp_path, key_reads):
+    client, seen = _client(tmp_path, _ok())
+    d = json.loads(client.budget.path.read_text(encoding='utf-8'))
+    assert set(JOURNAL_FIELDS) <= set(d)                          # журнал, созданный командой, схему проходит
+    for unused in ('carried', 'updated'):                         # проверяется то, чем клиент пользуется
+        d.pop(unused, None)
+    client.budget.path.write_text(json.dumps(d), encoding='utf-8')
+    assert client.ask('state', Q).answers['q']['noul'] == 0.9
+    assert len(seen) == 1 and len(key_reads) == 1 and client.budget.read()['calls'] == 1
+    with pytest.raises(ValueError):                               # журнал с отрицательным счётчиком не создаётся
+        Budget(tmp_path / 'другой' / 'b.json').init(0.0, calls=-1)
+
+
+def test_key_file_is_read_only_after_a_successful_reservation(tmp_path, key_reads):
+    limit = max_cost_usd(_body('state'))
+    forbidden = {'исчерпан': _budget(tmp_path / 'a', spent=BUDGET_STOP_USD),
+                 'не хватает на запрос': _budget(tmp_path / 'b', spent=round(BUDGET_STOP_USD - limit / 2, 9)),
+                 'отсутствует': Budget(tmp_path / 'c' / 'budget' / 'jev_budget.json'),
+                 'остановлен': _budget(tmp_path / 'd')}
+    forbidden['остановлен'].halt('остановлено человеком')
+    for name, budget in forbidden.items():
+        client, seen = _client(tmp_path / name, _ok(), budget=budget, max_retries=3)
+        with pytest.raises(JevBudgetExceeded):
+            client.ask('state', Q)
+        assert seen == [] and key_reads == [], name               # файл ключа не прочитан ни разу
+    # Разрешённый запрос читает ключ один раз, сколько бы ни было повторов.
+    client, seen = _client(tmp_path / 'ok', _script(httpx.ReadTimeout('поздно'), 503, 'ok'),
+                           budget=_budget(tmp_path / 'ok'), max_retries=2)
+    client.ask('state', Q)
+    assert len(seen) == 3 and len(key_reads) == 1
+    # Ключ не прочитался: резерв снят до отправки, попытка не учтена, запрос не ушёл.
+    for i, make in enumerate((lambda p: p.unlink(), lambda p: p.write_text('OTHER=1\n', encoding='utf-8'),
+                              lambda p: p.write_bytes(b'\xff\xfe' + f'OPENROUTER_API_KEY={SECRET}'.encode()))):
+        root = tmp_path / f'key{i}'
+        client, seen = _client(root, _ok(), budget=_budget(root))
+        make(root / 'key.env')
+        before = client.budget.read()
+        with pytest.raises(JevError) as err:
+            client.ask('state', Q)
+        after = client.budget.read()
+        assert err.value.code == 'key' and seen == [] and after['reserved'] == {} and after['calls'] == 0
+        assert Budget.committed(after) == Budget.committed(before) == 0
+        assert err.value.__cause__ is None and err.value.__context__ is None
+        assert SECRET not in ''.join(traceback.format_exception(err.value))
+    client.key_file = None
+    with pytest.raises(JevError, match='ключ не задан'):
+        client.ask('state', Q)
+    assert client.budget.read()['reserved'] == {}
+
+
+class OddTransportError(Exception):
+    pass
+
+
+LEAKS = {'JevError': lambda auth: JevError('transport ' + auth),
+         'Exception': lambda auth: OddTransportError(f'headers were {auth!r}', {'authorization': auth}),
+         'RuntimeError': lambda auth: RuntimeError('x' * 190 + auth),            # ключ на границе обрезки
+         'ReadError': lambda auth: httpx.ReadError('reset while sending ' + auth),
+         'ReadTimeout': lambda auth: httpx.ReadTimeout('timeout, ' + auth),
+         'ConnectError': lambda auth: httpx.ConnectError('no route with ' + auth),
+         'LLMError': lambda auth: llm_jev.LLMError(auth, attempts=3)}
+
+
+def _leaking(kind):
+    def transport(request):
+        raise LEAKS[kind](request.headers['authorization'])
+    return transport
+
+
+def _no_key_in_exception(error):
+    """Ни в тексте, ни в цепочке исключений, ни в кадрах клиента ключа нет."""
+    assert error.__cause__ is None and error.__context__ is None
+    shown = ''.join(traceback.format_exception(error)) + repr(error) + repr(error.args) + repr(vars(error))
+    assert SECRET not in shown and SECRET[:8] not in shown
+    frames = [f for f, _ in traceback.walk_tb(error.__traceback__) if f.f_code.co_filename == llm_jev.__file__]
+    assert any(f.f_code.co_name == '_send' for f in frames)
+    for frame in frames:
+        if frame.f_code.co_name == '_send':
+            assert not {'key', 'headers', 'r', 'e'} & set(frame.f_locals)
+        assert SECRET not in repr(frame.f_locals)
+
+
+@pytest.mark.parametrize('kind', list(LEAKS))
+def test_transport_exception_cannot_carry_the_key_out(tmp_path, kind):
+    client, seen = _client(tmp_path, _leaking(kind), max_retries=1)
+    with pytest.raises(JevError) as err:
+        client.ask('state', Q)
+    assert type(err.value) is JevError and err.value.code in REASON_CODES
+    assert SECRET in seen[0].headers['authorization']             # ключ у транспорта был — и наружу не вышел
+    _no_key_in_exception(err.value)
+    b = client.budget.read()
+    assert b['reserved'] == {} and SECRET not in _all_files(tmp_path)      # журнал расходов и кэш
+    if kind == 'ConnectError':
+        assert len(seen) == 2 and b['calls'] == 0 and err.value.code == 'network'      # не дошёл: денег не стоило
+    elif kind in ('ReadError', 'ReadTimeout'):
+        assert len(seen) == 2 and b['unknown_attempts'] == 2      # сбой связи повторяется, каждая попытка учтена
+        assert err.value.code == ('timeout' if kind == 'ReadTimeout' else 'network')
+    else:
+        assert len(seen) == 1 and b['unknown_attempts'] == 1      # чужое исключение не повторяется, но учтено
+        assert err.value.code == 'other' and ('***' in str(err.value) or kind == 'RuntimeError')   # там метка за обрезкой
+    assert not list((tmp_path / 'cache').glob('*.json'))
+
+
+def test_error_reply_leaves_no_key_in_the_frames_of_the_client(tmp_path):
+    client, _ = _client(tmp_path, lambda request: httpx.Response(403, text=request.headers['authorization']))
+    with pytest.raises(JevError) as err:
+        client.ask('state', Q)
+    assert err.value.code == 'server'
+    _no_key_in_exception(err.value)
+
+
+@pytest.mark.parametrize('stop', [KeyboardInterrupt, SystemExit])
+def test_process_interruption_is_not_swallowed_but_the_attempt_is_counted(tmp_path, stop):
+    def interrupted(request):
+        raise stop()
+    client, seen = _client(tmp_path, interrupted, max_retries=3)
+    with pytest.raises(stop):
+        client.ask('state', Q)
+    b = client.budget.read()
+    assert len(seen) == 1 and b['unknown_attempts'] == 1 and b['reserved'] == {}
+    assert b['unknown_cost_usd'] == pytest.approx(max_cost_usd(_body('state')))
+
+
+def test_leaking_transport_leaves_no_key_in_decisions_run_record_or_journal(tmp_path, monkeypatch, capsys):
+    for kind in LEAKS:
+        client, seen = _client(tmp_path / kind, _leaking(kind), budget=_budget(tmp_path / kind))
+        guard = GuardedPlanner(client, fallback=True)
+        plan = guard.plan(_state())
+        code = plan['guard']['reason']
+        assert seen and code in DISABLE_REASONS and plan['guard']['disabled'] == f'{code}: {DISABLE_REASONS[code]}'
+        assert SECRET not in json.dumps(plan, ensure_ascii=False) and '***' not in plan['reasoning'], kind
+        assert kind not in plan['reasoning'] and 'transport' not in plan['reasoning']   # текста исключения нет вовсе
+    # Прогон целиком на показе: запись прогона (всё, что собрал регистратор) и сводка — без ключа.
+    records = []
+
+    class Keeping(runner.Recorder):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            records.append(self)
+    monkeypatch.setattr(runner, 'Recorder', Keeping)
+    client, seen = _client(tmp_path / 'показ', _leaking('JevError'), budget=_budget(tmp_path / 'показ'))
+    res = run_episode('medium', 3, 'adaptive', save=False, config={'mission_guard': 'jev'}, llm={'jev': {'client': client}})
+    record = json.dumps(vars(records[-1]), ensure_ascii=False, default=repr)
+    assert len(seen) == 1 and res['metrics']['returned'] and '"decision": "disabled"' in record
+    assert SECRET not in record and SECRET not in json.dumps(res, ensure_ascii=False, default=repr)
+    # Исследовательский прогон: обработчик печатает исключение и traceback — ключа нет и там.
+    mod = _jev_eval()
+    monkeypatch.setattr(mod, 'run_episode', lambda *a, **k: run_episode(*a, **{**k, 'save': False}))
+    client, seen = _client(tmp_path / 'серия', _leaking('JevError'), budget=_budget(tmp_path / 'серия'))
+    assert mod.run_single(('M1', 'jev', 'medium', 3), '_j1b_test', False, client) is None
+    printed = capsys.readouterr()
+    assert len(seen) == 1 and 'ОШИБКА: JevError' in printed.err and 'Traceback' in printed.err
+    assert SECRET not in printed.err + printed.out
+    assert SECRET not in _all_files(tmp_path)                     # журналы расходов и кэши всех клиентов
+
+
+def test_journal_file_errors_are_client_errors_and_the_guard_falls_back(tmp_path, monkeypatch):
+    def denied(*a, **k):
+        raise PermissionError(13, 'Permission denied')
+    limit = max_cost_usd(_body('s1'))
+    # До резерва (нет прав на файл блокировки, на каталог, на замену файла): запрос не отправляется.
+    for i, (target, name) in enumerate([(Budget, '_lock'), (llm_jev.tempfile, 'mkstemp'), (llm_jev.os, 'replace'),
+                                        (llm_jev.fcntl, 'flock')]):
+        root = tmp_path / f'до{i}'
+        client, seen = _client(root, _ok(), budget=_budget(root))
+        before = client.budget.path.read_bytes()
+        with monkeypatch.context() as m:
+            m.setattr(target, name, denied)
+            with pytest.raises(JevJournalError) as err:
+                client.ask('s1', Q)
+            assert err.value.code == 'journal' and seen == []
+            guard = GuardedPlanner(client, fallback=True)         # на показе сторож отключается, прогон не падает
+            assert guard.plan(_state())['guard']['reason'] == 'journal' and seen == []
+        assert client.budget.path.read_bytes() == before
+    # После ответа: запись итога не удалась — резерв остаётся занятым, ответ не отдаётся и в кэш не идёт.
+    client, seen = _client(tmp_path, _ok())
+    writes, real = [], Budget._write
+
+    def second_write_fails(self, d):
+        writes.append(1)
+        if len(writes) == 2:
+            raise OSError(28, 'No space left on device')
+        return real(self, d)
+    with monkeypatch.context() as m:
+        m.setattr(Budget, '_write', second_write_fails)
+        with pytest.raises(JevJournalError):
+            client.ask('s1', Q)
+    b = client.budget.read()
+    assert len(seen) == 1 and len(b['reserved']) == 1 and b['calls'] == 0
+    assert Budget.committed(b) == pytest.approx(limit) and not list((tmp_path / 'cache').glob('*.json'))
+    # Связь не установилась, а снять резерв не удалось: резерв тоже остаётся (деньги считаются занятыми).
+    client, seen = _client(tmp_path / 'связь', _script(httpx.ConnectError('нет связи')), budget=_budget(tmp_path / 'связь'))
+    writes.clear()
+    with monkeypatch.context() as m:
+        m.setattr(Budget, '_write', second_write_fails)
+        with pytest.raises(JevJournalError) as err:
+            client.ask('s1', Q)
+    assert len(client.budget.read()['reserved']) == 1 and err.value.__context__ is None
+
+
 # --- только кэш --------------------------------------------------------------------------------
 
 def test_cache_replays_without_network_and_strict_mode_never_reads_the_key(tmp_path, monkeypatch):
@@ -431,16 +728,17 @@ def _jev_eval():
 
 def test_cache_only_reaches_every_place_where_the_tool_creates_a_client(tmp_path, monkeypatch):
     mod = _jev_eval()
-    source = (ROOT / 'tools' / 'jev_eval.py').read_text(encoding='utf-8')
-    assert source.count('JevClient(') == 1 and 'return JevClient(strict=bool(cache_only))' in source
-    calls = re.findall(r'(?<!def )make_jev\(([^)]*)\)', source)
-    assert len(calls) >= 2 and all('cache_only' in c for c in calls)         # режим передан во все места
-    assert 'Budget().init' not in source and '.reserve(' not in source
-    created = []
+    created, clients = [], []
+
+    def forbidden(*a, **k):
+        pytest.fail('режим «только кэш» не должен создавать или менять журнал расходов')
+    for name in ('init', 'reserve', 'release', 'settle', 'halt', '_update', '_write', '_lock'):
+        monkeypatch.setattr(Budget, name, forbidden)              # поведение, а не текст исходника
 
     class Recording(JevClient):
         def __init__(self, **kw):
             created.append(kw)
+            clients.append(self)
             super().__init__(cache_dir=tmp_path / 'cache', **kw,
                              transport=httpx.MockTransport(lambda r: pytest.fail('запрос ушёл в сеть')))
     monkeypatch.setattr(mod, 'JevClient', Recording)
@@ -465,6 +763,7 @@ def test_cache_only_reaches_every_place_where_the_tool_creates_a_client(tmp_path
     assert mod.main(['--out', '_j1_test', '--seeds', '1', '--levels', 'medium', '--missions', 'M1', '--variants',
                      'jev', '--cache-only']) == 0
     assert created == [{'strict': True}] * 2 and len(got) == 1 and got[0][0] is True and got[0][1].strict
+    assert got[0][1] is clients[-1] and len(clients) == 2
     # Без флажка strict не выставляется (а создание клиента само ничего не читает и не отправляет).
     monkeypatch.setenv(CACHE_ONLY_ENV, '')
     assert mod.make_jev(False).strict is False and created[-1] == {'strict': False}
@@ -597,16 +896,21 @@ def _failing_clients(tmp_path):
 
     def timeout(request):
         raise httpx.ReadTimeout('ответ не пришёл в срок')
-    cases = [('сеть', no_network, JevError, {}), ('таймаут', timeout, JevError, {}),
-             ('сервер', lambda r: httpx.Response(503, text=f'down {SECRET}'), JevError, {}),
-             ('чужая модель', _ok(model='openai/gpt-6'), JevWrongModel, {}),
-             ('ответ не по схеме', _answer_200(answers={'done': 'да'}), JevError, {}),
-             ('потолок расходов', _ok(), JevBudgetExceeded, {'spent': 0.95}),
-             ('журнала расходов нет', _ok(), JevBudgetExceeded, {'missing': True})]
+    cases = [('network', no_network, JevError, {}), ('timeout', timeout, JevError, {}),
+             ('server', lambda r: httpx.Response(503, text=f'down {SECRET}'), JevError, {}),
+             ('wrong_model', _ok(model='openai/gpt-6'), JevWrongModel, {}),
+             ('bad_reply', _answer_200(answers={'done': 'да'}), JevError, {}),
+             ('budget', _ok(), JevBudgetExceeded, {'spent': BUDGET_STOP_USD}),
+             ('journal', _ok(), JevBudgetExceeded, {'missing': True}),
+             ('key', _ok(), JevError, {'no_key': True}),
+             ('other', _leaking('JevError'), JevError, {})]
     for i, (name, handler, error, how) in enumerate(cases):
         root = tmp_path / str(i)
         budget = Budget(root / 'budget' / 'jev_budget.json') if how.get('missing') else _budget(root, how.get('spent', 0.0))
-        yield name, _client(root, handler, budget=budget)[0], error
+        client = _client(root, handler, budget=budget)[0]
+        if how.get('no_key'):
+            client.key_file = None
+        yield name, client, error
 
 
 def test_guard_switches_itself_off_and_the_rule_goes_on_when_jev_fails(tmp_path):
@@ -623,14 +927,24 @@ def test_guard_switches_itself_off_and_the_rule_goes_on_when_jev_fails(tmp_path)
         assert 'Сторож миссии отключён: ' in plan['reasoning'], name
         assert 'миссия словами дальше не гарантируется' in plan['reasoning'], name
         assert plan['guard']['decision'] == 'disabled' and plan['guard']['disabled'] == guard.disabled, name
-        assert error.__name__ in guard.disabled or guard.disabled.startswith('Jev'), name
+        # Причина — код из закрытого списка и постоянное пояснение; текста исключения в журнале решений нет.
+        assert plan['guard']['reason'] == name and guard.disabled == f'{name}: {DISABLE_REASONS[name]}', name
+        assert f'Сторож миссии отключён: {name}: {DISABLE_REASONS[name]}; миссия' in plan['reasoning'], name
         assert SECRET not in json.dumps(plan, ensure_ascii=False), name
         jev.ask = lambda *a, **k: pytest.fail('отключённый сторож не должен спрашивать Jev')
         later = guard.plan(_state())                              # до конца миссии — только правило
         assert later['subgoals'] == rule_plan['subgoals'] and 'guard' not in later, name
         assert 'Сторож миссии отключён' in later['reasoning'], name
         seen.append(guard.disabled)
-    assert len(set(seen)) >= 5                                    # причины разные и названы
+    assert len(set(seen)) == len(seen) == len(REASON_CODES)       # причины разные, и это весь закрытый список
+    assert set(DISABLE_REASONS) == set(REASON_CODES)
+    # Незнакомая ошибка клиента (чужой код, нестроковый код, код с текстом) — «other», текст не копируется.
+    for odd in (JevError(f'bad {SECRET}', code=f'leak {SECRET}'), JevError('x', code=['network'])):
+        class Odd(FakeJev):
+            def ask(self, state, questions, model=MODEL, odd=odd):
+                raise odd
+        plan = GuardedPlanner(Odd(None), fallback=True).plan(_state())
+        assert plan['guard']['reason'] == 'other' and SECRET not in json.dumps(plan, ensure_ascii=False)
 
 
 def test_cache_miss_still_stops_a_research_replay_even_with_fallback(tmp_path):
@@ -653,8 +967,13 @@ def test_fallback_is_on_for_shows_and_off_for_research_runs(tmp_path):
             return super().ask(state, questions, model)
     assert make_guarded(cfg, {'jev': {'client': Broken(None)}}, None).fallback is True          # показ
     assert make_guarded(cfg, {'jev': {'client': Broken(None), 'fallback': False}}, None).fallback is False
-    assert "'fallback': False" in (ROOT / 'tools' / 'jev_eval.py').read_text(encoding='utf-8')
     assert GuardedPlanner(Broken(None)).fallback is False
+    # Инструмент исследования передаёт в прогон выключенный запасной режим (поведение, а не текст исходника).
+    mod, passed = _jev_eval(), []
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(mod, 'run_episode', lambda *a, **k: passed.append(k['llm']) or {'metrics': {'score': 0}, 'file': ''})
+        mod.run_single(('M1', 'jev', 'medium', 3), '_j1b_test', False, Broken(None))
+    assert passed[0]['jev']['fallback'] is False and make_guarded(cfg, passed[0], None).fallback is False
     # Прогон целиком: Jev отказал на третьем вопросе — робот доезжает миссию по правилу и возвращается.
     base = run_episode('medium', 3, 'adaptive', save=False)
     jev = Broken(lambda s, k, q: 0.0)
