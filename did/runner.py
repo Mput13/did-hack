@@ -95,6 +95,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     study — задание исследования (словарь did.study.StudySpec) для агента 'study'.
     rules — правила мира; agent_rules=None — те же правила у агента (прежнее поведение),
     agent_rules={} — агент верит в Rules() независимо от правил мира.
+    Вариантам с самокалибровкой (calibrate) при agent_rules=None то, что они калибруют, не сообщается:
+    см. did.calibrate.assumed_rules.
     truth=True — писать в запись истинную позу робота на каждом шаге симулятора (поле truth).
     soil_probe — добавить в метрики разбор смены грунта по скрытой правде (did.metrics.SoilProbe).
     """
@@ -120,6 +122,11 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     cls, cfg = make_agent(agent, config)
     if getattr(cfg, 'inquiry_choice', 'gain') != 'gain':      # R12: случайный выбор опыта воспроизводим по сценарию
         cfg = replace(cfg, inquiry_seed=int(scenario.seed))
+    if agent_rules is None and getattr(cfg, 'calibrate', False):
+        # Калибрующийся агент сам проверяет дальность, закон датчика и расход: правды о них он не получает
+        # и стартует с допущений команды. Истину знает только явно названный ориентир (law_known).
+        from .calibrate import assumed_rules
+        bot_rules = assumed_rules(rules)
     arm = arm or cfg.name
     world = FastSim(arena, scenario, rules, seed=seed, **(sim or {}))
     rec = Recorder()

@@ -61,7 +61,8 @@ def _job(args, knowledge=None, soil_probe=False):
         s = run_episode(level, seed, arm['agent'], experiment=spec_id, arm=folder,
                         scenario_args={**cond.get('scenario', {})},
                         config=arm.get('config'), rules=cond.get('rules'),
-                        agent_rules=cond.get('agent_rules'),
+                        # knows_rules — вариант-ориентир: ему правила мира сообщены, что бы ни значилось в условии
+                        agent_rules=None if arm.get('knows_rules') else cond.get('agent_rules'),
                         # условие может дополнить настройки модели варианта (например, характер имитатора)
                         llm={**arm['llm'], **(cond.get('llm') or {})} if arm.get('llm') else None,
                         sim=cond.get('sim'), knowledge=knowledge, study=arm.get('study'),

@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field, replace
 
 import numpy as np
 
+from .calibrate import Calibrator
 from .belief import ChangeDetector, HazardMap, SampleBelief, SensorHealth, SoilModel
 from .config import BASE, Rules
 from .explore import rank_points
@@ -66,6 +67,8 @@ class AgentConfig:
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
     risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
     foresight_choice: str = 'planner'  # среди прошедших по риску выбирает: planner — правило планировщика, score — счёт
+    calibrate: bool = False           # проверять допущения о законе датчика и расходе на метр (did/calibrate.py)
+    law_known: bool = False           # для сравнения: форма закона датчика берётся из правил (как если бы её сообщили)
     scheme: str = 'rule'              # A1: rule — цель выбирает планировщик; tour — план на весь остаток прогона (did/tour.py)
     scheme_opts: dict = field(default_factory=dict)   # настройки схемы: поля did.tour.Settings
     # --- правки P1 (research/findings/P1.md): по умолчанию выключены; в пресетах *_v2 включена первая
@@ -94,6 +97,10 @@ PRESETS = {
     # Тот же агент, но точку разведки выбирает по ожидаемой пользе измерений (did/explore.py).
     'adaptive_ig': AgentConfig(name='adaptive_ig', explore='infogain'),
     'adaptive_llm': AgentConfig(name='adaptive_llm', planner='llm'),
+    # Полный агент, который сам проверяет допущения о датчике образцов и расходе на метр (R14).
+    'adaptive_cal': AgentConfig(name='adaptive_cal', calibrate=True),
+    # Верхняя граница для R14: агенту сообщили настоящую форму закона датчика.
+    'adaptive_known': AgentConfig(name='adaptive_known', law_known=True),
     # Исследователь: сам уточняет модель расхода и расследует странности опытами.
     'scientist': AgentConfig(name='scientist', science=True),
     'scientist_llm': AgentConfig(name='scientist_llm', science=True, planner='llm'),
@@ -124,11 +131,16 @@ PRESETS = {
     # Версия 2 (research/findings/P1.md): пережидание сбоя датчика по измеренной цене простоя. Спрямление
     # пути в неё не входит: выигрыша у него не показано. Прежние пресеты не меняются.
     'adaptive_v2': AgentConfig(name='adaptive_v2', fault_wait=True),
+    # adaptive_v2 с самокалибровкой датчика и расхода (R14, второй круг).
+    'adaptive_cal_v2': AgentConfig(name='adaptive_cal_v2', fault_wait=True, calibrate=True),
     'scientist_v2': AgentConfig(name='scientist_v2', science=True, fault_wait=True),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
                                avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
 }
+
+
+LAW_POWER = {'linear': 1.0, 'quadratic': 2.0, 'sqrt': 0.5}    # показатель p в законе 1 − (d / R) ** p
 
 
 def make_config(name, **overrides):
@@ -160,7 +172,8 @@ class Agent:
         self.home_graph = CostGraph(arena)                  # дорога домой: предпочитает проверенный пол
         self.follower = Follower()
         self.tracker = PoseTracker(arena, enabled=config.localize, verify=config.guard)   # одометрия → поза на карте
-        self.belief = SampleBelief(arena, n_samples, self.rules.sensor_range_m)
+        power = LAW_POWER[self.rules.sensor_law] if config.law_known else 1.0
+        self.belief = SampleBelief(arena, n_samples, self.rules.sensor_range_m, power=power)
         self.soil = SoilModel(arena, self.rules.drain_per_m, self.rules.drain_idle_per_s)
         self.change = ChangeDetector()
         self.health = SensorHealth(self.rules.sensor_sigma)
@@ -230,6 +243,7 @@ class Agent:
         self._no_collect_until = -1e9
         self.inv = Investigator(self, knowledge, roles) if config.science else None
         self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
+        self.cal = Calibrator(self) if config.calibrate else None  # проверка допущений о датчике и расходе
         self.guard = SensorGuard(self) if config.fault_wait else None   # пережидание сбоя датчика (did/sensorguard.py)
         self._battery_threshold_triggered = False
         self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
@@ -335,7 +349,7 @@ class Agent:
         elif kind == 'sample_collected' and ev.get('collected', 0) > self.collected:
             # Ответ сервиса сбора потерялся, а образец засчитан: повторять сбор нельзя, сверяемся по событию.
             self.collected = ev['collected']
-            self.belief.collected(obs.x, obs.y)
+            self._sample_taken(obs)
             self.journal.add(obs.t, 'action', f'Судья сообщил о сборе образца: всего {self.collected} из {self.n_samples}')
         elif kind == 'collision':
             self.journal.add(obs.t, 'alarm', f'Штраф: столкновение в ({obs.x:.2f}; {obs.y:.2f})', tag='collision')
@@ -408,12 +422,14 @@ class Agent:
     def _on_segment(self, x0, y0, x1, y1, spent, dt, t):
         ds = math.hypot(x1 - x0, y1 - y0)
         self._trail_point(x1, y1, t)
-        ratio = (spent - self.rules.drain_idle_per_s * dt) / (self.rules.drain_per_m * ds)
+        ratio = (spent - self.rules.drain_idle_per_s * dt) / (self._floor_per_m() * ds)
         if t <= self._skip_soil_until or ratio > 7.0:
             # Скачок расхода — это не грунт (разовая потеря в опасной зоне), в карту стоимостей не идёт.
             if ratio > 7.0 and t - self._hazard_t > 3.0:
                 self.journal.add(t, 'alarm', f'Скачок расхода батареи: {spent:.1f} ед. на {ds * 100:.0f} см пути')
             return
+        if self.cal:
+            self.cal.segment(ds, spent - self.rules.drain_idle_per_s * dt, t, x1, y1)
         if not self.cfg.learn_soil:
             return
         ratio, predicted, conf = self.soil.observe(x0, y0, x1, y1, spent, dt)
@@ -466,7 +482,7 @@ class Agent:
                                  f'{self.health.nominal:.2f}', tag='sensor_degraded')
                 self.journal.open(obs.t, 'sensor', 'датчик образцов неисправен, его показаниям нельзя верить как раньше',
                                   'снизить вес показаний и следить, вернётся ли разброс к норме')
-                self.belief.relax(0.25)
+                self._belief_do('relax', 0.25)
                 self._request_plan('sensor_degraded')
             elif change == 'recovered':
                 self.journal.close(obs.t, 'sensor', 'confirmed',
@@ -479,7 +495,23 @@ class Agent:
             z, sigma = self.inv.reading(z, obs, sigma)
             if z is None:                      # датчик залип: карту образцов не трогаем
                 return
-        self.belief.update(obs.x, obs.y, z, sigma)
+        if self.cal:
+            self.cal.reading(obs, z, sigma)
+        else:
+            self.belief.update(obs.x, obs.y, z, sigma)
+
+    def _belief_do(self, method, *args):
+        """Операция над картой образцов; при самокалибровке — над всеми картами-гипотезами."""
+        if self.cal:
+            self.cal.do(method, *args)
+        else:
+            getattr(self.belief, method)(*args)
+
+    def _sample_taken(self, obs):
+        if self.cal:
+            self.cal.collected(obs)        # заодно сверяет закон датчика по показаниям на подъезде
+        else:
+            self.belief.collected(obs.x, obs.y)
 
     def _soil_hypotheses(self, t):
         if not self.cfg.learn_soil:
@@ -551,7 +583,11 @@ class Agent:
 
     def _per_m(self):
         """Заряд на метр пути: номинал из правил либо то, что исследователь выяснил сам (груз, повороты)."""
-        return self.inv.per_meter() if self.inv else self.rules.drain_per_m
+        return self.inv.per_meter() if self.inv else self._floor_per_m()
+
+    def _floor_per_m(self):
+        """Заряд на метр обычного пола: допущение из правил либо измеренное при самокалибровке."""
+        return self.cal.per_m if self.cal else self.rules.drain_per_m
 
     def _affordable(self, battery, cost_to, cost_back):
         if self.cfg.dynamic_reserve:
@@ -572,7 +608,7 @@ class Agent:
         elif obs.battery <= need:
             reason = (f'заряд {obs.battery:.1f} ед., дорога домой оценивается в {home:.1f} ед.'
                       if self.cfg.dynamic_reserve else f'заряд {obs.battery:.1f} ед. опустился до порога {need:.0f}')
-        elif self.rules.time_limit_s - obs.t <= home / self.rules.drain_per_m / 0.15 + 10.0:
+        elif self.rules.time_limit_s - obs.t <= home / self._floor_per_m() / 0.15 + 10.0:
             reason = 'время прогона на исходе'
         if reason:
             self._go_home(obs.t, reason)
@@ -970,7 +1006,7 @@ class Agent:
         if here >= self.cfg.collect_confidence:
             if any(t - mt < 30.0 and math.hypot(obs.x - mx, obs.y - my) < 0.35 for mt, mx, my in self._misses):
                 # Здесь только что был промах: второй раз на том же месте не пробуем, как бы ни был уверен датчик.
-                self.belief.clear_disc(obs.x, obs.y, 0.35, factor=0.02)
+                self._belief_do('clear_disc', obs.x, obs.y, 0.35, 0.02)
                 self.journal.close(t, sg.get('key'), 'refuted', 'на этом месте уже был промах, повторно не собираю')
                 return self._end_subgoal(obs, io, 'candidate_lost')
             return self._try_collect(sg, obs, io, here)
@@ -996,7 +1032,7 @@ class Agent:
         ok, _ = io.collect()
         if ok:
             self.collected += 1
-            self.belief.collected(obs.x, obs.y)
+            self._sample_taken(obs)
             if self.inv:
                 self.inv.on_collect(obs.t)
             self.journal.add(obs.t, 'action', f'Сбор в ({obs.x:.2f}; {obs.y:.2f}) при уверенности {confidence:.0%}: '
@@ -1005,12 +1041,15 @@ class Agent:
             self._end_subgoal(obs, io, 'sample_collected')
             self._wait_until = obs.t + 1.0      # дать датчику показать следующий ближайший образец
         else:
-            self.belief.clear_disc(obs.x, obs.y, 0.30, factor=0.05)
+            if self.cal:
+                self.cal.missed(obs)
+            else:
+                self.belief.clear_disc(obs.x, obs.y, 0.30, factor=0.05)
             self._misses.append((obs.t, obs.x, obs.y))
             if sum(1 for mt, _, _ in self._misses if obs.t - mt < 25.0) >= 2:
                 # Два промаха подряд: карте образцов сейчас верить нельзя. Пауза в сборе и частичный сброс карты.
                 self._no_collect_until = obs.t + 15.0
-                self.belief.relax(0.4)
+                self._belief_do('relax', 0.4)
                 self.journal.add(obs.t, 'alarm', 'Два ложных сбора подряд: 15 секунд не собираю и заново набираю показания')
             if self.inv:
                 self.inv.on_miss(obs)
