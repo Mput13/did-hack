@@ -19,9 +19,10 @@ from .inquiry import Investigator
 from .journal import Journal
 from .localize import PoseTracker
 from .nav import (ESCAPE_ROOM, ESCAPE_STOP, ESCAPE_V, FRONT_STOP, CostGraph, Follower, corridor_room, escape_plan,
-                  free_ahead, freest_turn, moved_since)
+                  free_ahead, freest_turn, moved_since, straighten)
 from .planner import MISSION, HeuristicPlanner, resolve_subgoals
 from .route import survey_route
+from .sensorguard import SensorGuard
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,13 @@ class AgentConfig:
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
     risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
     foresight_choice: str = 'planner'  # среди прошедших по риску выбирает: planner — правило планировщика, score — счёт
+    # --- правки P1 (research/findings/P1.md): по умолчанию выключены; в пресетах *_v2 включена первая
+    fault_wait: bool = False          # при сбое датчика стоять, пока это дешевле езды за ложными кандидатами, и
+                                      # считать в цене дороги расход «за включённость» по своим замерам
+    fault_wait_lost: int = 0          # столько подъездов без сбора подряд — повод коротко проверить датчик (0 — нет)
+    fault_wait_s: float = 120.0       # бюджет ожидания датчика на весь прогон, с
+    fault_wait_charge: float = 3.0    # и по заряду, ед. (по показаниям батареи)
+    straight_paths: bool = False      # спрямлять путь по клеткам там, где прямая проходима и не дороже
 
     def to_dict(self):
         return asdict(self)
@@ -92,6 +100,10 @@ PRESETS = {
     'no_hazard': AgentConfig(name='no_hazard', avoid_hazards=False),
     'no_sensor_health': AgentConfig(name='no_sensor_health', sensor_health=False),
     'static_reserve': AgentConfig(name='static_reserve', dynamic_reserve=False),
+    # Версия 2 (research/findings/P1.md): пережидание сбоя датчика по измеренной цене простоя. Спрямление
+    # пути в неё не входит: выигрыша у него не показано. Прежние пресеты не меняются.
+    'adaptive_v2': AgentConfig(name='adaptive_v2', fault_wait=True),
+    'scientist_v2': AgentConfig(name='scientist_v2', science=True, fault_wait=True),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
                                avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
@@ -196,6 +208,7 @@ class Agent:
         self._no_collect_until = -1e9
         self.inv = Investigator(self, knowledge, roles) if config.science else None
         self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
+        self.guard = SensorGuard(self) if config.fault_wait else None   # пережидание сбоя датчика (did/sensorguard.py)
         self._battery_threshold_triggered = False
         self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
 
@@ -243,6 +256,8 @@ class Agent:
     # ======================================================================================
 
     def _perceive(self, obs):
+        if self.guard:
+            self.guard.observe(obs)        # замеры цены простоя и езды по батарее
         if obs.scan is not None:
             self._front = float(min(obs.scan[:20].min(), obs.scan[-20:].min()))
             # Скан в Gazebo приходит позже, чем снят: его поза — на момент измерения, а не нынешняя.
@@ -423,6 +438,8 @@ class Agent:
                                    f'шум был повышен, сейчас вернулся к {self.health.sigma:.2f}; '
                                    'показания за время сбоя учтены с малым весом')
             sigma = self.health.effective_sigma()
+        if self.guard:
+            self.guard.reading(z, obs)
         if self.inv:
             z, sigma = self.inv.reading(z, obs, sigma)
             if z is None:                      # датчик залип: карту образцов не трогаем
@@ -485,7 +502,15 @@ class Agent:
         """Оценка заряда на дорогу до базы по текущей карте стоимостей."""
         if self._base_dist is None:
             self._base_dist, self._base_pred = self.home_graph.field(*self.base)
-        return self.home_graph.energy(self._base_dist, self._base_pred, x, y) * self._per_m()
+        return self._trip_cost(self.home_graph, self._base_dist, self._base_pred, x, y)
+
+    def _trip_cost(self, graph, dist, pred, x, y):
+        """Заряд на путь из источника поля в (x, y). У агента v2 — вместе с расходом «за включённость» за время
+        пути по его собственным замерам: при дорогом простое дорога стоит заметно больше, чем метры."""
+        if not self.guard:
+            return graph.energy(dist, pred, x, y) * self._per_m()
+        energy, meters = graph.span(dist, pred, x, y)
+        return energy * self._per_m() + self.guard.trip_idle(meters)
 
     def _per_m(self):
         """Заряд на метр пути: номинал из правил либо то, что исследователь выяснил сам (груз, повороты)."""
@@ -501,13 +526,7 @@ class Agent:
             return self.fs.check(obs)          # вместо жёсткого запаса — сравнение «ехать дальше» и «домой»
         if self._returning:
             return
-        home = self._home_cost(obs.x, obs.y)
-        if self.cfg.dynamic_reserve:
-            need = home * self.cfg.reserve_margin + self.cfg.reserve_abs
-        else:
-            need = self.cfg.static_reserve
-        if self.inv:
-            need += self.inv.reserve(obs.t)    # идущая утечка или невыясненная причина расхода
+        home, need = self._return_need(obs)
         reason = None
         if self.collected >= self.n_samples:
             reason = 'все образцы собраны'
@@ -518,6 +537,17 @@ class Agent:
             reason = 'время прогона на исходе'
         if reason:
             self._go_home(obs.t, reason)
+
+    def _return_need(self, obs):
+        """(оценка дороги домой, заряд, при котором пора возвращаться)."""
+        home = self._home_cost(obs.x, obs.y)
+        if self.cfg.dynamic_reserve:
+            need = home * self.cfg.reserve_margin + self.cfg.reserve_abs
+        else:
+            need = self.cfg.static_reserve
+        if self.inv:
+            need += self.inv.reserve(obs.t)    # идущая утечка или невыясненная причина расхода
+        return home, need
 
     def _ask_at_battery_floor(self, obs):
         """Один раз за прогон спросить планировщик, когда заряда осталось «порог миссии + дорога домой».
@@ -562,7 +592,7 @@ class Agent:
         battery = obs.battery
 
         def costs(p):
-            to = self.graph.energy(dist, pred, p['x'], p['y']) * self._per_m()
+            to = self._trip_cost(self.graph, dist, pred, p['x'], p['y'])
             back = self._home_cost(p['x'], p['y'])
             ix, iy = self.arena.w2g(p['x'], p['y'])
             safe = self._risk[iy, ix] < 0.5
@@ -736,6 +766,11 @@ class Agent:
         if self.inv and self.inv.act(obs, io):
             self._waiting = True
             return                             # такт занят опытом расследования
+        if self.guard and self.guard.hold(obs):
+            self._waiting = True               # пережидание сбоя датчика: у него свой бюджет, сторожу простоя не подотчётно
+            self._stuck = None                 # и это не езда: счёт застревания начинается заново
+            self.mode = 'wait'
+            return self._command(io, 0.0, 0.0)
         if not self.queue:
             if self.cfg.search == 'route':
                 self._go_home(obs.t, 'маршрут пройден')
@@ -973,6 +1008,8 @@ class Agent:
         self.queue.pop(0)
         self._path_goal = None
         self._command(io, 0.0, 0.0)
+        if self.guard:
+            self.guard.subgoal_ended(trigger, obs.t)
         if self.cfg.search == 'belief' and not self._returning:
             # После сбора, промаха и находки план пересматривается сразу; после обычной точки — когда очередь пуста.
             if trigger != 'subgoal_done' or not self.queue:
@@ -989,6 +1026,8 @@ class Agent:
             if pts is None:
                 self._command(io, 0.0, 0.0)
                 return False
+            if self.cfg.straight_paths:
+                pts = straighten(graph, pts)
             self.follower.set_path(pts)
             self._path_goal, self._path_version, self._path_t = target, self._cost_version, t
             if self.rec and (moved_goal or stale):
