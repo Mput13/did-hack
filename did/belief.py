@@ -151,6 +151,19 @@ class SampleBelief:
         self._epoch = self.p.copy()
         self._log = []
 
+    def amend(self, k, dz):
+        """Последние k показаний были сдвинуты на постоянную величину: поправить их на dz и пересчитать карту
+        от последнего сбора (did/frugal.py). Сглаживания после тревог (relax) в журнале показаний нет — оно
+        при пересчёте теряется, как и при пересчёте после сбора."""
+        k = min(int(k), len(self._log))
+        if k <= 0:
+            return
+        self._log[-k:] = [(x, y, min(1.0, max(0.0, z + dz)), s) for x, y, z, s in self._log[-k:]]
+        self.p = self._epoch.copy()
+        for x, y, z, s in self._log:
+            self._apply(x, y, z, s)
+            self._normalize()
+
     def clear_disc(self, x, y, r, factor=0.0):
         """После сбора или промаха: в круге радиуса r образцов (почти) нет."""
         near = np.hypot(self.cx - x, self.cy - y) <= r
