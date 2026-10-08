@@ -1,0 +1,541 @@
+"""Разовая потеря заряда при штрафе в опасной зоне — не расход на грунт (находка ревью V1, прогон scientist/hard-1006).
+
+Судья при въезде в опасную зону разово отнимает hazard_battery_hit единиц заряда и сообщает о штрафе событием.
+Исследователь (did/inquiry.py) копит расход окнами пути; потеря от штрафа не должна попадать ни в тревогу
+о расходе, ни в карту стоимости грунта, ни в подбор модели расхода. При этом настоящий дорогой грунт сразу
+за местом штрафа должен замечаться, как и раньше.
+"""
+import math
+
+import pytest
+
+from did.agent import Agent, make_config
+from did.arena import load_arena
+from did.config import BASE, Rules
+from did.robot_io import Observation
+from did.runner import run_episode
+
+
+def _drive(hit, agent_hit=None, steps=90, hit_step=40, lag=0, dear_from=None, every=1, jumps=None):
+    """Робот едет прямо по обычному полу; на шаге hit_step судья отнимает hit единиц заряда и шлёт событие.
+
+    lag — на сколько тактов скачок показания батареи отстаёт от события (в ROS это разные темы); меньше нуля —
+    показание приходит раньше события, как в стенде: судья публикует батарею до событий;
+    dear_from — с какого шага пол становится дороже в 4 раза;
+    every — показание батареи обновляется раз в столько тактов: расход копится и приходит одним числом;
+    jumps — {шаг: потеря заряда} без события штрафа.
+    """
+    arena = load_arena()
+    rules = Rules() if agent_hit is None else Rules(hazard_battery_hit=agent_hit)
+    bot = Agent(arena, make_config('scientist'), n_samples=3, rules=rules)
+    th = next(a for a in (k * math.pi / 8 for k in range(16))
+              if all(arena.clearance(BASE[0] + d * math.cos(a), BASE[1] + d * math.sin(a)) >= 0.2
+                     for d in (0.3, 0.6, 0.9, 1.2, 1.5)))
+    world, battery, step, dt = Rules(), 60.0, 0.015, 0.1
+    hit_xy, shown = None, battery
+    for k in range(steps):
+        x, y = BASE[0] + k * step * math.cos(th), BASE[1] + k * step * math.sin(th)
+        events = []
+        if k:
+            mult = 4.0 if dear_from is not None and k >= dear_from else 1.0
+            battery -= world.drain_per_m * mult * step + world.drain_idle_per_s * dt
+        if k == hit_step + lag:
+            battery -= hit
+        battery -= (jumps or {}).get(k, 0.0)
+        if k == hit_step:
+            events, hit_xy = [{'type': 'hazard_hit', 't': k * dt, 'x': x, 'y': y}], (x, y)
+        if k % every == 0:
+            shown = battery
+        bot._perceive(Observation(t=k * dt, x=x, y=y, th=th, v=0.15, w=0.0, battery=shown, sensor=None, scan=None,
+                                  events=events))
+    return bot, hit_xy, world
+
+
+def _energy(bot):
+    return [q for q in bot.inv.inquiries if q.topic == 'energy']
+
+
+def _quiet(bot, hx, hy, world):
+    """Штраф не оставил следа: тревоги о расходе нет, пол в месте штрафа обычный, модель расхода не сбита."""
+    assert [q.anomaly['text'] for q in _energy(bot)] == []
+    assert bot.soil.at(hx, hy)[0] < 1.3
+    assert max(z['mult'] for z in bot.soil.zones()) < 1.4 if bot.soil.zones() else True
+    assert bot.inv.model.per_meter(0) == pytest.approx(world.drain_per_m, rel=0.1)
+    assert bot.inv._held == []                                # придержанных окон не осталось
+
+
+@pytest.mark.parametrize('hit,agent_hit,lag,found', [(3.0, None, 0, 'hit'), (5.0, None, 0, 'bad'), (3.0, 0.0, 0, 'bad'),
+                                                     (3.0, None, 3, 'hit'), (0.5, None, 0, 'bad')],
+                         ids=['hit3', 'hit5_agent_believes_3', 'agent_expects_no_loss', 'battery_reading_lags', 'hit0.5'])
+def test_penalty_loss_is_not_soil(hit, agent_hit, lag, found):
+    """found: 'hit' — потеря сошлась с правилами агента и вычтена; 'bad' — не сошлась, отрезок загрязнён."""
+    bot, (hx, hy), world = _drive(hit, agent_hit, lag=lag)
+    _quiet(bot, hx, hy, world)
+    assert bot.inv.penalty.stats == {'hit': 0, 'bad': 0, 'lost': 0, found: 1}
+
+
+@pytest.mark.parametrize('lag', [-6, -3, -2, -1, 1, 2, 6])
+def test_order_of_battery_and_event_does_not_matter(lag):
+    """Находка второго круга: в ROS судья публикует батарею раньше события (lag < 0). При lag=-1 прежняя
+    правка давала расследование «расход 24,8 ед/м при прогнозе 2,6»."""
+    bot, (hx, hy), world = _drive(3.0, lag=lag)
+    _quiet(bot, hx, hy, world)
+    assert bot.inv.inquiries == []
+    assert bot.inv.penalty.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+
+
+@pytest.mark.parametrize('hit_step', [40, 41, 42, 43])
+@pytest.mark.parametrize('lag', [0, -1])
+def test_battery_reading_that_piles_up(hit_step, lag):
+    """Показание батареи обновляется раз в четыре такта: расход 0,4 с и штраф приходят одним числом,
+    позже события или раньше него."""
+    bot, (hx, hy), world = _drive(3.0, every=4, hit_step=hit_step, lag=lag)
+    _quiet(bot, hx, hy, world)
+    assert bot.inv.penalty.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+
+
+def test_drive_without_penalty_is_quiet():
+    """Та же поездка без штрафа: расследований нет — значит, проверка выше ловит именно штраф."""
+    for every in (1, 4):
+        bot, _, world = _drive(0.0, hit_step=10 ** 6, every=every)
+        assert bot.inv.inquiries == []
+        assert bot.inv.penalty.stats == {'hit': 0, 'bad': 0, 'lost': 0}
+
+
+def test_dear_soil_right_after_penalty_is_still_noticed():
+    """Сразу за местом штрафа начинается грунт ×4: вычитается только скачок, настоящий расход остаётся в окнах."""
+    bot, _, _ = _drive(3.0, hit_step=40, dear_from=42)
+    opened = _energy(bot)
+    assert len(opened) == 1
+    assert 1.8 < opened[0].est['ratio'] < 5.0      # дорогой грунт (первые окна захватывают и обычный пол), но не ×10
+
+
+@pytest.mark.parametrize('every,hit_step', [(1, 40), (4, 41)], ids=['every_tick', 'piled_up'])
+def test_penalty_on_dear_soil_in_the_same_tick_keeps_real_drain(every, hit_step):
+    """Находка второго круга: штраф и грунт ×4 в одном отрезке. Вычитается ровно потеря из правил агента,
+    настоящий расход остаётся: тревога и оценка грунта те же, что в такой же поездке без штрафа.
+    Прежняя правка оставляла в отрезке расход обычного пола (0,154 вместо 0,604 в примере ревью)."""
+    with_hit, _, _ = _drive(3.0, hit_step=hit_step, dear_from=40, every=every)
+    no_hit, _, _ = _drive(0.0, hit_step=10 ** 6, dear_from=40, every=every)
+    a, b = _energy(with_hit), _energy(no_hit)
+    assert len(a) == len(b) == 1
+    assert a[0].t_open == b[0].t_open
+    assert a[0].est['ratio'] == pytest.approx(b[0].est['ratio'], abs=1e-6)
+    assert a[0].anomaly['observed'] == b[0].anomaly['observed']
+    assert with_hit.inv.penalty.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+
+
+def test_reviewer_example_exact_split():
+    """Пример ревью: за 0,4 с робот проходит 0,06 м по грунту ×4 (расход 0,604) и получает штраф 3 единицы.
+    Из окна уходит ровно 3; следующий скачок на 1 единицу без события окно не трогает."""
+    from did.penalty import PenaltyLedger
+    r = Rules()
+    most = lambda ds, dth, dt, t: 7.0 * r.drain_per_m * ds + r.drain_idle_per_s * dt     # noqa: E731
+    led, win = PenaltyLedger(3.0, most), {'b0': 60.0}
+    at = lambda t, x, b: Observation(t=t, x=x, y=0.0, th=0.0, v=0.15, w=0.0, battery=b, sensor=None, scan=None)  # noqa: E731
+    led.reading(at(0.0, 0.0, 60.0), win)
+    led.event(0.4)
+    led.reading(at(0.4, 0.06, 60.0 - 0.604 - 3.0), win)
+    assert win == {'b0': 57.0} and not led.pending
+    led.reading(at(0.5, 0.075, 60.0 - 0.604 - 3.0 - 0.151 - 1.0), win)       # второй скачок, события нет
+    assert win == {'b0': 57.0}
+    assert led.pending                              # скачок без события: окно ждёт, не придёт ли событие
+    led.reading(at(1.1, 0.165, 60.0 - 0.604 - 3.0 - 0.151 - 1.0 - 0.9), win)
+    assert win == {'b0': 57.0} and not led.pending and led.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+
+
+def test_second_jump_without_event_is_not_swallowed():
+    """Одному событию штрафа — одна поправка. Второй скачок через 0,3 с, уже без события, — странность:
+    тревога та же, что от такого же скачка в поездке без штрафа. Прежняя правка вычитала и его."""
+    bot, _, _ = _drive(3.0, hit_step=40, jumps={43: 1.0})
+    alone, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={43: 1.0})
+    assert len(_energy(bot)) == len(_energy(alone)) == 1
+    assert _energy(bot)[0].anomaly['observed'] == _energy(alone)[0].anomaly['observed']
+    assert bot.inv.penalty.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+
+
+def test_two_penalties_in_one_reading():
+    """Две зоны разом: два события и одно падение на 6 единиц — две поправки, по одной на событие."""
+    from did.penalty import PenaltyLedger
+    led, win = PenaltyLedger(3.0, lambda ds, dth, dt, t: 17.5 * ds + 0.01 * dt), {'b0': 60.0}
+    at = lambda t, x, b: Observation(t=t, x=x, y=0.0, th=0.0, v=0.15, w=0.0, battery=b, sensor=None, scan=None)  # noqa: E731
+    led.reading(at(0.0, 0.0, 60.0), win)
+    led.event(0.1)
+    led.event(0.1)
+    led.reading(at(0.1, 0.015, 60.0 - 0.04 - 6.0), win)
+    assert win == {'b0': 54.0} and led.stats == {'hit': 2, 'bad': 0, 'lost': 0} and not led.pending
+
+
+# --- третий круг ревью: каждый отрезок решается один раз и в свой срок -------------------------------------------
+
+def test_later_jumps_do_not_hold_windows_that_are_ready():
+    """Находка третьего круга: скачки заряда идут один за другим без событий. Окно ждёт только свои отрезки,
+    поэтому тревога открывается в тот же момент, что и от одного скачка. Прежде общий флаг ожидания держал
+    все окна, пока скачки не прекратятся: расследований не было вовсе."""
+    alone, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={40: 1.0})
+    many, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={k: 1.0 for k in range(40, 90, 3)})
+    some, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={k: 1.0 for k in range(40, 68, 3)})
+    assert len(_energy(alone)) == 1
+    for bot in (many, some):
+        assert [(q.t_open, q.anomaly['text']) for q in _energy(bot)] == \
+               [(q.t_open, q.anomaly['text']) for q in _energy(alone)]
+        assert len(bot.inv._held) <= 1
+    assert 4.0 <= _energy(alone)[0].t_open <= 4.0 + 0.6 + 1e-9      # не позже срока скачка
+
+
+def test_end_of_run_settles_what_was_waiting():
+    """Прогон кончился раньше срока скачка: по сигналу done агент досчитывает отложенное, окно не пропадает."""
+    class IO:
+        def command(self, v, w):
+            pass
+    bot, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={40: 1.0}, steps=44)
+    assert bot.inv.inquiries == [] and len(bot.inv._held) == 1 and bot.inv.penalty.pending
+    bot.tick(Observation(t=4.4, x=BASE[0], y=BASE[1], th=0.0, v=0.0, w=0.0,
+                         battery=50.0, sensor=None, scan=None, events=[], done=True), IO())
+    assert bot.inv._held == [] and not bot.inv.penalty.pending
+    assert bot.inv.penalty.early == 1                          # решено до срока — и это отмечено
+    # Странность записана, но расследование после конца прогона не открывается (правка вдогонку, находка 4).
+    assert bot.inv.inquiries == []
+    assert ['расход 10.0 ед/м при прогнозе 2.6' in e['text'] for e in _late(bot)] == [True]
+
+
+def test_jump_that_does_not_fit_does_not_take_the_event():
+    """Находка третьего круга: событие на 4,0 с, настоящий скачок без события на 4,1 с, показание штрафа
+    на 4,3 с. Скачок с правилами не сходится, но событие за это не списывается: его получает показание штрафа.
+    Тревога о настоящем скачке та же, что в поездке без штрафа. Прежде: hit=0, bad=1 и «расход 27,6 ед/м»."""
+    bot, _, _ = _drive(3.0, lag=3, jumps={41: 1.0})
+    alone, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={41: 1.0})
+    assert bot.inv.penalty.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+    assert len(_energy(alone)) == 1
+    assert [(q.t_open, q.anomaly['text']) for q in _energy(bot)] == \
+           [(q.t_open, q.anomaly['text']) for q in _energy(alone)]
+    assert bot.inv._held == []
+
+
+@pytest.mark.parametrize('events', [(0.5, 0.6), (0.5, 0.5), (0.0, 0.4), (0.4, 1.0)])
+def test_two_penalties_in_one_piled_up_reading(events):
+    """Находка третьего круга: показание за 0,4 с несёт два штрафа (падение 6,154), события приходят врозь.
+    Одного события мало — отрезок ждёт второго до своего срока и вычитает ровно 6. Прежде первое событие
+    списывалось как несошедшееся, второе терялось."""
+    from did.penalty import PenaltyLedger
+    led, win = PenaltyLedger(3.0, lambda ds, dth, dt, t: 7.0 * 2.6 * ds + 0.01 * dt), {'b0': 60.0}
+    at = lambda t, b: Observation(t=t, x=0.15 * t, y=0.0, th=0.0, v=0.15, w=0.0, battery=b, sensor=None, scan=None)  # noqa: E731
+    b = 60.0
+    for k in range(13):
+        t = k * 0.1
+        for e in events:
+            if abs(e - t) < 1e-9:
+                led.event(t)
+        if k == 4:
+            b -= 6.154
+        elif k > 4:
+            b -= 0.04
+        led.reading(at(t, b), win if k <= 4 else None)
+        if k < 4:
+            assert win == {'b0': 60.0}
+    assert win == {'b0': 54.0} and led.stats == {'hit': 2, 'bad': 0, 'lost': 0} and not led.pending
+
+
+def test_jump_and_penalty_in_one_reading_spoil_the_window():
+    """В одном показании и штраф, и настоящий скачок: разделить их нельзя, окно явно помечено испорченным."""
+    bot, (hx, hy), world = _drive(3.0, jumps={40: 1.0})
+    _quiet(bot, hx, hy, world)
+    assert bot.inv.penalty.stats == {'hit': 0, 'bad': 1, 'lost': 0}
+
+
+def test_expected_loss_that_never_shows_spoils_the_neighbourhood():
+    """Агент ждёт потерю 3 единицы, судья отнял 0,5, и она утонула в показании за четыре такта. Отделить её
+    нельзя: отрезки вокруг события в оценки не идут, ложного дорогого грунта нет."""
+    bot, (hx, hy), world = _drive(0.5, every=4, hit_step=41)
+    _quiet(bot, hx, hy, world)
+    assert bot.inv.penalty.stats == {'hit': 0, 'bad': 0, 'lost': 1}
+
+
+def test_without_penalty_event_a_jump_still_raises_alarm():
+    """Скачок заряда без события штрафа — по-прежнему странность: поправка действует только рядом с событием."""
+    bot, _, _ = _drive(3.0, hit_step=10 ** 6, lag=40 - 10 ** 6)
+    assert [q.topic for q in bot.inv.inquiries] == ['energy']
+    assert 4.0 <= bot.inv.inquiries[0].t_open <= 4.0 + 0.6 + 0.8     # не позже ожидания события и одного окна
+
+
+def test_event_that_comes_too_late_does_not_cancel_the_alarm():
+    """Граница памяти: событие через секунду после скачка к нему уже не относится."""
+    bot, _, _ = _drive(3.0, lag=-10)
+    assert len(_energy(bot)) == 1
+
+
+def test_hard_1006_penalty_does_not_open_soil_inquiry():
+    """Прогон из ревью: штраф на 18,2 с давал расследование «грунт ×10,4» и гипотезу о грунте с ошибкой 600%."""
+    s = run_episode('hard', 1006, 'scientist', save=False, knowledge={})
+    assert s['metrics']['hazard_hits'] >= 1
+    jumps = [q for q in s['science']['inquiries'] if q['topic'] == 'energy'
+             and q['anomaly'].get('unit') == 'ед/м' and q['anomaly']['observed'] > 5 * q['anomaly']['expected']]
+    assert [(q['t_open'], q['anomaly']['text']) for q in jumps] == []
+    assert s['metrics']['hyp_soil_error'] < 1.0
+
+
+# --- правка вдогонку (V2): конец прогона и длинные накопленные показания --------------------------------------
+
+class _IO:
+    def command(self, v, w):
+        pass
+
+
+def _late(bot):
+    return [e for e in bot.journal.entries if (e.get('data') or {}).get('tag') == 'late_anomaly']
+
+
+def _end(bot, t, events=()):
+    """Последнее наблюдение прогона (done): робот там же, где был, батарея чуть ниже последнего показания."""
+    k = bot.inv.penalty._tick
+    bot.tick(Observation(t=t, x=k['x'], y=k['y'], th=bot.inv._th, v=0.0, w=0.0, battery=k['b'] - 0.04, sensor=None,
+                         scan=None, events=[{'type': e, 't': t, 'x': k['x'], 'y': k['y']} for e in events],
+                         done=True), _IO())
+
+
+def test_penalty_event_in_the_last_observation_is_counted():
+    """Находка 1: показание со штрафом уже пришло, событие приходит последним наблюдением прогона (done).
+    Досчёт обязан его увидеть. Прежде: hit=0 и расследование «расход 24,8 ед/м при прогнозе 2,6»."""
+    bot, _, _ = _drive(3.0, hit_step=43, lag=-1, steps=43)
+    assert bot.inv.penalty.stats == {'hit': 0, 'bad': 0, 'lost': 0} and bot.inv.penalty.pending
+    _end(bot, 4.3, events=['hazard_hit'])
+    assert bot.inv.penalty.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+    assert bot.inv.inquiries == [] and _late(bot) == [] and bot.inv._held == []
+    usual, _, _ = _drive(3.0, hit_step=43, lag=-1, steps=60)       # то же наблюдение обычным путём
+    assert usual.inv.penalty.stats == bot.inv.penalty.stats and usual.inv.inquiries == []
+
+
+def test_penalty_reading_in_the_last_observation_is_counted():
+    """Находка 1, обратный порядок: событие уже пришло, показание со штрафом — в последнем наблюдении."""
+    bot, _, _ = _drive(3.0, hit_step=42, lag=1, steps=43)
+    k = bot.inv.penalty._tick
+    bot.tick(Observation(t=4.3, x=k['x'], y=k['y'], th=bot.inv._th, v=0.0, w=0.0, battery=k['b'] - 3.04, sensor=None,
+                         scan=None, events=[], done=True), _IO())
+    assert bot.inv.penalty.stats == {'hit': 1, 'bad': 0, 'lost': 0}
+    assert bot.inv.inquiries == [] and _late(bot) == []
+
+
+def _ledger(hit=3.0):
+    from did.penalty import PenaltyLedger
+    led = PenaltyLedger(hit, lambda ds, dth, dt, t: 7.0 * 2.6 * ds + 0.01 * dt)
+    at = lambda t, x, b: Observation(t=t, x=x, y=0.0, th=0.0, v=0.15, w=0.0, battery=b, sensor=None, scan=None)  # noqa: E731
+    return led, at
+
+
+def _long_reading(drop, events, late=()):
+    """Показание батареи не обновлялось 1,4 с (0,21 м пути), потом пришло одним числом; дальше — обычная езда.
+    events — события штрафа до показания, late — после него. Возвращает учёт и окно этого показания."""
+    led, at = _ledger()
+    win, b = {'b0': 60.0}, 60.0 - drop
+    led.reading(at(0.0, 0.0, 60.0), win)
+    for e in events:
+        led.event(e)
+    led.reading(at(1.4, 0.21, b), win)
+    for k in range(15, 33):
+        t = k / 10
+        for e in late:
+            if abs(e - t) < 1e-9:
+                led.event(t)
+        b -= 0.04
+        led.reading(at(t, 0.015 * k, b), None)
+    return led, win
+
+
+def test_two_penalties_in_a_long_reading_are_not_taken_for_one():
+    """Находка 2: за 1,4 с накоплены расход 0,56 и два штрафа. Падение 6,56 сходится и с одним штрафом
+    (остаток 3,56 меньше расхода на самом дорогом грунте), и с двумя. Решает число событий в пределах срока.
+    Прежде брался один штраф: hit=1, lost=1, а 3 единицы штрафа становились расходом."""
+    led, win = _long_reading(6.56, (0.9, 1.0))
+    assert win == {'b0': 54.0} and led.stats == {'hit': 2, 'bad': 0, 'lost': 0} and not led.pending
+
+
+@pytest.mark.parametrize('drop,events,late,took,bad', [
+    (6.56, (0.9,), (), 1, False),           # событие одно — штраф один, остальное расход (дорогой грунт)
+    (6.56, (0.9,), (1.9,), 2, False),       # второе событие пришло после показания, но в пределах срока
+    (6.56, (0.5, 0.9, 1.0), (), 0, True),   # событий больше, чем штрафов, с которыми сходится падение
+    (3.56, (), (), 0, False),               # падение сходится с одним штрафом, но событий нет: это расход
+    (3.56, (1.0,), (), 1, False),
+    (3.56, (), (1.8,), 1, False),           # событие после показания: прежде отрезок решался сразу как расход
+    (3.56, (0.9, 1.0), (), 0, True),
+], ids=['one_of_two', 'second_comes_later', 'three_events', 'no_event', 'one_event', 'event_later', 'too_many'])
+def test_long_reading_is_decided_by_the_number_of_events(drop, events, late, took, bad):
+    """Находка 2: падение сходится с разным числом штрафов — берётся столько, сколько событий пришло к сроку;
+    если это число с падением не сходится, отрезок испорчен и ничего не вычитается."""
+    led, win = _long_reading(drop, events, late)
+    assert win.get('b0') == 60.0 - 3.0 * took and bool(win.get('bad')) == bad
+    assert led.stats['hit'] == took and not led.pending and led._events == []
+
+
+def test_long_reading_does_not_take_the_event_of_the_next_penalty():
+    """Находка 2, оборотная сторона: длинное показание без штрафа (расход 3,3 на дорогом грунте), сразу за ним —
+    обычное показание со штрафом и его событие. Чьё событие, по числам не понять: длинный отрезок испорчен,
+    но чужое событие не забирает; штраф вычтен из своего окна."""
+    led, at = _ledger()
+    long, short = {'b0': 60.0}, {'b0': 56.7}
+    led.reading(at(0.0, 0.0, 60.0), long)
+    led.reading(at(1.4, 0.21, 56.7), long)
+    led.event(1.5)
+    led.reading(at(1.5, 0.225, 56.7 - 3.04), short)
+    b = 56.7 - 3.04
+    for k in range(16, 30):
+        b -= 0.04
+        led.reading(at(k / 10, 0.015 * k, b), None)
+    assert short == {'b0': 53.7} and long == {'b0': 60.0, 'bad': True}
+    assert led.stats == {'hit': 1, 'bad': 0, 'lost': 0} and not led.pending
+
+
+def test_long_reading_with_a_contested_event_is_spoiled():
+    """Длинное показание с одним штрафом и расходом дорогого грунта (сходится и с одним, и с двумя штрафами),
+    за ним показание со своим штрафом; оба события рядом с обоими. Сколько событий относится к длинному, не
+    понять: он испорчен и ничего не вычитает, следующий отрезок свой штраф получает."""
+    led, at = _ledger()
+    long, short = {'b0': 60.0}, {'b0': 53.44}
+    led.reading(at(0.0, 0.0, 60.0), long)
+    led.event(1.2)
+    led.reading(at(1.4, 0.21, 53.44), long)
+    led.event(1.5)
+    led.reading(at(1.5, 0.225, 53.44 - 3.04), short)
+    b = 53.44 - 3.04
+    for k in range(16, 30):
+        b -= 0.04
+        led.reading(at(k / 10, 0.015 * k, b), None)
+    assert short == {'b0': 50.44} and long == {'b0': 60.0, 'bad': True}
+    assert led.stats == {'hit': 1, 'bad': 1, 'lost': 0} and not led.pending and led._events == []
+
+
+def test_events_are_forgotten_by_time_when_battery_does_not_change():
+    """Находка 3: показание батареи не меняется, а события штрафа идут. Событие хранится не дольше KEEP_S,
+    что бы ни было с батареей. Прежде список рос без предела. Когда показание наконец приходит, потеря
+    забытых событий сидит в нём: отрезок испорчен, а не выдан за расход."""
+    from did.penalty import KEEP_S
+    led, at = _ledger()
+    win = {'b0': 60.0}
+    led.reading(at(0.0, 0.0, 60.0), win)
+    for i in range(1, 41):
+        led.event(0.8 * i)
+        led.reading(at(0.8 * i, 0.0, 60.0), win)
+        assert len(led._events) <= KEEP_S / 0.8 + 1
+    assert led.stats['lost'] >= 30
+    led.reading(at(32.1, 0.0, 60.0 - 0.3 - 3.0 * 40), win)
+    led.reading(at(32.8, 0.0, 60.0 - 0.3 - 3.0 * 40 - 0.01), None)
+    assert win.get('bad') and win['b0'] == 60.0 and not led.pending
+
+
+def test_events_without_readings_are_forgotten_too():
+    """Находка 3: показаний нет вовсе (агент для исследований в режиме поиска), события идут — память ограничена."""
+    led, _ = _ledger()
+    for i in range(100):
+        led.event(0.5 * i)
+    assert len(led._events) <= 8
+
+
+def test_end_of_run_clears_a_free_event():
+    """Находка 3: в конце прогона осталось одно свободное событие, нерешённых отрезков нет. Завершение
+    очищает всё безусловно. Прежде событие оставалось: досчёт смотрел только на отрезки."""
+    bot, _, _ = _drive(0.0, hit_step=10 ** 6, steps=30)
+    bot.inv.penalty.event(2.9)
+    assert not bot.inv.penalty.pending and len(bot.inv.penalty._events) == 1
+    _end(bot, 3.0)
+    assert bot.inv.penalty._events == [] and not bot.inv.penalty.pending and bot.inv._held == []
+    assert bot.inv.penalty.stats == {'hit': 0, 'bad': 0, 'lost': 1}
+
+
+def test_end_of_run_does_not_open_inquiry_or_ask_the_model(monkeypatch):
+    """Находка 4: досчёт в конце прогона освобождает окно со странностью. Она записывается в журнал, но
+    расследование не открывается и к языковой модели обращений нет (на стенде это 15–25 с ожидания после финиша)."""
+    import did.llm_roles
+    calls = []
+    monkeypatch.setattr(did.llm_roles, 'deliberate', lambda *a, **k: calls.append('deliberate') or 1 / 0)
+    monkeypatch.setattr(did.llm_roles, 'explain', lambda *a, **k: calls.append('explain') or 1 / 0)
+    bot, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={40: 1.0}, steps=44)
+    bot.inv.roles = object()
+    assert bot.inv.inquiries == [] and len(bot.inv._held) == 1
+    _end(bot, 4.4)
+    assert calls == [] and bot.inv.inquiries == [] and bot.inv.active is None and bot.inv.run is None
+    assert bot.inv._held == [] and not bot.inv.penalty.pending
+    notes = _late(bot)
+    assert len(notes) == 1 and 'расход 10.0 ед/м при прогнозе 2.6' in notes[0]['text']
+    assert 'в конце прогона' in notes[0]['text']
+    n = len(bot.journal.entries)
+    _end(bot, 4.5, events=['hazard_hit'])                      # стенд зовёт tick после конца ещё раз: ничего нового
+    assert len(bot.journal.entries) == n and calls == [] and bot.inv.penalty._events == []
+
+
+def test_the_same_jump_mid_run_still_opens_inquiry():
+    """Находка 4 не трогает обычную езду: та же странность посреди прогона расследуется, как раньше."""
+    bot, _, _ = _drive(0.0, hit_step=10 ** 6, jumps={40: 1.0}, steps=60)
+    assert [q.anomaly['text'] for q in _energy(bot)] == ['расход 10.0 ед/м при прогнозе 2.6'] and _late(bot) == []
+
+
+# --- агент для исследований по заданию: своё окно расхода в дороге (did/study_agent.py, _floor) ----------------
+
+TURN = {'quantity': 'turn_cost', 'allowed': {'spin': {'angle_deg': 360, 'repeats': 2}, 'pause': {'seconds': 3}},
+        'stop': {'rel_error': 0.05}, 'budget': {'energy': 10, 'reserve': 1}}
+
+
+def _study_drive(hit, jump_step, event_step, steps=60):
+    """Агент для исследований едет прямо; на шаге jump_step показание батареи падает на hit, событие штрафа
+    приходит на шаге event_step."""
+    from did.study import prepare
+    from did.study_agent import STUDY_CONFIG, StudyAgent
+    arena, rules = load_arena(), Rules()
+    bot = StudyAgent(arena, STUDY_CONFIG, 3, rules=rules, study=prepare(TURN, arena, rules))
+    assert bot.phase == 'study'
+    th = next(a for a in (k * math.pi / 8 for k in range(16))
+              if all(arena.clearance(BASE[0] + d * math.cos(a), BASE[1] + d * math.sin(a)) >= 0.2
+                     for d in (0.3, 0.6, 0.9, 1.2, 1.5)))
+    battery, step, dt = 60.0, 0.015, 0.1
+    for k in range(steps):
+        x, y = BASE[0] + k * step * math.cos(th), BASE[1] + k * step * math.sin(th)
+        if k:
+            battery -= rules.drain_per_m * step + rules.drain_idle_per_s * dt
+        if k == jump_step:
+            battery -= hit
+        events = [{'type': 'hazard_hit', 't': k * dt, 'x': x, 'y': y}] if k == event_step else []
+        bot._perceive(Observation(t=k * dt, x=x, y=y, th=th, v=0.15, w=0.0, battery=battery, sensor=None, scan=None,
+                                  events=events))
+    return bot
+
+
+@pytest.mark.parametrize('jump_step', range(18, 24))
+def test_study_agent_floor_ignores_penalty_that_arrives_before_its_event(jump_step):
+    """Показание батареи со штрафом пришло на такт раньше события (порядок стенда), и как раз на этом такте
+    закрылось окно в 0,3 м: штраф не должен стать дорогим полом. Когда событие приходит вместе с показанием
+    или раньше него, окно и прежде сбрасывалось — робот пятится из зоны."""
+    bot = _study_drive(3.0, jump_step, jump_step + 1)
+    assert [z['mult'] for z in bot.soil.zones() if z['mult'] >= 1.4] == []
+    assert bot._travel[0] / max(bot._travel[1], 1e-9) < 3.0 if bot._travel[1] else True
+
+
+def test_study_agent_floor_keeps_a_jump_without_event():
+    """Без события штрафа скачок остаётся в окне: поправка действует только рядом с событием."""
+    bot = _study_drive(3.0, 20, 10 ** 6)
+    assert any(z['mult'] >= 1.4 for z in bot.soil.zones())
+
+
+def test_study_agent_settles_at_the_end_of_run():
+    """Скачок за три такта до конца прогона: по сигналу done отложенное досчитывается, очередь пуста."""
+    class IO:
+        def command(self, v, w):
+            pass
+    bot = _study_drive(3.0, 57, 10 ** 6)
+    assert bot._hits.pending
+    bot.tick(Observation(t=6.0, x=BASE[0], y=BASE[1], th=0.0, v=0.0, w=0.0, battery=50.0, sensor=None, scan=None,
+                         events=[], done=True), IO())
+    assert not bot._hits.pending and bot._floor_held == [] and bot._hits.early == 1
+
+
+def test_study_agent_counts_the_last_observation_and_clears_events():
+    """Правка вдогонку, находки 1 и 3: показание со штрафом пришло за такт до конца, событие — последним
+    наблюдением; штраф вычтен, свободных событий после конца нет."""
+    bot = _study_drive(3.0, 59, 10 ** 6)
+    k = bot._hits._tick
+    bot.tick(Observation(t=6.0, x=k['x'], y=k['y'], th=0.0, v=0.0, w=0.0, battery=k['b'] - 0.04, sensor=None,
+                         scan=None, events=[{'type': 'hazard_hit', 't': 6.0, 'x': k['x'], 'y': k['y']}], done=True),
+             _IO())
+    assert bot._hits.stats == {'hit': 1, 'bad': 0, 'lost': 0} and bot._hits._events == []
+    bot = _study_drive(0.0, 10 ** 6, 10 ** 6)
+    bot._hits.event(5.9)
+    bot.tick(Observation(t=6.0, x=BASE[0], y=BASE[1], th=0.0, v=0.0, w=0.0, battery=50.0, sensor=None, scan=None,
+                         events=[], done=True), _IO())
+    assert bot._hits._events == []

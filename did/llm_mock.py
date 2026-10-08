@@ -20,6 +20,7 @@ from collections import Counter, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .llm import LLMError, extract_json
+from .llm_orchestration import PROPOSE_MARK, calc_choice
 from .llm_roles import find_task, mock_reply
 
 # Сбои проверяются в этом порядке, срабатывает первый выпавший: сначала транспорт, потом содержимое.
@@ -85,6 +86,126 @@ def mock_plan(state):
     return {'reasoning': ' '.join(why)[:600], 'hypotheses': _hypotheses(state), 'subgoals': subgoals}
 
 
+# --- характеры: одна и та же слабость во всех ролях --------------------------------------------
+#
+# Характер — это одно искажение, и оно одинаково действует, когда имитатор пишет план, критикует чужой
+# и выбирает из таблицы: робкий критик тоже зовёт домой, случайный выбирает из таблицы наугад.
+# Нужны, чтобы проверить обвязку способов оркестрации (did/llm_orchestration.py) на «плохой» модели.
+# На настоящие модели они не похожи, и выводов о способах по ним делать нельзя.
+#   normal   — правило mock_plan во всех ролях;
+#   timid    — при заряде ниже 70% начального хочет на базу;
+#   random   — выбирает наугад среди достижимых целей, вердикт критика — монетка;
+#   careless — в трети случаев не смотрит на достижимость.
+TEMPERAMENTS = ('normal', 'timid', 'random', 'careless')
+TIMID_SHARE = 0.7
+CARELESS_P = 1 / 3
+HOME = {'type': 'return_base'}
+
+
+def _all_collected(state):
+    samples = state.get('samples') or {}
+    return bool(samples.get('total')) and _num(samples.get('collected')) >= _num(samples.get('total'))
+
+
+def _wants_home(state, temperament):
+    return temperament == 'timid' and _num(state.get('battery')) < TIMID_SHARE * _num(state.get('battery_start'), 50.0)
+
+
+def _targets(state, feasible=True):
+    """Цели состояния как подцели: кандидаты, потом точки разведки, внутри — по убыванию выгоды."""
+    battery = _num(state.get('battery'))
+    out = []
+    for name, kind, gain, pad in (('candidates', 'investigate', 'confidence', 0.5),
+                                  ('explore_points', 'explore', 'unseen_share', 1.0)):
+        items = [it for it in state.get(name) or [] if isinstance(it, dict) and it.get('id')]
+        good = _reachable(items, battery)
+        chosen = good if feasible else [it for it in items if it not in good]
+        chosen.sort(key=lambda it: -_num(it.get(gain)) / (_num(it.get('cost_to')) + pad))
+        out += [{'type': kind, 'target': it['id']} for it in chosen]
+    return out
+
+
+def _one(subgoal, why, state=None):
+    return {'reasoning': why, 'hypotheses': _hypotheses(state) if state else [], 'subgoals': [subgoal]}
+
+
+def temper_plan(state, temperament=None, rng=None):
+    """План имитатора с характером; normal и None — в точности mock_plan."""
+    rng = rng or random.Random(0)
+    battery = _num(state.get('battery'))
+    if temperament in (None, 'normal') or _all_collected(state):
+        return mock_plan(state)
+    if _wants_home(state, temperament):
+        return _one(HOME, f'Заряд {battery:.1f} ниже {TIMID_SHARE:.0%} начального — возвращаюсь на базу.')
+    if temperament == 'random':
+        targets = _targets(state)
+        if targets:
+            return _one(rng.choice(targets), f'Цель выбрана наугад при заряде {battery:.1f}.', state)
+    if temperament == 'careless' and rng.random() < CARELESS_P:
+        targets = _targets(state, feasible=False)
+        if targets:
+            return _one(rng.choice(targets), 'Беру цель, не проверив запас на возврат.', state)
+    return mock_plan(state)
+
+
+def temper_proposals(state, k, temperament=None, rng=None):
+    """До k планов с разными первыми подцелями: сначала свой, потом остальные цели по выгоде и возврат."""
+    rng = rng or random.Random(0)
+    plans = [temper_plan(state, temperament, rng)]
+    rest = _targets(state)
+    if temperament == 'random':
+        rng.shuffle(rest)
+    for sg in rest + [HOME]:
+        if len(plans) >= k:
+            break
+        if all(p['subgoals'][0] != sg for p in plans):
+            plans.append(_one(sg, 'Другой вариант первой подцели.'))
+    return {'plans': plans}
+
+
+def temper_review(state, plan, temperament=None, rng=None):
+    """Отзыв критика на план: критик сверяет первую подцель со своей, а характер у него тот же."""
+    rng = rng or random.Random(0)
+    first = ((plan or {}).get('subgoals') or [{}])[0]
+    accept = {'verdict': 'accept', 'issues': [], 'advice': ''}
+    if _wants_home(state, temperament):
+        if first.get('type') == 'return_base':
+            return accept
+        return {'verdict': 'revise', 'advice': 'Возвращайся на базу (return_base).',
+                'issues': [f"Заряд {_num(state.get('battery')):.1f} ниже {TIMID_SHARE:.0%} начального, дальше ехать опасно"]}
+    if temperament == 'random':
+        if rng.random() < 0.5:
+            return accept
+        return {'verdict': 'revise', 'issues': ['Цель выбрана неудачно'], 'advice': 'Выбери другую цель.'}
+    if temperament == 'careless' and rng.random() < CARELESS_P:
+        return accept                        # не проверял
+    mine = mock_plan(state)['subgoals'][0]
+    if first == mine:
+        return accept
+    target = ' '.join(str(v) for v in mine.values())
+    return {'verdict': 'revise', 'issues': [f'По правилам выбора первая подцель должна быть другой: {target}'],
+            'advice': f'Первая подцель — {target}.'}
+
+
+def temper_choice(state, options, temperament=None, rng=None):
+    """Выбор строки таблицы последствий (см. llm_orchestration.consequences); номера с единицы."""
+    rng = rng or random.Random(0)
+    n = len(options)
+    if not n:
+        return {'choice': 1, 'reasoning': 'Вариантов нет.'}
+    if _wants_home(state, temperament):
+        best = max(range(n), key=lambda i: (options[i].get('kind') == 'return_base',
+                                            _num(options[i].get('battery_after_return'), -1e9), -i))
+        return {'choice': best + 1, 'reasoning': 'Беру возврат на базу, а без него — наибольший остаток заряда.'}
+    if temperament == 'random':
+        return {'choice': rng.randrange(n) + 1, 'reasoning': 'Вариант выбран наугад.'}
+    if temperament == 'careless' and rng.random() < CARELESS_P:
+        best = max(range(n), key=lambda i: (_num(options[i].get('sample_probability')), -i))
+        return {'choice': best + 1, 'reasoning': 'Беру вариант с наибольшей вероятностью образца, запас не проверял.'}
+    return {'choice': calc_choice(options, state) + 1,
+            'reasoning': 'Хватает заряда, выгода на единицу заряда наибольшая.'}
+
+
 def find_state(messages):
     """Состояние из последнего сообщения пользователя, в котором оно есть; иначе {}."""
     for m in reversed(messages or []):
@@ -98,6 +219,23 @@ def find_state(messages):
     return {}
 
 
+def find_query(messages):
+    """Что спрашивают: (шаг, данные шага). Шаги — plan, proposals, review, choice (did/llm_orchestration.py)."""
+    for m in reversed(messages or []):
+        if isinstance(m, dict) and m.get('role') == 'user':
+            try:
+                obj = extract_json(m.get('content'))
+            except LLMError:
+                continue                     # просьба исправить ответ: сам запрос — выше по переписке
+            if obj.get('request') == 'review':
+                return 'review', obj
+            if obj.get('request') == 'choice':
+                return 'choice', obj
+            if 'battery' in obj or 'candidates' in obj:
+                return ('proposals' if PROPOSE_MARK in m['content'] else 'plan'), obj
+    return 'plan', {}
+
+
 class MockResponder:
     """Ответчик для LocalClient и HTTP-сервера. Сбои выпадают по вероятностям, детерминированно по seed.
 
@@ -106,9 +244,12 @@ class MockResponder:
     есть ответ модели) приходит корректный план: сбои содержимого на него не действуют.
     """
 
-    def __init__(self, seed=0, faults=None, script=None):
+    def __init__(self, seed=0, faults=None, script=None, temperament=None):
         self.faults = dict(faults or {})
         self.script = list(script or [])
+        if temperament not in (None, *TEMPERAMENTS):
+            raise ValueError(f"неизвестный характер «{temperament}»; есть: {', '.join(TEMPERAMENTS)}")
+        self.temperament = temperament       # None и normal — прежний имитатор
         unknown = sorted((set(self.faults) | set(self.script)) - set(FAULTS) - {'ok'})
         if unknown:
             raise ValueError(f"неизвестные сбои: {', '.join(unknown)}; есть: {', '.join(FAULTS)}")
@@ -143,16 +284,33 @@ class MockResponder:
         task = find_task(messages)           # запрос роли расследования (автор, критик, вывод), а не плана
         if task is not None:
             return kind, mock_reply(kind, task, repair)
-        return kind, self._render(kind, find_state(messages))
+        return kind, self._render(kind, messages)
 
-    def _render(self, kind, state):
-        if kind == 'empty':
-            return ''
-        plan = mock_plan(state)
+    def _reply(self, kind, messages):
+        """Ответ на шаг способа оркестрации или план; сбои содержимого портят его по-своему."""
+        step, data = find_query(messages)
+        broken = kind in ('invalid_target', 'out_of_arena')
+        if step == 'review':
+            reply = temper_review(data.get('state') or {}, data.get('plan'), self.temperament, self.rng)
+            return {**reply, 'verdict': 'maybe'} if broken else reply
+        if step == 'choice':
+            reply = temper_choice(find_state(messages), data.get('options') or [], self.temperament, self.rng)
+            return {**reply, 'choice': 99} if broken else reply
+        if step == 'proposals':
+            reply = temper_proposals(data, 3, self.temperament, self.rng)
+            plan = reply['plans'][0]
+        else:
+            reply = plan = temper_plan(data, self.temperament, self.rng)
         if kind == 'invalid_target':
             plan['subgoals'][0] = {'type': 'investigate', 'target': 'C99'}
         elif kind == 'out_of_arena':
             plan['subgoals'][0] = {'type': 'goto', 'x': 4.2, 'y': -3.7}
+        return reply
+
+    def _render(self, kind, messages):
+        if kind == 'empty':
+            return ''
+        plan = self._reply(kind, messages)
         text = json.dumps(plan, ensure_ascii=False)
         if kind == 'malformed':
             return text[:len(text) * 2 // 3]

@@ -1,0 +1,40 @@
+title: Подбор правки забывания на отладочных сценариях (к опыту E19)
+kind: adaptation
+question: Какие параметры правки забывания взять в итоговый опыт E19?
+hypothesis: >-
+  Подбор, а не проверка гипотезы: на сценариях 1–80 сравниваются четыре набора параметров правки. В E19 идёт
+  набор с наибольшей средней разностью разностей счёта «на пути» против «без смены» относительно no_change.
+method: >-
+  Уровень hard, отладочные сценарии 1–80 (не отложенные), из событий только смена грунта. Варианты правки
+  отличаются длиной окна свежих отрезков, радиусом стирания и весом старых данных вдали от места тревоги.
+expect: Различия между наборами меньше разброса; выбор по среднему, без претензии на значимость.
+refute: Не применяется — это подбор. Выводы по гипотезе делаются только в E19 на отложенных сценариях.
+levels: [hard]
+seeds: 80
+seed_start: 1
+soil_probe: {control: no_change, oracle: oracle}
+arms:
+  - {id: no_change, label: Без обнаружения изменений, agent: no_change}
+  - {id: adaptive, label: Прежнее забывание, agent: adaptive}
+  - {id: fresh, label: 'Правка: окно 0,3 м, радиус 0,7 м, вдали 0,6', agent: adaptive_fresh,
+     config: {fresh_window_m: 0.3, fresh_radius_m: 0.7, fresh_keep_far: 0.6}}
+  - {id: fresh_far1, label: 'Правка: то же, вдали данные не ослабляются', agent: adaptive_fresh,
+     config: {fresh_window_m: 0.3, fresh_radius_m: 0.7, fresh_keep_far: 1.0}}
+  - {id: fresh_short, label: 'Правка: окно 0,15 м', agent: adaptive_fresh,
+     config: {fresh_window_m: 0.15, fresh_radius_m: 0.7, fresh_keep_far: 0.6}}
+  - {id: fresh_wide, label: 'Правка: окно 0,6 м, радиус 1,0 м', agent: adaptive_fresh,
+     config: {fresh_window_m: 0.6, fresh_radius_m: 1.0, fresh_keep_far: 0.6}}
+  - {id: oracle, label: Оракул грунта, agent: soil_oracle}
+conditions:
+  - {id: none, label: Без смены грунта, scenario: {events: []}}
+  - {id: random, label: Смена в случайном месте, scenario: {events: [soil_change]}}
+  - {id: route, label: Смена на пути, scenario: {events: [soil_change], soil_change_mode: route}}
+metrics: [score, samples_share, returned, battery_used]
+claims:
+  - {metric: score, a: fresh, b: no_change, minus: none, text: 'Окно 0,3 / радиус 0,7 / вдали 0,6: разность разностей'}
+  - {metric: score, a: fresh_far1, b: no_change, minus: none, text: 'Вдали без ослабления: разность разностей'}
+  - {metric: score, a: fresh_short, b: no_change, minus: none, text: 'Окно 0,15: разность разностей'}
+  - {metric: score, a: fresh_wide, b: no_change, minus: none, text: 'Окно 0,6 / радиус 1,0: разность разностей'}
+  - {metric: score, a: adaptive, b: no_change, minus: none, text: 'Прежнее забывание: разность разностей'}
+  - {metric: score, a: oracle, b: no_change, minus: none, text: 'Оракул: разность разностей (потолок)'}
+  - {metric: soil_extra_energy, better: lower, a: fresh, b: adaptive, conditions: [route], text: 'Лишний заряд на подорожавшем полу: правка против прежнего'}

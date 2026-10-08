@@ -26,7 +26,7 @@ conditions:
       battery_sigma: 0.02
       faults: true
       hazard_battery_hit: 0.0
-metrics: [hyp_correct_share, hyp_confirmed_correct, hyp_refuted_correct, hyp_soil_error, samples_share, returned, score]
+metrics: [hyp_correct_share, hyp_confirmed_correct, hyp_refuted_correct, hyp_soil_error, hyp_verified_share, samples_share, returned, score]
 claims:
   - {metric: hyp_confirmed_correct, a: scientist, b: adaptive, text: Исследователь подтверждает гипотезы не менее точно, better: higher}
   - {metric: hyp_soil_error, a: scientist, b: adaptive, text: Ошибка оценки множителя грунта у исследователя не выше, better: lower}
