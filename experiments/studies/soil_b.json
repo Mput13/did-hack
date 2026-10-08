@@ -1,0 +1,9 @@
+{
+  "title": "Расход в области B",
+  "quantity": "soil_cost",
+  "region": {"zone": "B"},
+  "allowed": {"straight": {"length_m": 0.5, "repeats": 2}},
+  "controls": {"max": 2},
+  "stop": {"rel_error": 0.05, "max_measurements": 12, "time_s": 300},
+  "budget": {"energy": 40, "reserve": 3}
+}

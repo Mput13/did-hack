@@ -1009,10 +1009,10 @@ def main():
             arena = load_arena()
             rules = Rules(**(SCIENCE if args.rules == 'science' else {}))
             plan = check_study(spec, arena, rules, generate(level, seed, arena))
-            print(describe(load_spec(spec)))
+            print(ru(describe(load_spec(spec))))
             for p in plan['problems']:
-                print(('ОШИБКА: ' if p['level'] == 'error' else 'Замечание: ') + p['text'])
-            print('\n'.join(f'{i}. {s}' for i, s in enumerate(plan['steps'], 1)))
+                print(('ОШИБКА: ' if p['level'] == 'error' else 'Замечание: ') + ru(p['text']))
+            print('\n'.join(ru(f'{i}. {s}') for i, s in enumerate(plan['steps'], 1)))
             raise SystemExit(0 if plan['ok'] else 2)
     except StudyError as e:
         raise SystemExit('Задание не принято:\n- ' + '\n- '.join(e.problems)) from e

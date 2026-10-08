@@ -29,7 +29,7 @@ conditions:
   - {id: bias, label: Только занижение датчика, scenario: {fault_kinds: [sensor_bias], n_hazards: 3}}
   - {id: stuck, label: Только залипание датчика, scenario: {fault_kinds: [sensor_stuck], n_hazards: 3}}
   - {id: double, label: Батарея и датчик сразу, scenario: {fault_kinds: [leak+sensor_noise, leak+sensor_stuck, leak+sensor_bias], n_hazards: 3}}
-  - {id: weak_soil, label: Грунт дороже всего в 1,5 раза, scenario: {soil_mults: [1.5]}}
+  - {id: weak_soil, label: "Грунт дороже в 1,5 раза", scenario: {soil_mults: [1.5]}}
 metrics: [inq_correct, inq_wrong, inq_insufficient, faults_found, returned, score, inq_total, inq_energy]
 claims:
   - {metric: returned, a: scientist, b: adaptive, text: В ловушках исследователь возвращается не реже адаптивного, better: higher}

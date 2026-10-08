@@ -29,7 +29,8 @@ SRC = ROOT / 'docs' / 'explainer'
 STORIES = [('typical', 1026, 'Типичный трудный сценарий'), ('failure', 1032, 'Сценарий, где адаптивный агент проиграл')]
 KEEP_METRICS = ('score', 'samples_share', 'returned', 'battery_used', 'penalties', 'false_collects',
                 'hazard_hits', 'distance', 'time', 'collisions', 'inq_total', 'inq_correct', 'inq_wrong',
-                'inq_insufficient', 'inq_energy', 'faults_found')
+                'inq_insufficient', 'inq_energy', 'faults_found', 'study_error_pct', 'study_covered',
+                'study_halfwidth_pct', 'study_energy')
 SCIENCE_STORY = 1020      # прогон исследователя, в котором есть утечка, залипший датчик и дорогой грунт
 
 
@@ -182,6 +183,27 @@ def inquiry_accuracy(exp='E10', arm='scientist', level='hard'):
             'wrong': sum(r['wrong'] for r in rows.values())} if runs else None
 
 
+def trap_table(exp='E14', arm='scientist', level='hard'):
+    """Опыт с ловушками: сколько выводов вынесено и сколько из них неверных в каждом условии."""
+    spec = experiment(exp)
+    if not spec or not spec.get('spec'):
+        return None
+    rows = []
+    for cond in spec['spec']['conditions']:
+        folder = arm if cond['id'] == 'base' else f"{arm}@{cond['id']}"
+        c = {'correct': 0, 'partial': 0, 'wrong': 0, 'insufficient': 0, 'unverifiable': 0}
+        runs = 0
+        for path in sorted((RUNS / exp / folder).glob(f'{level}-*.json.gz')):
+            runs += 1
+            for q in load_trace(path).get('inquiries', []):
+                if q.get('conclusion') and q.get('verdict') in c:
+                    c[q['verdict']] += 1
+        if runs:
+            rows.append({'id': cond['id'], 'label': cond['label'], 'runs': runs, **c,
+                         'identified': c['correct'] + c['partial'] + c['wrong'] + c['unverifiable']})
+    return rows or None
+
+
 def main():
     arena = load_arena()
     stories = []
@@ -212,6 +234,7 @@ def main():
         'experiments': {p.stem: experiment(p.stem) for p in sorted((ROOT / 'experiments').glob('E*.yaml'))},
         'science': science_story(),
         'inq_accuracy': inquiry_accuracy(),
+        'traps': trap_table(),
         'kb': _json(RUNS / '_knowledge' / 'kb.json'),
         'llm_real': {p.name.removesuffix('.summary.json'): {k: v for k, v in _json(p).items() if k not in ('runs',)}
                      for p in sorted((RUNS / 'llm_real').glob('*.summary.json'))},

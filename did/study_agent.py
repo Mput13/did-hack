@@ -1064,7 +1064,8 @@ class StudyAgent(LawMixin, Agent):
             nominal = self.rules.drain_per_m
             n_c = self._count('control', 'straight')
             text = (f"В области метр пути стоит {est['value'] * c:.2f} ед., "
-                    + (f"на контрольном участке — {c:.2f} ± {1.96 * sd:.2f} ед. по {n_c} пробегам (номинал из условия {nominal:g}). "
+                    + (f"на контрольном участке — {c:.2f} ± {1.96 * sd:.2f} ед. по {n_c} {plural(n_c, 'пробегу', 'пробегам', 'пробегам')} "
+                       f"(номинал из условия {nominal:g}). "
                        if n_c else f"контрольных пробегов нет, за обычный пол взят номинал из условия {nominal:g} ± {1.96 * sd:.2f} ед. ")
                     + f"Отношение — {est['value']:.2f}.")
             checks = [r for r in self.measurements if r['role'] in ('check', 'calibration') or r['kind'] == 'pause']
@@ -1080,9 +1081,10 @@ class StudyAgent(LawMixin, Agent):
                 return None
             idle = s['per_s']
             spin, dt = float(np.mean([r['spent'] for r in spins])), float(np.mean([r['dt'] for r in spins]))
+            n_p = self._count('control', 'pause') + 1
             text = (f"Разворот на {math.degrees(np.mean([r['dth'] for r in spins])):.0f}° стоит {spin:.2f} ед. за {dt:.1f} с; "
                     f"простоять столько же стоит {idle['value'] * dt:.2f} ед. (на месте уходит {idle['value']:.3f} ± "
-                    f"{1.96 * idle['sigma']:.3f} ед/с по {self._count('control', 'pause') + 1} паузам). Разница — цена самого поворота.")
+                    f"{1.96 * idle['sigma']:.3f} ед/с по {n_p} {plural(n_p, 'паузе', 'паузам', 'паузам')}). Разница — цена самого поворота.")
             return {'unit': 'ед. за замер', 'test': {'value': round(spin, 4)}, 'control': {'value': round(idle['value'] * dt, 4)},
                     'idle': idle, 'text': text}
         if self.q == 'idle_cost':

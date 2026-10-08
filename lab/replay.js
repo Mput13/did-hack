@@ -2381,7 +2381,14 @@ function createCharts(host, api) {
           if (w >= 50) s('text', { x: (x0 + 4).toFixed(1), y: P.t + plot - 5, class: 'rp-ch-bandlabel' }, bands).textContent = 'утечка';
         }
       } else if (c.key === 'sensor') {
-        for (const f of m.faults) {
+        // сбои могут накладываться (по расписанию сценария и после штрафа) — рисуем их одной полосой
+        const merged = [];
+        for (const f of m.faults.slice().sort((p, q) => p.t0 - q.t0)) {
+          const last = merged[merged.length - 1];
+          if (last && f.t0 <= last.t1 + 0.05) last.t1 = Math.max(last.t1, f.t1);
+          else merged.push({ t0: f.t0, t1: f.t1 });
+        }
+        for (const f of merged) {
           const x0 = xOf(f.t0);
           const w = Math.max(1.5, xOf(Math.min(f.t1, dur)) - x0);
           s('rect', { x: x0.toFixed(1), y: P.t, width: w.toFixed(1), height: plot, class: 'rp-ch-fault' }, bands);

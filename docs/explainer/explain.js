@@ -367,10 +367,12 @@
 
   /** Точки со средним и 95% интервалом: категории по горизонтали, варианты агента рядом. */
   function dotChart(root, cfg) {
-    const box = el('figure', 'chart');
+    const many = cfg.cats.length > 5;         // много условий: график во всю ширину, подписи в несколько строк
+    const box = el('figure', many ? 'chart wide' : 'chart');
     box.appendChild(el('figcaption', null, `<b>${cfg.title}</b>${cfg.sub ? `<span>${cfg.sub}</span>` : ''}`));
     if (cfg.series.length > 1 && !cfg.noLegend) legend(box, cfg.series);
-    const W = 460, H = 250, m = { l: 44, r: 14, t: 16, b: 34 };
+    const W = many ? 940 : 460, H = many ? 270 : 250, m = { l: 44, r: 14, t: 16, b: many ? 56 : 34 };
+    const wrap = text => { const out = ['']; text.split(' ').forEach(w => { if ((out[out.length - 1] + ' ' + w).trim().length > 15 && out[out.length - 1]) out.push(w); else out[out.length - 1] = (out[out.length - 1] + ' ' + w).trim(); }); return out.slice(0, 3); };
     const svg = S('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': cfg.title });
     const vals = [];
     cfg.cats.forEach(c => cfg.series.forEach(s => { const v = cfg.get(c, s); if (v) vals.push(v.lo, v.hi, v.mean); }));
@@ -385,13 +387,14 @@
     const rows = [];
     cfg.cats.forEach((c, ci) => {
       const cx = m.l + band * (ci + 0.5);
-      S('text', { x: cx, y: H - 12, 'text-anchor': 'middle', class: 'ax cat' }, svg, c.label);
+      if (many) wrap(c.label).forEach((line, li) => S('text', { x: cx, y: H - m.b + 18 + li * 13, 'text-anchor': 'middle', class: 'ax cat' }, svg, line));
+      else S('text', { x: cx, y: H - 12, 'text-anchor': 'middle', class: 'ax cat' }, svg, c.label);
       cfg.series.forEach((s, si) => {
         const v = cfg.get(c, s); if (!v) return;
         const x = cx + (si - (cfg.series.length - 1) / 2) * Math.min(34, band / (cfg.series.length + 0.6));
         if (cfg.points) {
           const pts = cfg.points(c, s) || [];
-          pts.forEach((p, k) => S('circle', { cx: x + ((k * 7919) % 13 - 6) * 0.9, cy: y(p), r: 1.8, fill: s.color, opacity: 0.22 }, svg));
+          pts.forEach((p, k) => { if (p >= lo && p <= hi) S('circle', { cx: x + ((k * 7919) % 13 - 6) * 0.9, cy: y(p), r: 1.8, fill: s.color, opacity: 0.22 }, svg); });
         }
         if (v.hi > v.lo) S('line', { x1: x, x2: x, y1: y(v.lo), y2: y(v.hi), stroke: s.color, 'stroke-width': 2, 'stroke-linecap': 'round' }, svg);
         const dot = S('circle', { cx: x, cy: y(v.mean), r: 5.5, fill: s.color, stroke: '#fff', 'stroke-width': 2 }, svg);
@@ -514,6 +517,11 @@
     faults_found: { title: 'Найдено сбоев', sub: 'доля настоящих сбоев', fmt: pct, ymin: 0, ymax: 1.08, noPoints: true },
     inq_insufficient: { title: 'Исход «недостаточно данных» за прогон', fmt: v => num(v, 2), ymin: 0, noPoints: true },
     inq_energy: { title: 'Заряд на опыты за прогон', fmt: v => num(v, 2), unit: 'ед.', ymin: 0, noPoints: true },
+    inq_wrong: { title: 'Ошибочных выводов за прогон', fmt: v => num(v, 2), ymin: 0, noPoints: true },
+    study_error_pct: { title: 'Ошибка оценки', sub: '% от настоящего значения', fmt: v => num(v, 1), unit: '%', ymin: 0 },
+    study_covered: { title: 'Истина внутри заявленного интервала', sub: 'доля прогонов, должно быть около 95%', fmt: pct, ymin: 0, ymax: 1.08, noPoints: true },
+    study_halfwidth_pct: { title: 'Заявленная погрешность', sub: '95%, в % от оценки', fmt: v => num(v, 1), unit: '%', ymin: 0 },
+    study_energy: { title: 'Заряд на исследование', fmt: v => num(v, 1), unit: 'ед.', ymin: 0 },
   };
   function expCharts(root, exp, metrics, byCondition) {
     const s = E[exp].spec, grid = el('div', 'chart-grid'), series = armsOf(exp);
@@ -834,8 +842,13 @@
     block('E9', ['samples_share', 'distance', 'battery_used', 'score'], false);
     block('E10', ['returned', 'samples_share', 'score', 'inq_correct', 'faults_found', 'inq_energy'], false);
     block('E11', ['faults_found', 'inq_insufficient', 'returned', 'score'], false);
-    block('E12', E.E12 ? E.E12.spec.metrics : [], false);
+    block('E12', ['study_error_pct', 'study_covered', 'study_halfwidth_pct', 'study_energy'], false);
     block('E13', ['returned', 'samples_share', 'score', 'battery_used'], false);
+    block('E14', ['inq_wrong', 'inq_insufficient', 'faults_found', 'returned', 'score', 'inq_energy'], true);
+    const tt = $('traps');
+    if (tt && D.traps) tt.innerHTML = '<thead><tr><th style="width:34%">Условие</th><th>Выводов вынесено</th><th>Из них неверных</th><th>Доля неверных</th><th>«Недостаточно данных»</th></tr></thead><tbody>' +
+      D.traps.map(r => `<tr><td>${r.label}</td><td>${r.identified}</td><td><b>${r.wrong}</b></td><td>${pct(r.identified ? r.wrong / r.identified : 0)}</td><td>${r.insufficient}</td></tr>`).join('') + '</tbody>';
+    else if (tt) tt.remove();
   })();
 
   /* --------------------------------------------------------- расследования */
@@ -939,7 +952,7 @@
     const toc = $('toc'); if (!toc) return;
     const secs = [...document.querySelectorAll('main section[id]')];
     secs.forEach((s, i) => { const h = s.querySelector('h2'); if (!h) return; const n = h.querySelector('.n'); if (n) n.textContent = i; const a = el('a', null, h.dataset.short || h.textContent.replace(/^\d+/, '')); a.href = '#' + s.id; toc.appendChild(a); });
-    for (const id of ['E12', 'E13']) { const w = $('wrap-' + id); if (w && !E[id]) w.style.display = 'none'; }
+    for (const id of ['E12', 'E13', 'E14']) { const w = $('wrap-' + id); if (w && !E[id]) w.style.display = 'none'; }
     const links = [...toc.querySelectorAll('a')];
     const mark = () => { let cur = secs[0]; for (const sec of secs) if (sec.getBoundingClientRect().top <= 160) cur = sec; links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + cur.id)); };
     window.addEventListener('scroll', mark, { passive: true }); mark();

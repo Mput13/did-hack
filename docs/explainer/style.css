@@ -135,6 +135,7 @@ svg.diagram .arr.acc { stroke: var(--accent); marker-end: url(#ah2); }
 @media (max-width: 760px) { .chart-grid { grid-template-columns: 1fr; } }
 figure.chart { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px 8px; }
 figure.chart.wide { margin: 14px 0; }
+.chart-grid figure.chart.wide { grid-column: 1 / -1; margin: 0; }
 figure.chart figcaption { font-size: 15px; line-height: 1.35; margin-bottom: 6px; }
 figure.chart figcaption span { display: block; font-size: 13px; color: var(--ink-2); margin-top: 2px; }
 figure.chart svg { width: 100%; height: auto; display: block; overflow: visible; }

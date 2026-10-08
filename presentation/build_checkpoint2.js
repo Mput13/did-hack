@@ -10,9 +10,10 @@
 //        --no-pdf — только pptx и текст доклада.
 //
 // Числа на слайдах читаются из runs/*/summary.json, runs/llm_real/*.summary.json и data/checkpoint2.json.
-// Снимки показа берутся из demo/shots/, шаги сценария — из docs/demo_script.md, если эти файлы есть:
-// один снимок встаёт в середину слайда «Сценарий», два — занимают его нижнюю половину целиком.
-// Пока их нет, в середине стоит снимок проигрывателя веб-лаборатории (figures/lab_shots.js).
+// Снимки показа берутся из demo/shots/, если они есть: снимок пульта (в имени pult / pilot / пульт) встаёт
+// в середину слайда «Сценарий», снимок окна Gazebo (в имени gazebo / gz) — слева вместо первого кадра.
+// Пока снимка пульта нет, в середине стоит снимок проигрывателя веб-лаборатории (figures/lab_shots.js).
+// Шаги сценария и число «сколько пола видно со старта» сверяются с docs/demo_script.md.
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
@@ -186,14 +187,16 @@ const STEPS = [
   ["Результат", "образцы собраны, робот на базе, счёт судьи"],
 ];
 // Из снимков показа берём один с пультом и один с окном Gazebo, если по именам их можно различить.
-function pickShots(files) {
-  const pult = files.find((f) => /pult|pilot|пульт/i.test(path.basename(f)));
-  const gzw = files.find((f) => /gazebo|gz/i.test(path.basename(f)) && f !== pult);
-  const picked = [pult, gzw].filter(Boolean);
-  for (const f of files) if (picked.length < 2 && !picked.includes(f)) picked.push(f);
-  return picked.slice(0, 2);
-}
-const DEMO_SHOTS = pickShots(SHOTS);
+// Из снимков показа берём не больше двух: один с пультом (встаёт в середину слайда «Сценарий») и один
+// с окном Gazebo (встаёт слева вместо первого кадра). Различаем по именам файлов.
+const shotName = (f) => path.basename(f).toLowerCase();
+const isPult = (f) => /pult|pilot|пульт/.test(shotName(f));
+const GZ_SHOTS = SHOTS.filter((f) => /gazebo|gz/.test(shotName(f)) && !isPult(f));
+const PULT_SHOTS = SHOTS.filter(isPult);
+const moving = (f) => /tour|drive|move|mission|ride|route|объезд|маршрут|мисси/.test(shotName(f)) && !/done|end|finish|итог/.test(shotName(f));
+const GZ_SHOT = GZ_SHOTS.find(moving) || GZ_SHOTS[0] || null;
+const PULT_SHOT = PULT_SHOTS.find(moving) || PULT_SHOTS[0] || null;
+const DEMO_SHOTS = [PULT_SHOT, GZ_SHOT].filter(Boolean);
 
 // ---------- 3. оформление ----------
 const TEAM = [
@@ -420,38 +423,38 @@ pres.addSection({ title: SEC_A });
       { x: x - 0.15, y: y0 + fh + 0.04, w: fw + 0.3, h: 0.28, fontSize: 13, bold: true, align: "center", valign: "middle", objectName: `frame-${i + 1}-state` });
     text(s, `Журнал: «${quote(f.quote)}»`, { x: x - 0.15, y: y0 + fh + 0.32, w: fw + 0.3, h: 0.36, fontSize: 11, color: C.text2, align: "center", objectName: `frame-${i + 1}-quote` });
   };
-  const legend = () => text(s, `Кадры — ${runLine}. Синее — где агент ждёт образец, жёлтые кольца — где образцы на самом деле, зелёное — собрано, красное — штраф.`,
+  const legend = (which) => text(s, `${which} — ${runLine}. Синее — где агент ждёт образец, жёлтые кольца — где образцы на самом деле, зелёное — собрано, красное — штраф.`,
     { x: X0, y: 6.42, w: CW, h: 0.38, fontSize: 11, color: C.accent5, align: "center", valign: "top", objectName: "frames-legend" });
-  const center = DEMO_SHOTS[0] || (fs.existsSync(LAB_SHOT) ? LAB_SHOT : null);
-  if (DEMO_SHOTS.length >= 2) {
-    // Снимки показа: два рядом, во всю ширину.
-    const w = (CW - 0.3) / 2, h = 3.1;
-    DEMO_SHOTS.forEach((file, i) => {
-      const x = X0 + i * (w + 0.3);
-      const r = image(s, file, { x, y: y0, w, h, align: "top" }, `shot-${i + 1}`, shotCaption(file));
-      text(s, shotCaption(file), { x, y: r.y + r.h + 0.08, w, h: 0.4, fontSize: 13, color: C.text2, align: "center", objectName: `shot-${i + 1}-caption` });
-    });
-  } else if (center) {
-    // Начало и конец прогона — кадрами, середина — снимком интерфейса (или первым снимком показа).
-    const cw = 5.9, fw = (CW - cw - 0.5) / 2;
-    frame(st.frames[0], 0, X0, fw);
-    frame(st.frames[st.frames.length - 1], st.frames.length - 1, X0 + CW - fw, fw);
-    const cap = DEMO_SHOTS[0] ? shotCaption(center)
+  const center = PULT_SHOT || (fs.existsSync(LAB_SHOT) ? LAB_SHOT : null);
+  if (center) {
+    // Слева — начало (окно Gazebo, если его сняли, иначе первый кадр прогона), в середине — интерфейс
+    // (пульт, а пока его снимка нет — проигрыватель веб-лаборатории), справа — итог прогона.
+    const cw = 5.9, fw = (CW - cw - 0.5) / 2, fh = fw * 4.79 / 5, last = st.frames.length - 1;
+    if (GZ_SHOT) {
+      image(s, GZ_SHOT, { x: X0, y: y0, w: fw, h: fh }, "gazebo-shot", shotCaption(GZ_SHOT));
+      text(s, "Окно Gazebo", { x: X0 - 0.15, y: y0 + fh + 0.04, w: fw + 0.3, h: 0.28, fontSize: 13, bold: true, align: "center", valign: "middle", objectName: "gazebo-shot-head" });
+      text(s, "мир и робот из официальных пакетов; цветом показана скрытая правда", { x: X0 - 0.15, y: y0 + fh + 0.32, w: fw + 0.3, h: 0.36, fontSize: 11, color: C.text2, align: "center", objectName: "gazebo-shot-caption" });
+    } else {
+      frame(st.frames[0], 0, X0, fw);
+    }
+    frame(st.frames[last], last, X0 + CW - fw, fw);
+    const cap = PULT_SHOT ? shotCaption(center)
       : `Веб-лаборатория: тот же прогон в проигрывателе${LAB_META && LAB_META.time_s ? `, ${ru(LAB_META.time_s, 0)} с` : ""}`;
     const r = image(s, center, { x: X0 + fw + 0.25, y: y0, w: cw, h: 3.05, align: "top" }, "scenario-shot", cap);
     text(s, cap, { x: X0 + fw + 0.25, y: r.y + r.h + 0.05, w: cw, h: 0.26, fontSize: 12, color: C.text2, align: "center", valign: "middle", objectName: "scenario-shot-caption" });
-    legend();
+    legend(GZ_SHOT ? "Кадр справа" : "Кадры");
   } else {
     const fw = 2.55, gap = (CW - 4 * fw) / 3;
     st.frames.forEach((f, i) => frame(f, i, X0 + i * (fw + gap), fw));
-    legend();
+    legend("Кадры");
   }
 }
 
 // ---------- 4. архитектура ----------
 {
-  const walls = GZ.runs.map((r) => r.fastsim.wall_s).filter((v) => v > 0);
-  const fast = walls.length ? walls.reduce((a, b) => a + b, 0) / walls.length : null;     // секунд на прогон в быстром симуляторе
+  // Сколько секунд считается один прогон в быстром симуляторе: медиана по главной серии E1.
+  const walls = (Array.isArray(EXP.E1.runs) ? EXP.E1.runs.map((r) => r.wall_s) : []).filter((v) => v > 0).sort((a, b) => a - b);
+  const fast = walls.length ? walls[Math.floor(walls.length / 2)] : null;
   const s = content(SEC_A, "Архитектура решения", "Агент и стенд общаются только через каналы из условия: судью можно заменить судьёй организаторов", [
     "Слева стенд: генератор сценариев, судья и симулятор — Gazebo для показа и быстрый для серий опытов. Справа агент: картина мира, планировщик, исполнитель и журнал гипотез.",
     "Между ними только каналы из условия задачи, поэтому нашего судью можно заменить судьёй организаторов, не трогая агента.",
@@ -502,7 +505,7 @@ pres.addSection({ title: SEC_A });
   const by = 5.45, bh2 = 1.2, bw2 = 3.55, bgap = (CW - 3 * bw2) / 2;
   const chain = [
     ["Запись прогона", "путь, заряд, решения и гипотезы агента"],
-    ["Серии опытов", `${nSeries(EXP_IDS.length)} на одинаковых сценариях${fast ? `; ${ru(fast, 1)} с на прогон` : ""}`],
+    ["Серии опытов", `${nSeries(EXP_IDS.length)} на одинаковых сценариях${fast ? `; прогон считается ${ru(fast, 1)} с` : ""}`],
     ["Веб-лаборатория и пульт", "графики, проигрыватель прогонов, управление показом"],
   ];
   chain.forEach(([head, sub], i) => {

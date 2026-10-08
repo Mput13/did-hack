@@ -1,0 +1,9 @@
+# Задание для конструктора исследования (did/study.py): сколько заряда стоит поворот.
+#   pixi run python -m did.study --spec experiments/studies/turn.yaml --level medium --seed 3
+title: Цена поворота
+quantity: turn_cost
+allowed:
+  spin: {angle_deg: 360, repeats: 2}    # полные обороты, не меньше двух: по часовой и против
+  pause: {seconds: 3}                   # паузы для сравнения: сколько уходит без поворота
+stop: {rel_error: 0.05, max_measurements: 12, time_s: 200}
+budget: {energy: 10, reserve: 1}
