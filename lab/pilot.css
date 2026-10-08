@@ -47,11 +47,11 @@
 .dm-status { color:var(--ink-2); margin:0; font-size:13px; }
 .dm-notice { margin:0; background:var(--wash); padding:10px; border-radius:8px; font-size:13px; }
 .dm-notice[data-bad="true"] { background:#fff0ef; color:#a62f2f; }
-.dm-metrics { display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line); border-radius:12px; background:var(--surface); overflow:hidden; }
+.dm-metrics { display:grid; grid-template-columns:1fr 1fr 1fr; border:1px solid var(--line); border-radius:12px; background:var(--surface); overflow:hidden; }
 .dm-metrics > div { padding:16px; display:flex; flex-direction:column; gap:5px; }
 .dm-metrics > div + div { border-left:1px solid var(--line); }
 .dm-metrics span { color:var(--ink-2); font-size:13px; }
-.dm-metrics strong { font-size:28px; line-height:1.2; font-variant-numeric:tabular-nums; }
+.dm-metrics strong { font-size:24px; line-height:1.2; font-variant-numeric:tabular-nums; }
 .dm-result,.dm-cycle { padding:18px; display:flex; flex-direction:column; gap:12px; }
 .dm-result-title { font-size:18px; }
 .dm-comparison-card { background:#fbfcfd; }

@@ -149,6 +149,9 @@ def main():
     ap.add_argument('--no-gui', action='store_true', help='не открывать окно Gazebo')
     ap.add_argument('--no-hints', action='store_true', help='не рисовать скрытую правду на полу Gazebo')
     ap.add_argument('--open', action='store_true', help='открыть страницу пульта в браузере')
+    ap.add_argument('--agent', default=None, metavar='ИМЯ',
+                    help='какой агент выбран на странице для автономной миссии (например scientist_v2); '
+                         'без ключа — умолчание страницы')
     ap.add_argument('--slam', action='store_true',
                     help='запустить ещё и SLAM Toolbox: его карта появится на странице рядом с нашей')
     ap.add_argument('--slam-map', action='store_true',
@@ -169,7 +172,7 @@ def main():
     code = 0
     try:
         url, server = ensure_server(args.port)
-        page = f'{url}/#/pilot'
+        page = f'{url}/#/pilot' + (f'?agent={args.agent}' if args.agent else '')
         if args.fast and args.slam_map:
             raise SystemExit('--slam-map работает только в Gazebo: в быстром симуляторе SLAM Toolbox нет')
         if args.fast:
