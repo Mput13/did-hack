@@ -38,6 +38,23 @@ def client(model, cache_only=False):
     return make_client(**llm_opts(model, cache_only))
 
 
+class CacheFirst:
+    """Досчёт серии: что уже есть в кэше (ответ или отказ) — повторяется как было, чего нет — спрашивается по сети.
+
+    Обычный режим кэша пустые ответы и обрывы спрашивает заново, и прогон мог бы пойти другой дорогой.
+    """
+
+    def __init__(self, model):
+        self.strict, self.live = client(model, cache_only=True), client(model)
+        self.model, self.use_schema = self.live.model, self.live.use_schema
+
+    def chat(self, messages, **kw):
+        try:
+            return self.strict.chat(messages, **kw)
+        except CacheMiss:
+            return self.live.chat(messages, **kw)
+
+
 def slug(model):
     return model.replace('/', '-').replace(':', '-')
 

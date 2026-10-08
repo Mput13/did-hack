@@ -533,7 +533,8 @@ class Investigator:
         c = q.close(t, action, veto=veto)
         if self.roles is not None:
             from .llm_roles import explain
-            text = explain(self.roles, q.to_dict())
+            # Рассказчик получает расследование без служебной записи обсуждения (в ней время ответов модели).
+            text = explain(self.roles, {k: v for k, v in q.to_dict().items() if k != 'llm'})
             # Обмены рассказчика лежат при расследовании, а не в общей ленте: сводка llm_stats прежних опытов не меняется.
             q.llm = {**(q.llm or {}), 'explain': {'source': text.source, 'error': text.error, 'text': str(text),
                                                   'latency_ms': text.latency_ms, 'exchanges': list(text.exchanges)}}

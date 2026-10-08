@@ -16,7 +16,7 @@ import argparse
 import time
 from collections import Counter
 
-from l3_common import (ENV_FILE, MAIN, MODELS, RUNS, exchange_stats, fmt_share, llm_opts, paired_diff, run_cells, share,
+from l3_common import (ENV_FILE, MAIN, CacheFirst, MODELS, RUNS, exchange_stats, fmt_share, llm_opts, paired_diff, run_cells, share,
                        share_diff, slug, wait_for_idle, write_json)
 
 from did.llm import load_env
@@ -37,6 +37,8 @@ def run_cell(cell, experiment, cache_only):
     arm, level, seed = cell
     kind, _, model = arm.partition('@')
     roles = llm_opts(model, cache_only) if model else None
+    if model and cache_only == 'first':      # досчёт: готовые ответы и отказы из кэша, остальное по сети
+        roles = {'client': CacheFirst(model)}
     config = {'inquiry_follow_plan': True} if kind == 'plan' else None
     res = run_episode(level, seed, 'scientist', rules='science', experiment=experiment, arm=arm_dir(arm),
                       config=config, roles=roles)
@@ -199,6 +201,7 @@ def main():
     ap.add_argument('--jobs', type=int, default=6, help='сколько прогонов одновременно ждут модель')
     ap.add_argument('--out', default=EXPERIMENT)
     ap.add_argument('--cache-only', action='store_true')
+    ap.add_argument('--cache-first', action='store_true', help='досчёт: что есть в кэше — оттуда, остальное по сети')
     ap.add_argument('--report', action='store_true')
     ap.add_argument('--levels', nargs='+', default=None)
     ap.add_argument('--seeds', nargs='+', type=int, default=None, help='номера сценариев вместо плана (отладка)')
@@ -211,7 +214,8 @@ def main():
             wait_for_idle()
         cells = [(arm, lv, s) for arm in args.arms for lv, s in scen]
         t0 = time.time()
-        done = run_cells(cells, lambda c: run_cell(c, args.out, args.cache_only), args.jobs,
+        mode = 'first' if args.cache_first else args.cache_only
+        done = run_cells(cells, lambda c: run_cell(c, args.out, mode), args.jobs,
                          label=lambda c: f'{c[0]} {c[1]}-{c[2]}')
         print(f'Готово за {time.time() - t0:.0f} с, без результата: {sum(v is None for v in done.values())}', flush=True)
     summary = compile_summary(args.out, ARMS)
