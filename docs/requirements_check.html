@@ -8,11 +8,12 @@
  h1 { font-size: 24px; margin: 6px 0; } h2 { font-size: 19px; margin: 34px 0 8px; } h3 { font-size: 16px; margin: 18px 0 6px; }
  p { margin: 7px 0; } .sub { color: var(--mut); } a { color: var(--acc); }
  table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin: 8px 0 12px; }
- th, td { text-align: left; vertical-align: top; padding: 7px 10px 7px 0; border-top: 1px solid var(--line); }
+ th, td { text-align: left; vertical-align: top; padding: 7px 10px 7px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+ table { table-layout: fixed; } code { overflow-wrap: anywhere; }
  th { font-size: 12.5px; color: var(--mut); border-top: 0; font-weight: 600; }
  code { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; background: var(--card); padding: 1px 5px; border-radius: 4px; }
  .s { font-weight: 700; white-space: nowrap; } .ok { color: var(--ok); } .part { color: var(--part); } .no { color: var(--no); }
- .ref { color: var(--mut); font-size: 12.5px; white-space: nowrap; }
+ .ref { color: var(--mut); font-size: 12.5px; }
  .box { background: var(--card); border-radius: 10px; padding: 12px 16px; margin: 12px 0; }
  .flow { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; } .flow div { flex: 1 1 130px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 13.5px; }
  .flow b { display: block; font-size: 14px; } .flow .hl { border: 2px solid var(--acc); }
@@ -21,7 +22,7 @@
  .c { font-size: 12px; font-weight: 700; padding: 2px 7px; border-radius: 6px; white-space: nowrap; }
  .c.g { background: rgba(127,127,127,.25); } .c.i { background: rgba(235,104,52,.22); color: var(--acc); } .c.r { background: rgba(53,120,229,.2); color: #3b82f6; } .c.a { background: rgba(20,145,95,.2); color: var(--ok); } .c.h { background: rgba(192,57,43,.18); color: var(--no); }
  .nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 10px 0; } .nums div { background: var(--card); border-radius: 10px; padding: 10px 12px; } .nums b { display: block; font-size: 22px; } .nums span { font-size: 12.5px; color: var(--mut); }
- @media (max-width: 640px) { .nums { grid-template-columns: repeat(2, 1fr); } .lane .name { flex-basis: 100%; } }
+ @media (max-width: 760px) { .nums { grid-template-columns: repeat(2, 1fr); } .lane .name { flex-basis: 100%; } body { padding: 10px 12px 60px; font-size: 14.5px; } table { font-size: 13.5px; } }
 </style></head><body>
 <h1>Сверка с требованиями</h1>
 <p class="sub">Проходим по условию задачи, уровням, критериям, требованиям к показу и бонусным трекам: что выполнено, что частично, чего нет. Номера строк — как на странице <a href="/">с текстом условия</a>. Состояние на вечер 8 октября.</p>
