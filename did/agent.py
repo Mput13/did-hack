@@ -7,7 +7,7 @@
 import math
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 
 import numpy as np
 
@@ -59,6 +59,8 @@ class AgentConfig:
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
     risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
     foresight_choice: str = 'planner'  # среди прошедших по риску выбирает: planner — правило планировщика, score — счёт
+    scheme: str = 'rule'              # A1: rule — цель выбирает планировщик; tour — план на весь остаток прогона (did/tour.py)
+    scheme_opts: dict = field(default_factory=dict)   # настройки схемы: поля did.tour.Settings
 
     def to_dict(self):
         return asdict(self)
@@ -83,6 +85,20 @@ PRESETS = {
     'scientist_fs': AgentConfig(name='scientist_fs', science=True, foresight=True, risk_limit=0.15),
     'adaptive_fs': AgentConfig(name='adaptive_fs', foresight=True, risk_limit=0.15),
     # Отключение по одному механизму: что именно даёт выигрыш.
+    # A1: другие схемы выбора целей и возврата (did/tour.py); числа настроек подобраны на сценариях 1–80.
+    # План на весь остаток прогона с пересчётом: порядок кандидатов — перебором, ближние ценятся выше дальних,
+    # разведка — по правилу, когда кандидатов нет.
+    'adaptive_tour': AgentConfig(name='adaptive_tour', scheme='tour',
+                                 scheme_opts={'explore': 'rule', 'haste': 8.0, 'switch_gain': 0.0}),
+    # То же в чистом виде: кандидаты и участки разведки в одном объезде, порядок — по длине объезда.
+    'adaptive_tour_full': AgentConfig(name='adaptive_tour_full', scheme='tour'),
+    # Сначала короткий обзорный объезд (6 ед. заряда) с попутным сбором, потом сбор по правилу.
+    'adaptive_survey': AgentConfig(name='adaptive_survey', scheme='tour',
+                                   scheme_opts={'targets': 'rule', 'survey_cover': 1.8, 'survey_budget': 6.0}),
+    # Цели — по правилу, но возврат решает план: цель по дороге домой берётся, если на неё хватает заряда.
+    'adaptive_pickup': AgentConfig(name='adaptive_pickup', scheme='tour', scheme_opts={'targets': 'rule'}),
+    # Порог «кандидат не стоит заряда»: к месту с уверенностью ниже 50% робот не едет.
+    'adaptive_picky': AgentConfig(name='adaptive_picky', candidate_mass=0.5),
     'no_soil': AgentConfig(name='no_soil', learn_soil=False, detect_change=False),
     'no_change': AgentConfig(name='no_change', detect_change=False),
     'no_hazard': AgentConfig(name='no_hazard', avoid_hazards=False),
@@ -101,7 +117,7 @@ def make_config(name, **overrides):
 class Agent:
 
     def __init__(self, arena, config, n_samples, rules=None, planner=None, recorder=None, knowledge=None,
-                 roles=None, soil_truth=None):
+                 roles=None, soil_truth=None, truth=None):
         self.arena = arena
         self.cfg = config
         self.rules = rules or Rules()
@@ -175,6 +191,13 @@ class Agent:
         self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
         self._battery_threshold_triggered = False
         self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
+        self.tour = None
+        if config.scheme != 'rule':                         # A1: другая схема выбора целей и возврата
+            from .tour import TourScheme
+            self.tour = TourScheme(self)
+        self._oracle = truth                                # оракул (только быстрый симулятор): did/oracle.py
+        if truth is not None:
+            truth.attach(self)
 
     # ======================================================================================
     # один такт цикла
@@ -386,6 +409,8 @@ class Agent:
     # ======================================================================================
 
     def _refresh_costs(self, obs):
+        if self._oracle is not None:
+            self._oracle.refresh(self, obs)
         if self._soil_truth is not None and self._soil_truth() is not self._truth:
             first = self._truth is None
             self._truth = self._soil_truth()               # грунты сменились: оракул узнаёт об этом сразу
@@ -433,6 +458,8 @@ class Agent:
     def _check_return(self, obs):
         if self.fs is not None:
             return self.fs.check(obs)          # вместо жёсткого запаса — сравнение «ехать дальше» и «домой»
+        if self.tour is not None:
+            return self.tour.check(obs)        # возврат решает план на остаток прогона
         if self._returning:
             return
         home = self._home_cost(obs.x, obs.y)
@@ -587,6 +614,8 @@ class Agent:
             trigger = self._trigger
             state = self._state(obs, trigger)
             ahead = self.fs.plan(obs, state) if self.fs is not None else None    # выбор сравнением вариантов
+            if self.tour is not None:
+                ahead = self.tour.plan(obs, state)                               # порядок обхода всех целей сразу
             use_llm =self.cfg.planner == 'llm' and obs.t - self._last_llm_t >= self.cfg.llm_min_interval_s
             planner = self.planner if use_llm or self.cfg.planner != 'llm' else HeuristicPlanner()
             if use_llm:

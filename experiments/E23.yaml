@@ -1,0 +1,61 @@
+title: Другие устройства агента и потолок счёта
+kind: main
+question: >-
+  Есть ли устройство агента лучше нынешнего «лучшая цель сейчас», сколько очков вообще можно набрать при
+  данном запасе заряда и на чём теряется остальное?
+hypothesis: >-
+  Хотя бы один из новых вариантов — план на весь остаток прогона, разведка перед сбором, возврат с попутным
+  сбором, порог «кандидат не стоит заряда» — набирает больше очков, чем adaptive, на одних и тех же сценариях.
+method: >-
+  Нетронутые сценарии 6001–6040, уровни medium и hard, базовые и «научные» правила. Код и настройки заморожены
+  до запуска; числа настроек подобраны на сценариях 1–80 (tools/a1_dev.py). Каждый новый вариант сравнивается с
+  adaptive парной разностью счёта. В той же таблице — оракулы (did/oracle.py), которым быстрый симулятор сообщает
+  часть правды: места образцов; грунты и опасные зоны, включая будущие; всё сразу. Разность оракула с adaptive —
+  цена соответствующего незнания; оракул «знает всё» — потолок.
+expect: >-
+  Потолок на hard — около 91–92 очков. Знание мест образцов и знание среды дают по 10 очков и больше; выигрыш
+  новых вариантов, если есть, — единицы очков.
+refute: >-
+  Для каждого варианта отдельно: гипотеза «лучше adaptive» опровергнута, если верхняя граница 95% интервала
+  парной разности счёта не выше нуля; ноль внутри интервала — «различие не показано».
+arms:
+  - {id: adaptive, label: С адаптацией (нынешний), agent: adaptive}
+  - {id: fixed, label: Фиксированный план, agent: fixed}
+  - {id: adaptive_tour, label: 'A. План на остаток прогона', agent: adaptive_tour}
+  - {id: adaptive_tour_full, label: 'A. То же в чистом виде (кандидаты и разведка в одном объезде)', agent: adaptive_tour_full}
+  - {id: adaptive_survey, label: 'B. Сначала разведка (6 ед.), потом сбор', agent: adaptive_survey}
+  - {id: adaptive_survey15, label: 'B. Сначала разведка (15 ед.), потом сбор', agent: adaptive_survey,
+     config: {scheme_opts: {targets: rule, survey_cover: 1.8, survey_budget: 15.0}}}
+  - {id: adaptive_pickup, label: 'C. Возврат с попутным сбором', agent: adaptive_pickup}
+  - {id: adaptive_picky, label: 'C. Порог «кандидат не стоит заряда»', agent: adaptive_picky}
+  - {id: oracle_touch, label: 'Оракул: зона грунта известна после въезда', agent: oracle_touch}
+  - {id: oracle_env, label: 'Оракул: знает грунты и опасные зоны', agent: oracle_env}
+  - {id: oracle_samples, label: 'Оракул: знает места образцов', agent: oracle_samples}
+  - {id: oracle_samples_tour, label: 'Оракул: знает места образцов, обход по плану', agent: oracle_samples_tour}
+  - {id: oracle_all, label: 'Оракул: знает всё (потолок)', agent: oracle_all}
+conditions:
+  - {id: base, label: Базовые правила}
+  - {id: science, label: «Научные» правила,
+     rules: {drain_per_rad: 0.12, load_drain: 0.05, battery_sigma: 0.02, faults: true, hazard_battery_hit: 0.0}}
+levels: [medium, hard]
+seeds: 40
+seed_start: 6001
+metrics: [score, samples_share, returned, penalties, battery_used]
+claims:
+  - {metric: score, a: adaptive_tour, b: adaptive, text: 'A. План на остаток прогона набирает больше очков'}
+  - {metric: score, a: adaptive_tour_full, b: adaptive, text: 'A в чистом виде набирает больше очков'}
+  - {metric: score, a: adaptive_survey, b: adaptive, text: 'B. Разведка 6 ед. перед сбором набирает больше очков'}
+  - {metric: score, a: adaptive_survey15, b: adaptive, text: 'B. Разведка 15 ед. перед сбором набирает больше очков'}
+  - {metric: score, a: adaptive_pickup, b: adaptive, text: 'C. Возврат с попутным сбором набирает больше очков'}
+  - {metric: score, a: adaptive_picky, b: adaptive, text: 'C. Порог на кандидата набирает больше очков'}
+  - {metric: score, a: adaptive_pickup, b: adaptive, kind: noninferiority, margin: 1,
+     text: 'C. Возврат с попутным сбором не хуже adaptive (допуск 1 очко)'}
+  - {metric: score, a: adaptive_tour, b: adaptive, kind: noninferiority, margin: 1,
+     text: 'A. План на остаток прогона не хуже adaptive (допуск 1 очко)'}
+  - {metric: score, a: oracle_touch, b: adaptive, text: 'Цена незнания формы зоны грунта после въезда'}
+  - {metric: score, a: oracle_env, b: adaptive, text: 'Цена незнания среды: грунты и опасные зоны'}
+  - {metric: score, a: oracle_samples, b: adaptive, text: 'Цена поиска: знание мест образцов при прежнем правиле'}
+  - {metric: score, a: oracle_samples_tour, b: oracle_samples, text: 'Цена порядка обхода при известных местах'}
+  - {metric: score, a: oracle_all, b: adaptive, text: 'Потолок: знает всё'}
+  - {metric: samples_share, a: adaptive_tour, b: adaptive, text: 'A. План на остаток прогона собирает больше образцов'}
+  - {metric: returned, a: adaptive_tour, b: adaptive, text: 'A. План на остаток прогона возвращается не реже', better: higher}
