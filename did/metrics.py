@@ -185,6 +185,73 @@ def verdict(pair, better, kind=None, margin=None):
     return 'inconclusive'
 
 
+def _outline_points(z, x, y):
+    """Точки границы зоны, ближайшие к (x, y): для круга одна, для прямоугольника — по одной на сторону и углы."""
+    if z.shape == 'circle':
+        d = math.hypot(x - z.x, y - z.y)
+        return [(z.x + z.r * (x - z.x) / d, z.y + z.r * (y - z.y) / d) if d else (z.x + z.r, z.y)]
+    x0, x1, y0, y1 = z.x - z.w / 2, z.x + z.w / 2, z.y - z.h / 2, z.y + z.h / 2
+    cx, cy = min(max(x, x0), x1), min(max(y, y0), y1)
+    return [(cx, y0), (cx, y1), (x0, cy), (x1, cy), (x0, y0), (x0, y1), (x1, y0), (x1, y1)]
+
+
+def _outline_crossings(a, b):
+    """Точки пересечения границ двух зон (круги и прямоугольники со сторонами вдоль осей)."""
+    def sides(z):
+        x0, x1, y0, y1 = z.x - z.w / 2, z.x + z.w / 2, z.y - z.h / 2, z.y + z.h / 2
+        return [('h', y0, x0, x1), ('h', y1, x0, x1), ('v', x0, y0, y1), ('v', x1, y0, y1)]
+
+    out = []
+    if a.shape == 'circle' and b.shape == 'circle':
+        d = math.hypot(b.x - a.x, b.y - a.y)
+        if d and abs(a.r - b.r) <= d <= a.r + b.r:
+            k = (d * d + a.r * a.r - b.r * b.r) / (2 * d)
+            h = math.sqrt(max(a.r * a.r - k * k, 0.0))
+            ux, uy = (b.x - a.x) / d, (b.y - a.y) / d
+            out = [(a.x + k * ux - s * h * uy, a.y + k * uy + s * h * ux) for s in (-1, 1)]
+    elif a.shape == 'circle' or b.shape == 'circle':
+        c, r = (a, b) if a.shape == 'circle' else (b, a)
+        for kind, at, lo, hi in sides(r):
+            off = at - (c.y if kind == 'h' else c.x)
+            if abs(off) <= c.r:
+                h = math.sqrt(c.r * c.r - off * off)
+                for u in ((c.x if kind == 'h' else c.y) - h, (c.x if kind == 'h' else c.y) + h):
+                    if lo <= u <= hi:
+                        out.append((u, at) if kind == 'h' else (at, u))
+    else:
+        for ka, at_a, lo_a, hi_a in sides(a):
+            for kb, at_b, lo_b, hi_b in sides(b):
+                if ka != kb and lo_a <= at_b <= hi_a and lo_b <= at_a <= hi_b:
+                    out.append((at_b, at_a) if ka == 'h' else (at_a, at_b))
+    return out
+
+
+def changed_distance(start, now, x, y, eps=1e-6):
+    """Расстояние от (x, y) до пола, где множитель расхода сейчас (now) не тот, что был (start).
+
+    Точное, с учётом перекрытия зон: изменившаяся область ограничена дугами и отрезками границ зон, так что
+    ближайшая её точка — либо ближайшая точка границы одной из зон, либо пересечение двух границ. Каждая
+    такая точка проверяется: изменился ли множитель вплотную к ней. Если изменившегося пола нет — inf.
+    """
+    from .scenario import soil_mult
+
+    def changed(px, py):
+        return soil_mult(now, px, py) != soil_mult(start, px, py)
+
+    if changed(x, y):
+        return 0.0
+    zones = list({(z.shape, z.x, z.y, z.r, z.w, z.h): z for z in list(start) + list(now)}.values())
+    points = [p for z in zones for p in _outline_points(z, x, y)]
+    points += [p for i, a in enumerate(zones) for b in zones[i + 1:] for p in _outline_crossings(a, b)]
+    around = [(eps * math.cos(k * math.pi / 8), eps * math.sin(k * math.pi / 8)) for k in range(16)]
+    best = math.inf
+    for px, py in points:
+        d = math.hypot(px - x, py - y)
+        if d < best and any(changed(px + dx, py + dy) for dx, dy in around):
+            best = d
+    return best
+
+
 class SoilProbe:
     """Разбор смены грунта по скрытой правде: что изменение стоило роботу и верны ли его тревоги.
 
@@ -237,9 +304,7 @@ class SoilProbe:
                 soils = after
         if soils is self.start:
             return False
-        ring = [(0.0, 0.0)] + [(r * math.cos(k * math.pi / 6), r * math.sin(k * math.pi / 6))
-                               for r in (self.NEAR / 2, self.NEAR) for k in range(12)]
-        return any(self._mult(soils, x + dx, y + dy) != self._mult(self.start, x + dx, y + dy) for dx, dy in ring)
+        return changed_distance(self.start, soils, x, y) <= self.NEAR
 
     def metrics(self, journal):
         alarms = [(e['t'], e['data']['x'], e['data']['y']) for e in journal.entries

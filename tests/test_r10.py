@@ -13,7 +13,7 @@ from did.config import Rules
 from did.experiments import _soil_probe_table, summarize_experiment
 from did.journal import Journal
 from did.judge import Judge
-from did.metrics import SoilProbe, paired, paired_did, verdict
+from did.metrics import SoilProbe, changed_distance, paired, paired_did, verdict
 from did.nav import CostGraph
 from did.runner import ORACLE, _soil_truth, make_agent, run_episode
 from did.scenario import Scenario, Zone, generate
@@ -239,6 +239,66 @@ def test_soil_probe_counts_cost_of_change_and_sorts_alarms():
     # До события и вдали от изменившегося пола — ложные; на зоне и в 0,2 м от её края — по делу.
     assert (m['soil_alarms'], m['soil_alarms_true'], m['soil_alarms_false']) == (4, 2, 2)
     assert m['soil_alarm_delay'] == pytest.approx(1.0)
+
+
+def _probe(start, after, t=1.0):
+    sc = Scenario('hard', 1, samples=[], soils=start, events=[{'t': t, 'type': 'soil_change', 'soils': after}])
+    return SoilProbe(sc, Rules())
+
+
+def test_alarm_near_changed_floor_is_not_missed_between_probe_points():
+    # Новая зона ×4 в 0,29 м от места тревоги, в стороне от прежних 24 пробных точек: тревога по делу.
+    zone = Zone('R1', 'circle', 0.79 * math.cos(math.pi / 12), 0.79 * math.sin(math.pi / 12), r=0.5, mult=4.0)
+    probe = _probe([], [zone])
+    assert changed_distance([], [zone], 0.0, 0.0) == pytest.approx(0.29)
+    assert probe._changed_near(0.0, 0.0, 2.0)
+    assert not probe._changed_near(0.0, 0.0, 0.5)                       # до события изменившегося пола нет
+    far = Zone('R1', 'circle', 0.81, 0.0, r=0.5, mult=4.0)              # 0,31 м — уже не «рядом»
+    assert not _probe([], [far])._changed_near(0.0, 0.0, 2.0)
+
+
+def test_changed_distance_respects_overlaps_and_rectangles():
+    old = Zone('A', 'circle', 0.0, 0.0, r=0.5, mult=4.0)
+    new = Zone('R1', 'circle', 0.6, 0.0, r=0.5, mult=4.0)               # часть новой зоны лежит на прежней ×4
+    # Слева от прежней зоны: ближайший изменившийся пол — за ней, там, где новая зона выходит из-под прежней.
+    assert changed_distance([old], [old, new], -0.6, 0.0) == pytest.approx(math.hypot(0.9, 0.4))
+    assert changed_distance([old], [old, new], 0.2, 0.0) == pytest.approx(0.3)      # внутри перекрытия: до края прежней
+    assert changed_distance([old], [old, new], 0.8, 0.0) == 0.0
+    assert changed_distance([old], [old], 0.8, 0.0) == math.inf                     # ничего не изменилось
+    # Прямоугольник сменил цену: расстояние до стороны и до угла.
+    rect, cheap = Zone('B', 'rect', 2.0, 0.0, w=1.0, h=0.6, mult=3.0), Zone('B', 'rect', 2.0, 0.0, w=1.0, h=0.6, mult=1.5)
+    assert changed_distance([rect], [cheap], 1.3, 0.1) == pytest.approx(0.2)
+    assert changed_distance([rect], [cheap], 1.2, 0.7) == pytest.approx(math.hypot(0.3, 0.4))
+    # Зона переехала: изменились и старое место (подешевело), и новое (подорожало).
+    moved = Zone('A', 'circle', 3.0, 3.0, r=0.4, mult=4.0)
+    assert changed_distance([old], [moved], 0.0, 0.7) == pytest.approx(0.2)
+    assert changed_distance([old], [moved], 3.0, 2.0) == pytest.approx(0.6)
+
+
+def test_changed_distance_matches_dense_grid():
+    rng = np.random.default_rng(3)
+
+    def zone(i, mult):
+        x, y = rng.uniform(-1.0, 1.0, 2)
+        if rng.random() < 0.5:
+            return Zone(f'Z{i}', 'circle', x, y, r=rng.uniform(0.3, 0.6), mult=mult)
+        return Zone(f'Z{i}', 'rect', x, y, w=rng.uniform(0.5, 1.2), h=rng.uniform(0.5, 1.2), mult=mult)
+    xs = np.arange(-2.5, 2.5, 0.004)
+    X, Y = np.meshgrid(xs, xs)
+
+    def grid(zones):
+        m = np.ones(X.shape)
+        for z in zones:
+            m = np.where(z.mask(X, Y), np.maximum(m, z.mult), m)
+        return m
+    for _ in range(12):
+        start = [zone(i, float(rng.choice([2.0, 3.0, 4.0]))) for i in range(3)]
+        after = [replace(start[0], mult=4.0 if start[0].mult < 4.0 else 1.5), start[1], zone(2, start[2].mult),
+                 zone(3, 4.0)]
+        changed = grid(start) != grid(after)
+        for px, py in rng.uniform(-2.0, 2.0, (25, 2)):
+            brute = float(np.hypot(X[changed] - px, Y[changed] - py).min())
+            assert changed_distance(start, after, px, py) == pytest.approx(brute, abs=0.008)
 
 
 # --- разность разностей и допуск ---------------------------------------------------------------
