@@ -24,8 +24,8 @@ MAIN = Path('/Users/a/MAI/DID')
 def busy():
     if (MAIN / 'research' / 'PAUSE').exists() or (ROOT / 'research' / 'PAUSE').exists():
         return 'пауза research/PAUSE'
-    for name, why in (('gz sim', 'уже идёт Gazebo'), ('tools/gazebo_run.py', 'идёт чужой прогон в Gazebo'),
-                      ('tools/gazebo_batch.py', 'идёт чужая серия в Gazebo'), ('tools/demo.py', 'идёт показ')):
+    for name, why in (('^gz sim ', 'уже идёт Gazebo'), ('bin/python[0-9.]* tools/gazebo_run\\.py', 'идёт чужой прогон в Gazebo'),
+                      ('bin/python[0-9.]* tools/gazebo_batch\\.py', 'идёт чужая серия в Gazebo'), ('bin/python[0-9.]* tools/demo\\.py', 'идёт показ')):
         if subprocess.run(['pgrep', '-f', name], stdout=subprocess.DEVNULL).returncode == 0:
             return why
     return None

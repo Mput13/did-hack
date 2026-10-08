@@ -9,7 +9,8 @@
     python -m did.ros_team agent --robot tb1 --level medium --seed 3
     python -m did.ros_team agent --robot tb2 --level medium --seed 3
 
-Всё вместе одной командой — tools/team_gazebo_run.py. Мир с двумя роботами — launch/team.launch.py.
+Всё вместе одной командой — tools/team_gazebo_run.py. Мир с двумя роботами —
+ws/src/did_bringup/launch/team.launch.py.
 Узлы запускаются как обычные программы Python, сборка воркспейса им не нужна.
 """
 import argparse
