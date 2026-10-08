@@ -78,7 +78,7 @@ def stop(proc, name, grace=12.0):
         say(f'останавливаю: {name}')
     try:
         os.killpg(proc.pid, signal.SIGINT)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
@@ -87,10 +87,12 @@ def stop(proc, name, grace=12.0):
             os.killpg(proc.pid, 0)              # в группе ещё кто-то жив (launch иногда оставляет детей)
         except ProcessLookupError:
             return
+        except PermissionError:             # macOS: в группе остался только завершившийся, но ещё не убранный процесс
+            pass
         time.sleep(0.2)
     try:
         os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         pass
 
 
@@ -117,6 +119,19 @@ def ensure_server(port):
     raise SystemExit('не нашёл свободного порта для сервера интерфейса')
 
 
+def settled(url):
+    """Пульт на связи со стендом, и робот уже осел на колёса."""
+    _, s = http(f'{url}/api/pilot/state')
+    return bool(s and s.get('active') and s.get('linked') and s.get('mode') != 'settle' and s.get('settle_left', 1) <= 0)
+
+
+def start_slam(cmd, slam_map):
+    proc = spawn(cmd, 'demo-slam.log')
+    say('SLAM Toolbox запущен: робот едет по его карте, готовая карта ему не даётся' if slam_map
+        else 'SLAM Toolbox запущен: карта появится на странице, переключатель под картой')
+    return proc
+
+
 def tail(path, n=15):
     try:
         return '\n'.join(Path(path).read_text(errors='replace').splitlines()[-n:])
@@ -134,10 +149,15 @@ def main():
     ap.add_argument('--no-gui', action='store_true', help='не открывать окно Gazebo')
     ap.add_argument('--no-hints', action='store_true', help='не рисовать скрытую правду на полу Gazebo')
     ap.add_argument('--open', action='store_true', help='открыть страницу пульта в браузере')
+    ap.add_argument('--agent', default=None, metavar='ИМЯ',
+                    help='какой агент выбран на странице для автономной миссии (например scientist_v2); '
+                         'без ключа — умолчание страницы')
     ap.add_argument('--slam', action='store_true',
                     help='запустить ещё и SLAM Toolbox: его карта появится на странице рядом с нашей')
     ap.add_argument('--slam-map', action='store_true',
                     help='без готовой карты: SLAM Toolbox строит карту, робот планирует путь и едет по ней')
+    ap.add_argument('--slam-start', choices=['stand', 'settle'], default='stand',
+                    help='когда запускать SLAM Toolbox: stand — вместе со стендом, settle — когда робот осел на колёса')
     ap.add_argument('--launch-arg', action='append', default=[], metavar='ИМЯ:=ЗНАЧЕНИЕ',
                     help='дополнительный аргумент для stand.launch.py (можно несколько раз)')
     args = ap.parse_args()
@@ -147,11 +167,12 @@ def main():
         signal.signal(sig, lambda *_: halt.set())
 
     server = stand = pilot = slam = None
+    slam_cmd = None                 # SLAM Toolbox ещё не запущен: ждём, пока робот осядет
     fast_started = False
     code = 0
     try:
         url, server = ensure_server(args.port)
-        page = f'{url}/#/pilot'
+        page = f'{url}/#/pilot' + (f'?agent={args.agent}' if args.agent else '')
         if args.fast and args.slam_map:
             raise SystemExit('--slam-map работает только в Gazebo: в быстром симуляторе SLAM Toolbox нет')
         if args.fast:
@@ -175,16 +196,22 @@ def main():
                           'demo-pilot.log', echo='пульт:')
             if args.slam or args.slam_map:
                 # Своя тема и свой кадр карты (env/slam_demo.yaml): /map и кадр map заняты эталонной картой судьи.
-                slam = spawn(['ros2', 'launch', 'slam_toolbox', 'online_async_launch.py', 'use_sim_time:=true',
-                              f'slam_params_file:={ROOT / "env" / "slam_demo.yaml"}'], 'demo-slam.log')
-                say('SLAM Toolbox запущен: робот едет по его карте, готовая карта ему не даётся' if args.slam_map
-                    else 'SLAM Toolbox запущен: карта появится на странице, переключатель под картой')
+                slam_cmd = ['ros2', 'launch', 'slam_toolbox', 'online_async_launch.py', 'use_sim_time:=true',
+                            f'slam_params_file:={ROOT / "env" / "slam_demo.yaml"}']
+                if args.slam_start == 'stand':
+                    slam = start_slam(slam_cmd, args.slam_map)
+                    slam_cmd = None
+                else:
+                    say('SLAM Toolbox запустится, когда робот осядет на колёса')
         say(f'страница пульта: {page}')
         say('Ctrl+C — остановить показ')
         if args.open:
             subprocess.run(['open' if sys.platform == 'darwin' else 'xdg-open', page], check=False)
 
         while not halt.wait(0.5):
+            if slam_cmd is not None and settled(url):
+                slam = start_slam(slam_cmd, args.slam_map)
+                slam_cmd = None
             if stand is not None and stand.poll() is not None:
                 say(f'стенд остановился сам (код {stand.returncode}). Последние строки журнала:\n'
                     + tail(LOGS / 'demo-stand.log'))
