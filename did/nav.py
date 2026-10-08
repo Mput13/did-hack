@@ -180,3 +180,49 @@ class Follower:
 
 def _wrap(a):
     return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+def straighten(graph, pts, step=0.025, spacing=0.05):
+    """Спрямить путь по клеткам: кусок заменяется прямой, если она проходима и по стоимости не дороже.
+
+    Кратчайший путь на сетке с восемью направлениями идёт «коленом» и бывает длиннее прямой до 8%.
+    Стоимость прямой считается по той же карте стоимостей клеток, поэтому дорогой грунт, стены и
+    опасные зоны она не срезает. Точки результата идут с шагом spacing, как у исходного пути.
+    """
+    if len(pts) < 3:
+        return pts
+    arena = graph.arena
+    cost = graph.grid(graph.cost, fill=np.inf)
+    p = np.asarray(pts, dtype=float)
+    ix = ((p[:, 0] - arena.x0) / arena.res).astype(int)
+    iy = ((p[:, 1] - arena.y0) / arena.res).astype(int)
+    c = cost[iy, ix]
+    seg = np.hypot(*np.diff(p, axis=0).T) * 0.5 * (c[1:] + c[:-1])
+    along = np.concatenate(([0.0], np.cumsum(seg)))           # стоимость пути по клеткам до каждой точки
+
+    def line(i, j):
+        d = math.dist(pts[i], pts[j])
+        n = max(2, int(math.ceil(d / step)))
+        k = (np.arange(n) + 0.5) / n
+        x = p[i, 0] + k * (p[j, 0] - p[i, 0])
+        y = p[i, 1] + k * (p[j, 1] - p[i, 1])
+        return float(cost[((y - arena.y0) / arena.res).astype(int), ((x - arena.x0) / arena.res).astype(int)].sum() * d / n)
+
+    keep, i = [0], 0
+    while i < len(pts) - 1:
+        j = best = i + 1
+        while j < len(pts) - 1:
+            j = min(len(pts) - 1, j + 2)
+            if line(i, j) <= (along[j] - along[i]) * (1.0 + 1e-6):
+                best = j
+            elif j - best > 12:                               # прямая давно не проходит: дальше не ищем
+                break
+        keep.append(best)
+        i = best
+    out = [pts[0]]
+    for a, b in zip(keep, keep[1:]):
+        d = math.dist(pts[a], pts[b])
+        n = max(1, int(round(d / spacing)))
+        out += [(pts[a][0] + (pts[b][0] - pts[a][0]) * k / n, pts[a][1] + (pts[b][1] - pts[a][1]) * k / n)
+                for k in range(1, n + 1)]
+    return out

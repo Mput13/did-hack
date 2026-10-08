@@ -1,0 +1,44 @@
+title: Результативность — агенты второй версии против прежних
+kind: main
+question: Сколько очков возвращают правки P1 (пережидание сбоя датчика, спрямление пути) на сценариях, которых никто не видел?
+hypothesis: >-
+  На трудном уровне агент второй версии набирает больше очков, чем прежний, на тех же сценариях: он не ездит за
+  ложными кандидатами, пока датчик образцов неисправен, и не идёт «коленом» там, где проходима прямая.
+  Возвращается на базу он не реже, а штрафов получает не больше.
+method: >-
+  Четыре агента (adaptive, adaptive_v2, scientist, scientist_v2) проходят одни и те же сценарии 5001–5040 уровней
+  medium и hard при двух наборах правил: базовом и «научном» (несколько причин расхода и сбои). Сценарии не
+  использовались ни при отладке (1–80), ни в прежних опытах (1001–1040); код и настройки заморожены до запуска.
+  Сравниваются парные разности «вторая версия − прежняя» по счёту, доле собранных образцов, возврату, штрафам
+  и времени.
+expect: >-
+  На hard прибавка счёта отличима от нуля при обоих наборах правил; на medium агент и так у потолка, там
+  разность около нуля. Платой будет время: вторая версия стоит, пока датчик неисправен.
+refute: >-
+  Гипотеза опровергнута, если на hard парная разность счёта включает ноль или отрицательна, либо если вторая
+  версия возвращается на базу реже прежней (интервал разности возврата целиком ниже нуля).
+arms:
+  - {id: adaptive, label: Адаптивный (прежний), agent: adaptive}
+  - {id: adaptive_v2, label: Адаптивный v2, agent: adaptive_v2}
+  - {id: scientist, label: Исследователь (прежний), agent: scientist}
+  - {id: scientist_v2, label: Исследователь v2, agent: scientist_v2}
+levels: [medium, hard]
+seeds: 40
+seed_start: 5001
+conditions:
+  - {id: base, label: Базовые правила}
+  - id: science
+    label: Научные правила
+    rules: {drain_per_rad: 0.12, load_drain: 0.05, battery_sigma: 0.02, faults: true, hazard_battery_hit: 0.0}
+metrics: [score, samples_share, returned, penalties, hazard_hits, false_collects, time, distance, battery_used]
+claims:
+  - {metric: score, a: adaptive_v2, b: adaptive, focus: hard, text: Адаптивный v2 набирает больше очков}
+  - {metric: samples_share, a: adaptive_v2, b: adaptive, focus: hard, text: Адаптивный v2 собирает больше образцов}
+  - {metric: returned, a: adaptive_v2, b: adaptive, focus: hard, better: higher, text: Адаптивный v2 возвращается не реже}
+  - {metric: penalties, a: adaptive_v2, b: adaptive, focus: hard, text: Адаптивный v2 получает не больше штрафов}
+  - {metric: time, a: adaptive_v2, b: adaptive, focus: hard, text: Адаптивный v2 тратит не больше времени}
+  - {metric: score, a: scientist_v2, b: scientist, focus: hard, text: Исследователь v2 набирает больше очков}
+  - {metric: samples_share, a: scientist_v2, b: scientist, focus: hard, text: Исследователь v2 собирает больше образцов}
+  - {metric: returned, a: scientist_v2, b: scientist, focus: hard, better: higher, text: Исследователь v2 возвращается не реже}
+  - {metric: penalties, a: scientist_v2, b: scientist, focus: hard, text: Исследователь v2 получает не больше штрафов}
+  - {metric: time, a: scientist_v2, b: scientist, focus: hard, text: Исследователь v2 тратит не больше времени}

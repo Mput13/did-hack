@@ -18,9 +18,11 @@ from .foresight import Advisor
 from .inquiry import Investigator
 from .journal import Journal
 from .localize import PoseTracker
-from .nav import CostGraph, Follower
+from .nav import CostGraph, Follower, straighten
 from .planner import HeuristicPlanner, resolve_subgoals
 from .route import survey_route
+from .sensorguard import SensorGuard
+from .soilguess import suspect_grid
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,11 @@ class AgentConfig:
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
     risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
     foresight_choice: str = 'planner'  # среди прошедших по риску выбирает: planner — правило планировщика, score — счёт
+    # --- правки P1 (research/findings/P1.md): по умолчанию выключены, вместе включены в пресетах *_v2
+    fault_wait: bool = False          # при признаках сбоя датчика стоять и ждать, а не ездить за ложными кандидатами
+    fault_wait_lost: int = 3          # столько подъездов без сбора подряд — тоже признак сбоя датчика (0 — не считать)
+    straight_paths: bool = False      # спрямлять путь по клеткам там, где прямая проходима и не дороже
+    soil_spread_m: float = 0.0        # считать дорогим и непроверенный пол в этом радиусе от измеренного дорогого
 
     def to_dict(self):
         return asdict(self)
@@ -78,6 +85,9 @@ PRESETS = {
     'no_hazard': AgentConfig(name='no_hazard', avoid_hazards=False),
     'no_sensor_health': AgentConfig(name='no_sensor_health', sensor_health=False),
     'static_reserve': AgentConfig(name='static_reserve', dynamic_reserve=False),
+    # Версия 2 (research/findings/P1.md): все правки P1 вместе. Прежние пресеты не меняются.
+    'adaptive_v2': AgentConfig(name='adaptive_v2', fault_wait=True, straight_paths=True),
+    'scientist_v2': AgentConfig(name='scientist_v2', science=True, fault_wait=True, straight_paths=True),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
                                avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
@@ -158,6 +168,7 @@ class Agent:
         self._no_collect_until = -1e9
         self.inv = Investigator(self, knowledge, roles) if config.science else None
         self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
+        self.guard = SensorGuard(self) if config.fault_wait else None   # пережидание сбоя датчика (did/sensorguard.py)
 
     # ======================================================================================
     # один такт цикла
@@ -273,6 +284,10 @@ class Agent:
             return
         ratio, predicted, conf = self.soil.observe(x0, y0, x1, y1, spent, dt)
         self._cost_dirty = True
+        if self.cfg.soil_spread_m > 0.0 and ratio >= 1.45 and predicted < 1.25:
+            # Неожиданно дорогой пол: маршрут пересчитывается сразу, пока робот не заехал вглубь зоны.
+            self._cost_t = -1e9
+            self._path_t = -1e9
         if self.cfg.detect_change:
             verdict = self.change.update(ratio, predicted, conf, ds)
             if verdict:
@@ -295,6 +310,8 @@ class Agent:
 
     def _on_reading(self, z, obs):
         self._readings.append(z)
+        if self.guard:
+            self.guard.reading(z, obs)
         sigma = self.rules.sensor_sigma
         if self.cfg.sensor_health:
             change = self.health.update(z)
@@ -352,6 +369,11 @@ class Agent:
         danger = 1.0 + self.cfg.hazard_weight * self._risk if self.hazards else None
         self.graph.set_cost(mult, bias=danger)
         # Домой — по проверенному: там, где робот уже ездил, нет ни опасных зон, ни сюрпризов с грунтом.
+        if self.cfg.learn_soil and self.cfg.soil_spread_m > 0.0:
+            guess = suspect_grid(self.soil, self.cfg.soil_spread_m)
+            if guess is not None:
+                danger = guess if danger is None else danger * guess
+                self.graph.set_cost(mult, bias=danger)
         if self.cfg.learn_soil:
             unknown = 1.0 + self.cfg.unknown_risk * (1.0 - self.soil.confidence_grid())
             danger = unknown if danger is None else danger * unknown
@@ -578,6 +600,9 @@ class Agent:
             self._stuck = None
         if self.inv and self.inv.act(obs, io):
             return                             # такт занят опытом расследования
+        if self.guard and self.guard.hold(obs):
+            self.mode = 'wait'
+            return self._command(io, 0.0, 0.0)
         if not self.queue:
             if self.cfg.search == 'route':
                 self._go_home(obs.t, 'маршрут пройден')
@@ -694,6 +719,8 @@ class Agent:
         self.queue.pop(0)
         self._path_goal = None
         self._command(io, 0.0, 0.0)
+        if self.guard:
+            self.guard.subgoal_ended(trigger, obs.t)
         if self.cfg.search == 'belief' and not self._returning:
             # После сбора, промаха и находки план пересматривается сразу; после обычной точки — когда очередь пуста.
             if trigger != 'subgoal_done' or not self.queue:
@@ -710,6 +737,8 @@ class Agent:
             if pts is None:
                 self._command(io, 0.0, 0.0)
                 return False
+            if self.cfg.straight_paths:
+                pts = straighten(graph, pts)
             self.follower.set_path(pts)
             self._path_goal, self._path_version, self._path_t = target, self._cost_version, t
             if self.rec and (moved_goal or stale):
