@@ -8,8 +8,8 @@
     pixi run python tools/demo_check.py --agent scientist_v2 --tour short --no-goal --expect hard 2 --min-samples 7 --clean
 
 Печатает, что получилось на каждом шаге, и возвращает ненулевой код, если показ не прошёл: объезд не пройден
-целиком, миссия не стартовала на новом прогоне судьи, робот не вернулся, было столкновение, нет записи прогона
-(нельзя проверить нагрузку машины) или не выполнены ожидания --min-samples / --min-score / --clean.
+целиком, миссия не стартовала на новом прогоне судьи, робот не вернулся, было столкновение, нет записи именно
+этого прогона (нельзя проверить нагрузку машины) или не выполнены ожидания --min-samples / --min-score / --clean.
 Решение «прошло / не прошло» — функция verdict(), она проверяется в tests/test_demo_check.py.
 """
 import argparse
@@ -58,6 +58,21 @@ def tour_done(state, n_points):
     """
     route = state.get('route') or []
     return state.get('mode') == 'idle' and len(route) == n_points and all(p.get('done') for p in route)
+
+
+def trace_foreign(row, result, mtime, t_mission):
+    """Почему запись — не от этого прогона (None — от этого). Имя файла записи у прогонов одного агента на одном
+    сценарии общее, поэтому существование файла ничего не доказывает: сверяем с итогом, который отдал пульт.
+
+    row — строка demo_pick.summarize() по записи, result — итог миссии от пульта, mtime — когда файл записан,
+    t_mission — когда скрипт отправил команду миссии (часы одной и той же машины).
+    """
+    if mtime < t_mission:
+        return f'файл записан за {t_mission - mtime:.0f} с до старта миссии'
+    for key, name, in_row in (('score', 'счёт', 'score'), ('samples_collected', 'образцов', 'collected')):
+        if row.get(in_row) != result.get(key):
+            return f'{name} в записи {row.get(in_row)}, а в итоге пульта {result.get(key)}'
+    return None
 
 
 def verdict(facts, min_samples=None, min_score=None, clean=False):
@@ -132,7 +147,10 @@ def _mission_verdict(mission, min_samples, min_score, clean):
         failed.append(f"прогон не чистый: заездов в опасные зоны {r.get('hazard_hits', 0)}, "
                       f"ложных сборов {r.get('false_collects', 0)}")
     trace = mission.get('trace')
-    if trace != 'ok':
+    if trace == 'foreign':
+        failed.append(f"запись не от этого прогона ({mission.get('trace_why')}): нагрузку машины проверить нельзя "
+                      '(сервер интерфейса запущен из другого каталога?)')
+    elif trace != 'ok':
         failed.append('запись прогона не найдена: нагрузку машины проверить нельзя (сервер интерфейса запущен '
                       'из другого каталога?)' if trace in (None, 'missing')
                       else f'запись прогона не читается: нагрузку машины проверить нельзя ({trace})')
@@ -308,13 +326,18 @@ def main():
                 fact['trace'] = f'{type(e).__name__}: {e}'
                 print(f"   запись миссии не читается: {fact['trace']}")
             else:
-                fact.update(trace='ok', lag=row['lag'])
-                print('   ' + line(row).replace('\n', '\n   '))
-                if args.save:
-                    out = ROOT / args.save / f"{args.agent}-{s['level']}-{s['seed']}{args.tag}.json.gz"
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(trace, out)
-                    print(f'   запись миссии: {out.relative_to(ROOT)}')
+                foreign = trace_foreign(row, sc or {}, trace.stat().st_mtime, t_cmd)
+                if foreign:
+                    fact.update(trace='foreign', trace_why=foreign)
+                    print(f'   ЗАПИСЬ НЕ ОТ ЭТОГО ПРОГОНА: {foreign} ({trace})')
+                else:
+                    fact.update(trace='ok', lag=row['lag'])
+                    print('   ' + line(row).replace('\n', '\n   '))
+                    if args.save:
+                        out = ROOT / args.save / f"{args.agent}-{s['level']}-{s['seed']}{args.tag}.json.gz"
+                        out.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(trace, out)
+                        print(f'   запись миссии: {out.relative_to(ROOT)}')
         else:
             print('   ЗАПИСЬ МИССИИ НЕ НАЙДЕНА (сервер интерфейса запущен из другого каталога?)')
 

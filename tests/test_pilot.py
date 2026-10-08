@@ -8,7 +8,8 @@ import pytest
 from did.arena import load_arena
 from did.config import BASE
 from did.mission_agents import MISSION_AGENTS
-from did.pilot import PRESETS, FastWorld, Pilot, PilotHub, RunReset, dumps, fresh_score
+from did.pilot import (PRESETS, RESET_LOST_S, RESET_SYNC_S, FastWorld, Pilot, PilotHub, RunReset, dumps,
+                       fresh_score)
 
 
 @pytest.fixture(scope='module')
@@ -147,33 +148,59 @@ def test_escape_side_is_counted_from_current_heading(arena):
 class _StandWorld(FastWorld):
     """Быстрый симулятор со сбросом судьи как на стенде Gazebo: вызов, ответ и подтверждение счётом — порознь.
 
-    lost — сколько первых вызовов сброса до судьи не дойдут. Часы ожидания — свои (self.now), чтобы проверка
-    не ждала настоящие десять секунд. Счёт судьи приходит «сообщениями»: один и тот же объект до следующего такта.
+    lost — сколько первых вызовов сброса судья выполнит не сразу, а только по deliver() (или никогда). Часы
+    ожидания — свои (self.now), чтобы проверка не ждала настоящие десять секунд. Счёт судьи приходит
+    «сообщениями»: один и тот же объект до следующего такта.
     """
 
     def __init__(self, *args, lost=0, **kw):
         super().__init__(*args, **kw)
         self.lost, self.calls, self.now = lost, 0, 0.0
+        self.resets = 0                                 # сколько раз судья на самом деле начал прогон заново
+        self._late = []                                 # вызовы, которые висят без ответа
         self._msg = self.sim.judge.score()
+        self._reset = RunReset(self._send, lambda: (self._msg, self.sim.judge.battery), self.rules.battery_start,
+                               clock=lambda: self.now)
 
     def advance(self):
         super().advance()
         self._msg = self.sim.judge.score()
 
-    def _send(self):
-        self.calls += 1
-        if self.calls <= self.lost:
-            return lambda: None                         # вызов ушёл, судья молчит
+    def _do_reset(self):
+        self.resets += 1
         FastWorld.reset_begin(self)
         self._msg = self.sim.judge.score()
-        return lambda: (True, 'судья начал прогон заново')
+        return True, 'судья начал прогон заново'
 
-    def reset_begin(self):
-        self._reset = RunReset(self._send, lambda: (self._msg, self.sim.judge.battery), self.rules.battery_start,
-                               clock=lambda: self.now)
+    def _send(self):
+        self.calls += 1
+        if self.calls > self.lost:
+            answer = self._do_reset()
+            return lambda: answer
+        box = []                                        # вызов ушёл, судья молчит
+        self._late.append(box)
+        return lambda: box[0] if box else None
+
+    def deliver(self):
+        """Судья наконец выполнил все зависшие вызовы сброса."""
+        for box in self._late:
+            box.append(self._do_reset())
+        self._late = []
+
+    def reset_begin(self, wait_s=10.0):
+        self._reset.start(wait_s)
 
     def reset_poll(self):
         return self._reset.poll()
+
+    def new_run(self):
+        """Как у стенда: ожидание на месте, только часы проверки идут сами."""
+        self.reset_begin(RESET_SYNC_S)
+        while True:
+            res = self.reset_poll()
+            if res is not None:
+                return res
+            self.now += 0.1
 
 
 def _stand(arena, lost, level='easy', seed=1):
@@ -196,7 +223,7 @@ def test_mission_starts_only_after_confirmed_reset(arena):
     assert m['state'] == 'running' and m['fresh_run'] is True
 
 
-def test_mission_is_not_started_when_reset_is_refused(arena):
+def test_mission_is_refused_after_ten_seconds_without_second_reset(arena):
     world, pilot = _stand(arena, lost=99)
     pilot.bot = object()                                    # агент прошлой миссии: такт ему достаться не должен
     res = pilot.command({'cmd': 'mission', 'agent': 'adaptive'})
@@ -204,19 +231,117 @@ def test_mission_is_not_started_when_reset_is_refused(arena):
     assert pilot.mode == 'mission' and pilot.bot is None and pilot.mission['state'] == 'reset'
     assert not pilot.command({'cmd': 'mission', 'agent': 'adaptive'})['ok']     # вторая кнопка — «уже идёт»
     assert not pilot.command({'cmd': 'go'})['ok']
-    for _ in range(3):                                      # первая попытка, вторая, отказ
-        _run(world, pilot, lambda: True)
-        assert pilot.bot is None
-        world.now += 10.5
+    world.now += 9.5
     _run(world, pilot, lambda: True)
-    assert world.calls == 2 and pilot.mode == 'idle' and pilot.bot is None
+    assert pilot.bot is None and pilot.mission['state'] == 'reset'             # срок ещё не вышел
+    world.now += 1.0
+    _run(world, pilot, lambda: True)
+    assert world.calls == 1 and pilot.mode == 'idle' and pilot.bot is None      # второго запроса не было
     st = json.loads(dumps(pilot.state()))                   # то, что уходит странице показа
     assert st['mission']['state'] == 'refused' and st['mission']['fresh_run'] is False
-    assert 'не ответил' in st['mission']['reason']
+    assert 'не ответил на сброс за 10 с' in st['mission']['reason']
     assert st['note']['tone'] == 'bad' and 'Судья не начал новый прогон' in st['note']['text']
     assert 'ещё раз' in st['note']['text']
-    world.lost = 0                                          # оператор нажал ещё раз, судья ожил
-    assert pilot.command({'cmd': 'mission', 'agent': 'adaptive'})['ok'] and pilot.bot is not None
+    assert pilot._last_cmd == (0.0, 0.0)
+
+
+def test_second_press_does_not_send_second_reset_while_first_hangs(arena):
+    """Отказ, прежний запрос висит: повторное нажатие ждёт его же. Иначе запоздавший первый сброс подтвердил бы
+    миссию, а второй обнулил бы судью уже под агентом."""
+    world, pilot = _stand(arena, lost=99)
+    pilot.command({'cmd': 'mission', 'agent': 'adaptive'})
+    world.now += 10.5
+    _run(world, pilot, lambda: True)
+    assert pilot.mission['state'] == 'refused' and world.calls == 1
+    res = pilot.command({'cmd': 'mission', 'agent': 'adaptive'})
+    assert res['ok'] and 'Жду' in res['message'] and pilot.mission['state'] == 'reset'
+    for _ in range(5):
+        _run(world, pilot, lambda: True)
+    assert world.calls == 1 and pilot.bot is None           # нового вызова нет, агент не запущен
+    world.now += 4.0
+    world.deliver()                                         # судья выполнил тот самый, первый вызов
+    _run(world, pilot, lambda: pilot.bot is not None, limit=5)
+    assert world.calls == 1 and world.resets == 1
+    for _ in range(50):                                     # и под работающим агентом судью никто не сбрасывает
+        _run(world, pilot, lambda: True)
+    assert world.resets == 1 and pilot.mission['state'] == 'running' and pilot.mission['fresh_run'] is True
+    assert world.sim.judge.t > 4.0                          # часы судьи идут с подтверждённого сброса, не обнулялись
+
+
+def test_new_reset_is_sent_when_previous_was_answered_or_lost(arena):
+    world, pilot = _stand(arena, lost=1)
+    pilot.command({'cmd': 'mission', 'agent': 'adaptive'})
+    world.now += 10.5
+    _run(world, pilot, lambda: True)
+    assert pilot.mission['state'] == 'refused'
+    world.deliver()                                         # судья ответил уже после отказа: тот прогон не наш
+    for _ in range(80):
+        _run(world, pilot, lambda: True)                    # робот стоит, часы и заряд судьи идут
+    assert pilot.command({'cmd': 'mission', 'agent': 'adaptive'})['ok']
+    assert world.calls == 2 and world.resets == 2 and pilot.bot is not None and world.sim.judge.t < 1.0
+
+    world, pilot = _stand(arena, lost=1)                    # судью перезапустили: ответа на вызов не будет никогда
+    pilot.command({'cmd': 'mission', 'agent': 'adaptive'})
+    world.now += 10.5
+    _run(world, pilot, lambda: True)
+    world.now += RESET_LOST_S
+    assert pilot.command({'cmd': 'mission', 'agent': 'adaptive'})['ok'] and world.calls == 2 and pilot.bot is not None
+
+
+def test_reset_deadline_does_not_need_sim_clock(arena):
+    """Gazebo завис: тактов нет. Срок по часам машины всё равно выходит — отказ, режим ожидания, кнопки доступны."""
+    world, pilot = _stand(arena, lost=99)
+    pilot.command({'cmd': 'mission', 'agent': 'adaptive'})
+    t = pilot.t
+    pilot.watch_reset()
+    assert pilot.mode == 'mission' and pilot.mission['state'] == 'reset'
+    world.now += 10.5
+    pilot.watch_reset()                                     # вызывается основным циклом пульта, не тактом
+    st = json.loads(dumps(pilot.state()))
+    assert pilot.t == t and st['mode'] == 'idle' and st['mission']['state'] == 'refused'
+    assert st['note']['tone'] == 'bad' and pilot._last_cmd == (0.0, 0.0) and world.calls == 1
+    pilot.watch_reset()                                     # дальше ждать нечего
+    assert pilot.mission['state'] == 'refused'
+    assert pilot.command({'cmd': 'route', 'points': [[-1.6, 0.6]]})['ok']       # команды оператора принимаются
+    assert pilot.command({'cmd': 'stop'})['ok'] and pilot.mode == 'idle'
+
+
+def test_manual_reset_waits_briefly_and_reports_honestly(arena):
+    """«Сбросить прогон» и новый прогон в ручной езде: одна попытка, не дольше RESET_SYNC_S, робот стоит,
+    успех — только при подтверждённом новом прогоне."""
+    world, pilot = _stand(arena, lost=99)
+    world.can_respawn = False                               # как на стенде: судью сбрасывает вызов сервиса
+    t0 = world.now
+    res = pilot.command({'cmd': 'reset'})
+    assert res['ok'] and 'Судья не начал новый прогон: судья не ответил на сброс' in res['message']
+    assert world.calls == 1 and world.now - t0 <= RESET_SYNC_S + 0.2 < PilotHub.FRESH_S
+    assert pilot.note['tone'] == 'bad' and pilot.mode == 'idle'
+
+    world, pilot = _stand(arena, lost=99)
+    assert pilot.command({'cmd': 'route', 'points': [[-1.0, -1.6]]})['ok']
+    world.finish()                                          # прогон судьи закончен, оператор едет дальше
+    pilot._last_cmd = (0.2, 0.0)
+    seen = []
+    new_run = world.new_run
+    world.new_run = lambda: (seen.append(pilot._last_cmd), new_run())[1]
+    t0 = world.now
+    res = pilot.command({'cmd': 'go'})
+    assert seen == [(0.0, 0.0)]                             # перед ожиданием роботу ушла нулевая команда
+    assert res['ok'] and pilot.mode == 'drive' and world.calls == 1 and world.now - t0 <= RESET_SYNC_S + 0.2
+    assert pilot.note['tone'] == 'bad' and 'Еду по маршруту' in pilot.note['text']
+    assert 'Судья не начал новый прогон' in pilot.note['text']
+    pilot._rerun_at = 0.0                                   # следующая попытка — уже в такте ручной езды
+    pilot._last_cmd = (0.2, 0.0)
+    _run(world, pilot, lambda: True)
+    assert seen == [(0.0, 0.0)] * 2 and world.calls == 1    # робот остановлен; вызов прежний, второго нет
+    world.deliver()
+    pilot._rerun_at = 0.0
+    _run(world, pilot, lambda: pilot.mode == 'idle')        # дальше езда идёт на новом прогоне
+    assert world.calls == 1 and not world.score()['finished']
+
+    world, pilot = _stand(arena, lost=0)
+    world.can_respawn = False
+    assert 'судья начал прогон заново' in pilot.command({'cmd': 'reset'})['message'] and pilot.note['tone'] == 'info'
 
 
 def test_immediate_refusal_is_the_command_answer(arena):
@@ -228,14 +353,16 @@ def test_immediate_refusal_is_the_command_answer(arena):
     assert pilot.mode == 'idle' and pilot.bot is None and pilot.note['tone'] == 'bad'
 
 
-def test_mission_starts_when_reset_confirmed_on_second_try(arena):
+def test_mission_starts_when_reset_is_confirmed_on_seventh_second(arena):
     world, pilot = _stand(arena, lost=1)
     assert pilot.command({'cmd': 'mission', 'agent': 'adaptive'})['ok']
     _run(world, pilot, lambda: True)
+    world.now += 7.0
+    _run(world, pilot, lambda: True)
     assert pilot.bot is None and pilot.mission['state'] == 'reset' and world.calls == 1
-    world.now += 10.5
+    world.deliver()
     _run(world, pilot, lambda: pilot.bot is not None, limit=5)
-    assert world.calls == 2 and pilot.mode == 'mission'
+    assert world.calls == 1 and world.resets == 1 and pilot.mode == 'mission'
     assert pilot.mission['state'] == 'running' and pilot.mission['fresh_run'] is True
 
 
@@ -257,7 +384,8 @@ def test_stale_finished_does_not_end_new_mission(arena):
         _run(world, pilot, lambda: True)
         assert pilot.mode == 'mission' and pilot.bot is None and pilot.mission['state'] == 'reset'
     assert world.score()['finished']                        # судья всё ещё на старом прогоне
-    world.now += 10.5
+    world.now += 7.0
+    world.deliver()
     _run(world, pilot, lambda: pilot.bot is not None, limit=5)
     for _ in range(30):
         _run(world, pilot, lambda: True)
@@ -290,33 +418,55 @@ def test_run_reset_contract():
     assert not fresh_score({'t': 0.9, 'finished': False}, start, young, start)  # без ответа судьи это может быть он же
     assert fresh_score({'t': 0.9, 'finished': False}, start, young, start, True)
 
-    box = {'now': 0.0, 'score': old, 'sent': 0}
+    box = {'now': 0.0, 'score': old, 'sent': 0, 'answer': (True, 'ок')}
     def send():
         box['sent'] += 1
-        return lambda: (True, 'ок')
+        return lambda: box['answer']
     r = RunReset(send, lambda: (box['score'], start), start, clock=lambda: box['now'])
+    assert r.poll()[0] is False and box['sent'] == 0                            # без start() ничего не вызывается
+    r.start()
     assert r.poll() is None and box['sent'] == 1
     box['now'] = 9.0
     assert r.poll() is None and box['sent'] == 1                                # ждём дольше прежних трёх секунд
     box['score'] = {'t': 0.4, 'finished': False}
     assert r.poll() == (True, 'ок') and r.poll() == (True, 'ок')
 
-    box.update(now=0.0, score=old, sent=0)
+    box.update(now=0.0, score=old, sent=0)                                      # судья ответил, а счёт прежний
     r = RunReset(send, lambda: (box['score'], start), start, clock=lambda: box['now'])
-    for now in (0.0, 10.1, 10.2, 20.0):
+    r.start()
+    for now in (0.0, 5.0, 9.9):
         box['now'] = now
         assert r.poll() is None
-    box['now'] = 20.4
+    box['now'] = 10.1
     ok, why = r.poll()
-    assert not ok and box['sent'] == 2 and 'счёт нового прогона' in why and '150' in why
+    assert not ok and box['sent'] == 1 and 'счёт нового прогона' in why and '150' in why
+    box['now'] = 30.0
+    assert r.poll() == (ok, why) and box['sent'] == 1                           # сам по себе вызов не повторяется
+    assert not r.hanging()
+    r.start()                                                                   # повторяет оператор
+    assert r.poll() is None and box['sent'] == 2
 
-    r = RunReset(lambda: None, lambda: (old, start), start, wait_s=1.0, clock=lambda: box['now'])   # сервиса нет
-    for now in (30.0, 31.5, 31.6, 33.0):
+    box.update(now=0.0, sent=0, answer=None)                                    # вызов завис: один на оба ожидания
+    r = RunReset(send, lambda: (box['score'], start), start, clock=lambda: box['now'])
+    r.start(2.5)
+    assert r.poll() is None
+    box['now'] = 2.6
+    ok, why = r.poll()
+    assert not ok and 'не ответил на сброс за 2.5 с' in why and r.hanging()
+    r.start()
+    box['now'] = 8.0
+    assert r.poll() is None and box['sent'] == 1
+    box['score'] = {'t': 0.2, 'finished': False}                                # новый счёт пришёл раньше ответа
+    assert r.poll()[0] is True and box['sent'] == 1
+
+    r = RunReset(lambda: None, lambda: (old, start), start, clock=lambda: box['now'])   # сервиса нет
+    r.start(1.0)
+    for now in (30.0, 30.5, 31.1):
         box['now'] = now
         res = r.poll()
-    assert res[0] is False and '/did/reset' in res[1]
+    assert res == (False, 'у судьи нет сервиса /did/reset')
 
     r = RunReset(lambda: (lambda: (False, 'занят')), lambda: (old, start), start, clock=lambda: box['now'])
-    assert r.poll() is None                                                     # отказ: сразу вторая попытка
-    ok, why = r.poll()
+    r.start()
+    ok, why = r.poll()                                                          # отказ судьи — сразу, без ожидания
     assert not ok and 'занят' in why

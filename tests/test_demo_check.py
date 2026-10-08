@@ -79,13 +79,27 @@ def test_missing_trace_fails(good):
     assert 'опоздавших тактов 8.0%' in _why(good)
 
 
+def test_trace_of_another_run_fails(good):
+    """Файл записи есть и читается, но он от прежнего прогона того же агента на том же сценарии."""
+    result = good['mission']['result']
+    row = {'score': 91.8, 'collected': 7, 'lag': 0.0}
+    assert dc.trace_foreign(row, result, mtime=1300.0, t_mission=1000.0) is None
+    assert 'до старта миссии' in dc.trace_foreign(row, result, mtime=400.0, t_mission=1000.0)
+    assert 'счёт в записи 88.1' in dc.trace_foreign({**row, 'score': 88.1}, result, 1300.0, 1000.0)
+    assert 'образцов в записи 6' in dc.trace_foreign({**row, 'collected': 6}, result, 1300.0, 1000.0)
+    assert dc.trace_foreign(row, {}, 1300.0, 1000.0)        # пульт итога не отдал — сверять не с чем
+    good['mission'].update(trace='foreign', trace_why='счёт в записи 88.1, а в итоге пульта 91.8', lag=None)
+    why = dc.verdict(good, min_samples=7, clean=True)
+    assert len(why) == 1 and 'запись не от этого прогона (счёт в записи 88.1' in why[0]
+
+
 def test_stale_run_and_refused_reset_fail(good):
     stale = copy.deepcopy(good)
     stale['mission']['fresh_run'] = False
     assert 'не на новом прогоне судьи' in _why(stale)
     del stale['mission']['fresh_run']                       # пульт не сообщил — тоже не подтверждено
     assert 'не на новом прогоне судьи' in _why(stale)
-    good['mission'] = {'state': 'refused', 'reason': 'судья не ответил на сброс за 10 с (2 вызова сброса)'}
+    good['mission'] = {'state': 'refused', 'reason': 'судья не ответил на сброс за 10 с'}
     why = dc.verdict(good, min_samples=7, clean=True)
     assert len(why) == 1 and 'миссия не стартовала: судья не начал новый прогон (судья не ответил' in why[0]
     good['mission'] = {'state': 'aborted', 'reason': None}

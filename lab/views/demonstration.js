@@ -204,7 +204,7 @@ export async function render(root, ctx) {
     compare.disabled = mutation || moving;
     if (task === 'mission' && s?.zones?.length) hint.textContent = 'Уберите зоны оператора перед миссией: автономный агент исследует свойства, заданные сценарием.';
     const m = s?.mission;
-    status.textContent = !active ? 'Подключите стенд или примените карту для быстрого симулятора.' : s.mode === 'mission' ? 'Идёт автономная миссия' : s.mode === 'drive' ? 'Робот следует заданному маршруту' :
+    status.textContent = !active ? 'Подключите стенд или примените карту для быстрого симулятора.' : s.mode === 'mission' ? (m?.state === 'reset' ? 'Жду, пока судья начнёт новый прогон' : 'Идёт автономная миссия') : s.mode === 'drive' ? 'Робот следует заданному маршруту' :
       s.mode === 'home' ? 'Возвращение на базу' : s.mode === 'wait' || s.mode === 'settle' ? 'Робот готовится к запуску' : 'Готов к заданию';
     const ex = s?.nav?.explore;
     if (active && s.mode === 'drive' && ex && !ex.done) status.textContent = `Строю карту: подъезд ${ex.visited}, границ увиденного осталось ${s.nav.frontiers}`;
@@ -217,7 +217,8 @@ export async function render(root, ctx) {
     const sc = active ? s.score : null;
     scoreBox.textContent = sc && sc.score != null ? num(sc.score, 1) : '—';
     scoreSub.textContent = sc && sc.samples_total != null ? `образцов ${sc.samples_collected ?? 0} из ${sc.samples_total}` : '';
-    const done = active && !moving && (m?.result || s.route?.length && s.route.every((p) => p.done));
+    // Миссия ждёт нового прогона судьи или не запущена из-за него: пройденный подъезд к базе — не результат задания.
+    const done = active && !moving && (m?.result || !['reset', 'refused'].includes(m?.state) && s.route?.length && s.route.every((p) => p.done));
     const step = !active ? 0 : done ? 4 : moving && !['wait', 'settle'].includes(s.mode) ? 3 : todo.length || task === 'mission' ? 2 : 1;
     Array.from(steps.children).forEach((el, i) => { el.dataset.done = String(active && i < step); el.setAttribute('aria-current', i === step ? 'step' : 'false'); });
     result.hidden = !done;
