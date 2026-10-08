@@ -10,7 +10,7 @@
     belief: [42, 120, 214],
   };
   const ARM_COLOR = { fixed: C.fixed, adaptive: C.adaptive, fastsim: C.fixed, gazebo: C.third,
-    rule: C.fixed, llm: C.adaptive, llm_faulty: C.third };
+    rule: C.fixed, llm: C.adaptive, llm_faulty: C.third, scientist: C.third, scientist_mem: C.adaptive, odom: C.fixed, lidar: C.adaptive };
   const MODE_RU = { start: 'старт', explore: 'разведка', travel: 'в пути', approach: 'подход к образцу',
     collect: 'сбор', return: 'возврат на базу', think: 'думает', escape: 'отъезд назад', done: 'финиш' };
   const EVENT_RU = { sample_collected: 'образец собран', collision: 'столкновение', false_collect: 'ложный сбор',
@@ -478,7 +478,8 @@
   const grp = (exp, arm, cond, level) => (E[exp] ? E[exp].groups : []).find(g => g.arm === arm && g.condition === cond && g.level === level);
   const stat = (exp, arm, cond, level, metric) => { const g = grp(exp, arm, cond, level); const s = g && g.stats[metric]; return s ? { mean: s.mean, lo: s.ci[0], hi: s.ci[1], n: s.n } : null; };
   const runsOf = (exp, arm, cond, level) => (E[exp] ? E[exp].runs : []).filter(r => r.arm === arm && r.condition === cond && (level === 'all' || r.level === level));
-  const armsOf = exp => E[exp].spec.arms.map(a => ({ key: a.id, label: a.label, color: ARM_COLOR[a.id] || C.third }));
+  const PALETTE = [C.fixed, C.adaptive, C.third, '#8a5cd6', '#c9a227', C.ink3, C.ink];
+  const armsOf = exp => { const free = PALETTE.filter(c => !E[exp].spec.arms.some(a => ARM_COLOR[a.id] === c)); let k = 0; return E[exp].spec.arms.map(a => ({ key: a.id, label: a.label, color: ARM_COLOR[a.id] || free[k++ % free.length] })); };
   const VERDICT = { supported: ['✓', 'подтверждается'], refuted: ['✗', 'опровергается'], inconclusive: ['≈', 'разницу не различить'], no_data: ['·', 'нет данных'], partial: ['◐', 'подтверждается частично'], mixed: ['◐', 'по-разному'], descriptive: ['·', 'описательный'], not_run: ['·', 'не запускался'] };
   const chip = st => `<span class="chip ${st}">${(VERDICT[st] || ['·', st])[0]} ${(VERDICT[st] || ['', st])[1]}</span>`;
 
@@ -508,6 +509,11 @@
     hazard_hits: { title: 'Въезды в опасную зону за прогон', fmt: v => num(v, 2), ymin: 0 },
     distance: { title: 'Путь', fmt: v => num(v, 1), unit: 'м' },
     penalties: { title: 'Штрафы за прогон', fmt: v => num(v, 2), ymin: 0 },
+    collisions: { title: 'Столкновения за прогон', fmt: v => num(v, 1), ymin: 0 },
+    inq_correct: { title: 'Причина названа верно', sub: 'доля вынесенных выводов', fmt: pct, ymin: 0, ymax: 1.08, noPoints: true },
+    faults_found: { title: 'Найдено сбоев', sub: 'доля настоящих сбоев', fmt: pct, ymin: 0, ymax: 1.08, noPoints: true },
+    inq_insufficient: { title: 'Исход «недостаточно данных» за прогон', fmt: v => num(v, 2), ymin: 0, noPoints: true },
+    inq_energy: { title: 'Заряд на опыты за прогон', fmt: v => num(v, 2), unit: 'ед.', ymin: 0, noPoints: true },
   };
   function expCharts(root, exp, metrics, byCondition) {
     const s = E[exp].spec, grid = el('div', 'chart-grid'), series = armsOf(exp);
@@ -515,7 +521,9 @@
     const level = s.levels[0];
     metrics.forEach(mt => {
       const M = METRIC[mt];
-      dotChart(grid, { title: M.title, sub: M.unit || '', cats, series, fmt: M.fmt, unit: M.unit, ymin: M.ymin, ymax: M.ymax, catName: byCondition ? 'Условие' : 'Уровень',
+      const have = series.filter(sr => cats.some(c => byCondition ? stat(exp, sr.key, c.key, level, mt) : stat(exp, sr.key, 'base', c.key, mt)));
+      if (!have.length) return;
+      dotChart(grid, { title: M.title, sub: M.sub || M.unit || '', cats, series: have, fmt: M.fmt, unit: M.unit, ymin: M.ymin, ymax: M.ymax, catName: byCondition ? 'Условие' : 'Уровень',
         get: (c, sr) => byCondition ? stat(exp, sr.key, c.key, level, mt) : stat(exp, sr.key, 'base', c.key, mt),
         points: M.noPoints ? null : (c, sr) => (byCondition ? runsOf(exp, sr.key, c.key, level) : runsOf(exp, sr.key, 'base', c.key)).map(r => r[mt]).filter(v => v != null) });
     });
@@ -818,12 +826,109 @@
     }
   })();
 
+  (() => {
+    const block = (id, metrics, byCond) => { const r = $('exp-' + id); if (!r || !E[id]) return; expHeader(r, id); expCharts(r, id, metrics, byCond); claimList(r, id); };
+    block('E8', ['score', 'samples_share', 'returned', 'collisions'], true);
+    block('E9', ['samples_share', 'distance', 'battery_used', 'score'], false);
+    block('E10', ['returned', 'samples_share', 'score', 'inq_correct', 'faults_found', 'inq_energy'], false);
+    block('E11', ['faults_found', 'inq_insufficient', 'returned', 'score'], false);
+    block('E12', E.E12 ? E.E12.spec.metrics : [], false);
+    block('E13', ['returned', 'samples_share', 'score', 'battery_used'], false);
+  })();
+
+  /* --------------------------------------------------------- расследования */
+
+  (() => {
+    const root = $('inq'), tr = D.science;
+    if (!root || !tr || tr.error || !(tr.inquiries || []).length) { if (root) root.textContent = 'Пример расследований не собран.'; return; }
+    const TOPIC = { energy: 'расход заряда', sensor: 'датчик образцов', fault: 'проверка после штрафа' };
+    const TRUTH = { soil: 'дорогой грунт', leak: 'утечка заряда', noise: 'шум датчика', stuck: 'залипший датчик', bias: 'заниженные показания', none: 'сбоя нет', ok: 'датчик исправен' };
+    const VERD = { correct: ['supported', '✓ вывод совпал с правдой'], wrong: ['refuted', '✗ вывод не совпал с правдой'], insufficient: ['inconclusive', '≈ вывода нет'], unverifiable: ['inconclusive', '· проверить нечем'] };
+    const COL = [C.fixed, C.adaptive, C.third, '#8a5cd6', C.ink3];
+    const short = t => t.split(',')[0].split(':')[0];
+    const pick = el('div', 'btns'), box = el('div', 'iq');
+    root.append(pick, box);
+    function scale(q, test) {
+      const ids = q.alternatives.map(a => a.id).filter(id => test.predictions[id]);
+      const lo0 = Math.min(...ids.map(id => test.predictions[id].mean - 2.5 * test.predictions[id].sigma), test.measured ? test.measured.value : Infinity);
+      const hi0 = Math.max(...ids.map(id => test.predictions[id].mean + 2.5 * test.predictions[id].sigma), test.measured ? test.measured.value : -Infinity);
+      const pad = (hi0 - lo0) * 0.08 || 0.1, lo = lo0 - pad, hi = hi0 + pad;
+      const W = 640, left = 250, right = 24, rowH = 22, H = 30 + rowH * ids.length + 22;
+      const svg = S('svg', { viewBox: `0 0 ${W} ${H}`, class: 'iq-scale', role: 'img', 'aria-label': 'Предсказания и измерение: ' + test.name });
+      const x = v => left + (W - left - right) * (v - lo) / (hi - lo);
+      niceTicks(lo, hi, 4).forEach(v => { S('line', { x1: x(v), x2: x(v), y1: 22, y2: H - 20, stroke: C.line, 'stroke-width': 1 }, svg); S('text', { x: x(v), y: H - 6, 'text-anchor': 'middle', class: 'ax' }, svg, num(v, Math.abs(hi - lo) < 2 ? 2 : 1)); });
+      ids.forEach((id, i) => {
+        const a = q.alternatives.find(z => z.id === id), p = test.predictions[id], cy = 30 + rowH * (i + 0.5), col = COL[q.alternatives.indexOf(a) % COL.length];
+        S('text', { x: left - 10, y: cy + 4, 'text-anchor': 'end', class: 'ax cat' }, svg, short(a.statement).slice(0, 38));
+        S('line', { x1: x(p.mean - p.sigma), x2: x(p.mean + p.sigma), y1: cy, y2: cy, stroke: col, 'stroke-width': 4, 'stroke-linecap': 'round', opacity: 0.45 }, svg);
+        const dot = S('circle', { cx: x(p.mean), cy, r: 5, fill: col, stroke: '#fff', 'stroke-width': 2 }, svg);
+        tip(dot, `Если верно «${short(a.statement)}», опыт покажет около ${num(p.mean, 2)} ± ${num(p.sigma, 2)} ${test.unit}`);
+      });
+      if (test.measured) {
+        const mx = x(test.measured.value);
+        S('line', { x1: mx, x2: mx, y1: 16, y2: H - 20, stroke: C.ink, 'stroke-width': 2 }, svg);
+        S('text', { x: Math.min(Math.max(mx, left + 40), W - 60), y: 12, 'text-anchor': 'middle', class: 'val' }, svg, 'измерено ' + num(test.measured.value, 2));
+      }
+      return svg;
+    }
+    function show(i) {
+      const q = tr.inquiries[i]; box.innerHTML = '';
+      pick.querySelectorAll('button').forEach((b, k) => b.classList.toggle('on', k === i));
+      const step = (n, title) => { const d = el('div', 'iq-step'); d.appendChild(el('h4', null, `<span>${n}</span>${title}`)); box.appendChild(d); return d; };
+      step(1, 'Что заметил').appendChild(el('p', null, `<b>${num(q.t_open, 0)}-я секунда.</b> ${q.anomaly.text}.`));
+      const s2 = step(2, 'Какие объяснения возможны: вероятность до опытов и после');
+      q.alternatives.forEach((a, k) => s2.appendChild(el('div', 'iq-alt', `<span class="iq-name"><i style="background:${COL[k % COL.length]}"></i>${a.statement}</span>
+        <span class="iq-bar"><i class="pr" style="width:${a.prior * 100}%"></i></span><span class="iq-p">${pct(a.prior)}</span>
+        <span class="iq-arrow">→</span><span class="iq-bar"><i class="po" style="width:${a.posterior * 100}%;background:${COL[k % COL.length]}"></i></span><span class="iq-p"><b>${pct(a.posterior)}</b></span>`)));
+      const s3 = step(3, 'Какие опыты были возможны и что каждое объяснение для них предсказывало');
+      q.tests.forEach(t => { const d = el('div', 'iq-test' + (t.chosen ? ' on' : ''));
+        d.appendChild(el('div', 'iq-tname', `${t.chosen ? '<b>Проведён:</b>' : 'Не понадобился:'} ${t.name} <small>ожидаемая польза ${num(t.gain_bits, 2)} бит, цена ${num(t.cost, 2)} ед. заряда; измеряется: ${t.unit}</small>`));
+        d.appendChild(scale(q, t)); s3.appendChild(d); });
+      const c = q.conclusion || {}, v = VERD[q.verdict] || VERD.unverifiable;
+      step(4, 'Вывод').appendChild(el('p', null, `${chip(c.status === 'identified' ? 'supported' : 'inconclusive').replace(/>.*</, '>' + (c.status === 'identified' ? '✓ причина названа' : '≈ недостаточно данных') + '<')} ${c.text || ''}.<br>
+        <small>Сверка со скрытой правдой сценария (агент её не видит): на самом деле — ${(q.truth || []).map(k => TRUTH[k] || k).join(' и ') || 'явной причины нет'}. <span class="chip ${v[0]}">${v[1]}</span></small>`));
+      step(5, 'Что агент сделал дальше').appendChild(el('p', null, q.action || '—'));
+    }
+    tr.inquiries.forEach((q, i) => { const b = el('button', 'seg', `${q.id} · ${num(q.t_open, 0)} с · ${TOPIC[q.topic] || q.topic}`); b.onclick = () => show(i); pick.appendChild(b); });
+    show(Math.max(0, tr.inquiries.findIndex(q => q.conclusion && q.conclusion.best === 'leak')));
+    const m = tr.energy_model, law = $('inq-model');
+    if (m && law) law.innerHTML = `<thead><tr><th>Что</th><th>Оценка агента к концу прогона</th><th>На самом деле (в правилах)</th></tr></thead><tbody>
+      <tr><td>Метр по обычному полу</td><td>${num(m.per_m.value, 2)} ± ${num(m.per_m.sigma, 2)} ед.</td><td>${num(RULES.drain_per_m, 2)}</td></tr>
+      <tr><td>Добавка на метр за каждый несомый образец</td><td>${num(m.per_m_load.value, 3)} ± ${num(m.per_m_load.sigma, 3)} ед.</td><td>0,125 (5% от 2,5)</td></tr>
+      <tr><td>Поворот на радиан</td><td>${num(m.per_rad.value, 3)} ± ${num(m.per_rad.sigma, 3)} ед.</td><td>0,12</td></tr>
+      <tr><td>Секунда простоя</td><td>${num(m.per_s.value, 3)} ± ${num(m.per_s.sigma, 3)} ед.</td><td>${num(RULES.drain_idle_per_s, 2)}</td></tr></tbody>`;
+  })();
+
+  /* ---------------------------------------------------------------- память */
+
+  (() => {
+    const t = $('kb-table'); if (!t) return;
+    if (!D.kb || !(D.kb.rules || []).length) { t.outerHTML = '<p class="warn">Память пуста: опыт E11 ещё не запускался.</p>'; return; }
+    const ST = { confirmed: ['supported', '✓ подтверждено'], tentative: ['inconclusive', '≈ предварительно'], retired: ['refuted', '✗ под сомнением'] };
+    t.innerHTML = `<thead><tr><th>Знание</th><th>Разброс между прогонами</th><th>Подтверждений</th><th>Противоречий</th><th>Статус</th></tr></thead><tbody>` +
+      D.kb.rules.map(r => `<tr><td>${r.statement.replace(/(\d)\.(\d)/g, '$1,$2')}</td><td>${r.sigma ? '± ' + num(r.sigma, 3) + ' ' + r.unit : '—'}</td><td>${r.n}</td><td>${(r.contradictions || []).length}</td><td><span class="chip ${(ST[r.status] || ST.tentative)[0]}">${(ST[r.status] || ST.tentative)[1]}</span></td></tr>`).join('') + '</tbody>';
+    const n = $('kb-runs'); if (n) n.textContent = D.kb.runs;
+  })();
+
+  /* ------------------------------------------------------- настоящая модель */
+
+  (() => {
+    const t = $('llm-real'); if (!t) return;
+    const rows = Object.entries(D.llm_real || {});
+    if (!rows.length) { t.outerHTML = '<p class="warn">Прогонов с настоящей моделью на момент сборки нет.</p>'; return; }
+    const NAME = { 'gpt-6-luna_v1': 'GPT-6 Luna, первый вариант запроса', 'gpt-6-luna': 'GPT-6 Luna, доработанный запрос и схема ответа' };
+    rows.sort((a, b) => (a[0] > b[0] ? -1 : 1));
+    t.innerHTML = `<thead><tr><th>Модель и запрос</th><th>Обращений</th><th>Годный план с первого раза</th><th>После исправления</th><th>Отказ в запасное правило</th><th>Время ответа, медиана</th><th>Счёт: модель / правило</th></tr></thead><tbody>` +
+      rows.map(([k, v]) => `<tr><td>${NAME[k] || k}</td><td>${v.requests}</td><td><b>${pct(v.first_ok_share)}</b></td><td>${pct(v.repaired_share)}</td><td>${pct(v.fallback_share)}</td><td>${num(v.latency_ms.median / 1000, 0)} с</td><td>${num(v.score_mean_complete, 1)} / ${num(v.rule_score_mean_complete, 1)} <small>(${v.complete_runs} прогонов)</small></td></tr>`).join('') + '</tbody>';
+  })();
+
   /* ------------------------------------------------------------ оглавление */
 
   (() => {
     const toc = $('toc'); if (!toc) return;
     const secs = [...document.querySelectorAll('main section[id]')];
-    secs.forEach(s => { const h = s.querySelector('h2'); if (!h) return; const a = el('a', null, h.dataset.short || h.textContent); a.href = '#' + s.id; toc.appendChild(a); });
+    secs.forEach((s, i) => { const h = s.querySelector('h2'); if (!h) return; const n = h.querySelector('.n'); if (n) n.textContent = i; const a = el('a', null, h.dataset.short || h.textContent.replace(/^\d+/, '')); a.href = '#' + s.id; toc.appendChild(a); });
+    for (const id of ['E12', 'E13']) { const w = $('wrap-' + id); if (w && !E[id]) w.style.display = 'none'; }
     const links = [...toc.querySelectorAll('a')];
     const mark = () => { let cur = secs[0]; for (const sec of secs) if (sec.getBoundingClientRect().top <= 160) cur = sec; links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + cur.id)); };
     window.addEventListener('scroll', mark, { passive: true }); mark();

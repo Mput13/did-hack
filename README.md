@@ -1,33 +1,54 @@
 # DID Hack — автономный ИИ-исследователь на TurtleBot3
 
-Агент ставит эксперимент на роботе в Gazebo: ищет скрытые образцы по датчику близости,
-оценивает «грунты» по расходу батареи, планирует маршрут и возвращается на базу.
+Агент управляет роботом в Gazebo: ищет скрытые образцы по датчику близости, оценивает стоимость
+грунта по расходу батареи, расследует странности опытами, запоминает выясненное и возвращается на
+базу. Подробное объяснение с рисунками и результатами — `explain.html` (открывается двойным щелчком).
 
-## Окружение
+## Запуск
 
-ROS 2 Jazzy, Gazebo Sim (Harmonic) и TurtleBot3 ставятся из RoboStack через [pixi](https://pixi.sh),
-версии закреплены в `pixi.lock`. Root не нужен. Платформы: linux-64, osx-arm64.
+Окружение (ROS 2 Jazzy, Gazebo Sim Harmonic, TurtleBot3) ставится из RoboStack через
+[pixi](https://pixi.sh); версии закреплены в `pixi.lock`. Root не нужен. Платформы: macOS arm64, Linux x86-64.
 
 ```bash
-curl -fsSL https://pixi.sh/install.sh | sh   # один раз
-pixi run sim        # мир turtlebot3_world и Burger без окна Gazebo; первый запуск скачает окружение (~1 ГБ) и соберёт ws/
-pixi run smoke      # во втором терминале: проверка уровня 0
-pixi run sim-gui    # то же с окном Gazebo
-pixi run teleop     # ручное управление с клавиатуры
+curl -fsSL https://pixi.sh/install.sh | sh    # один раз
+pixi run demo                                 # показ: окно Gazebo, судья, интерфейс и «пульт» (#/pilot)
+pixi run demo --fast                          # то же без Gazebo, на быстром симуляторе
+pixi run lab                                  # только интерфейс: http://127.0.0.1:8765
 ```
 
-На Linux без дисплея `pixi run sim` сам включает рендер лидара через EGL, Xvfb не нужен.
+| Команда | Что делает |
+|---|---|
+| `pixi run exp E1` · `pixi run exp all` | пересчитать серию опытов или все |
+| `pixi run run --level hard --seed 3 --agent adaptive` | один прогон в быстром симуляторе |
+| `pixi run run --level hard --seed 3 --agent scientist --rules science` | исследователь на «научных» правилах |
+| `pixi run gazebo-run --level hard --seed 1 [--gui] [--rules science --agent scientist]` | один прогон в Gazebo целиком |
+| `pixi run stand-gui level:=hard seed:=3` + `pixi run agent-ros --level hard --seed 3` | стенд и агент в двух терминалах |
+| `pixi run run --level medium --seed 1001 --agent adaptive_llm --llm codex` | планировщик на настоящей модели (`ollama` — локальная Qwen, `mock` — имитатор) |
+| `pixi run check` | все автоматические проверки |
+| `pixi run explain` | пересобрать `explain.html` со свежими данными |
+| `pixi run smoke`, `pixi run smoke-judge`, `pixi run teleop` | проверки уровня 0 и ручное управление |
 
-## Структура
+## Что где лежит
 
-- `ws/src/did_bringup` — launch-файлы
-- `maps/` — карта арены из `turtlebot3_navigation2`: 384×384, 0.05 м/клетка, начало (−10; −10)
-- `tools/smoke_sim.py` — проверка уровня 0: данные идут, робот слушается `/cmd_vel`
-- `env/activate.sh` — переменные окружения (модель робота, сеть только внутри машины)
-- `presentation/` — слайды чекпоинта 1. Пересборка: `python3 presentation/figures/make_figures.py`,
-  затем `node presentation/build_deck.js` (нужен `npm install` в `presentation/`)
+- `did/` — библиотека стенда (без ROS):
+  `config.py` правила (базовые и набор `SCIENCE`), `scenario.py` генератор сценариев, `judge.py` судья,
+  `fastsim.py` быстрый симулятор, `arena.py` карта, `nav.py` путь и ведение, `localize.py` поправка положения
+  по лидару, `mapping.py` построение карты, `belief.py` картина мира агента, `energy.py` + `science.py` +
+  `inquiry.py` модель расхода и расследования, `memory.py` память между прогонами, `planner.py` + `llm*.py`
+  планировщик и языковая модель, `agent.py` агентский цикл, `baselines.py` базовые стратегии,
+  `recorder.py` запись прогона, `metrics.py` + `experiments.py` серии опытов, `pilot.py` пульт для показа,
+  `ros_agent.py` агент в ROS 2, `lab/server.py` сервер интерфейса.
+- `ws/src/did_bringup`, `ws/src/did_ros` — launch-файлы и узел судьи для ROS 2 и Gazebo.
+- `lab/` — веб-интерфейс «Лаборатория»: опыты, графики, проигрыватель, пульт.
+- `experiments/*.yaml` — описания опытов; `runs/` — результаты и записи прогонов (в git не входят).
+- `docs/explainer/` — исходники страницы-объяснения; `docs/demo_script.md` — сценарий показа.
+- `presentation/` — слайды чекпоинтов.
+- `tests/` — автоматические проверки.
 
-## Координаты
+## Координаты и правила
 
-Робот стартует в (−2.0; −0.5) с нулевым курсом, `/odom` на старте равен (0; 0):
-`x_world = −2.0 + odom.x`, `y_world = −0.5 + odom.y`.
+Робот стартует в (−2.0; −0.5) с нулевым курсом, `/odom` на старте равен (0; 0); положение уточняется
+по лидару и карте. Интерфейс агента — топики и сервисы из условия задачи (`/cmd_vel`, `/scan`, `/odom`,
+`/did/battery`, `/did/sample_sensor`, `/did/collect`, `/did/finish`, `/did/score`, `/did/events`).
+Формула расхода, датчик, штрафы и счёт в условии не заданы — это допущения стенда, они собраны в
+`did/config.py` и разобраны в `explain.html`.

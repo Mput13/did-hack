@@ -65,8 +65,9 @@ MAX_POINTS = 20
 BASE_NEAR = 0.25               # м: ближе — робот «на базе»
 # Агенты, которым не нужна языковая модель: их можно запускать с пульта.
 MISSION_AGENTS = {'adaptive': 'С адаптацией', 'scientist': 'Исследователь', 'fixed': 'Фиксированный план'}
-# Уход одометрии в быстром симуляторе — как в Gazebo, чтобы поправка по лидару была видна и на репетиции.
-FAST_DRIFT = dict(odom_turn_slip=1.0, odom_turn_scale=0.03, odom_path_scale=0.03)
+# Уход одометрии в быстром симуляторе, чтобы поправка по лидару была видна и на репетиции: около 14 см
+# на 10 м пути. В Gazebo на спокойной езде выходит 3–8 см, на резких разворотах — больше.
+FAST_DRIFT = dict(odom_turn_slip=0.12, odom_turn_scale=0.006, odom_path_scale=0.006)
 EVENT_TEXT = {'collision': 'Столкновение', 'hazard_hit': 'Заезд в опасную зону', 'false_collect': 'Ложный сбор',
               'sample_collected': 'Образец собран'}
 REASONS = {'finish': 'миссия завершена', 'battery': 'села батарея', 'timeout': 'вышло время прогона'}
@@ -189,7 +190,7 @@ class Pilot:
         self._finish_at = None
         self._last_odom = None
         self._rerun_at = 0.0
-        self._say('info', 'Пульт запущен')
+        self._log(0.0, 'info', 'Пульт запущен')
 
     # ======================================================================================
     # один такт
@@ -337,7 +338,7 @@ class Pilot:
         home = self.mode == 'home'
         self.mode = 'idle'
         self.route = [] if home else self.route
-        self._say('ok', f'Робот на базе, до её центра {err * 100:.0f} см' if home
+        self._say('ok', f'Робот на базе: до её центра {err * 100:.0f} см' if home
                   else f'Приехал: до заданной точки {err * 100:.0f} см')
         after, self._after_home = self._after_home, None
         if home and after:
@@ -429,7 +430,7 @@ class Pilot:
             self.note = {'tone': 'info', 'text': 'Маршрут очищен'}
             return 'Маршрут очищен'
         length = sum(path_length(p['pts']) for p in route)
-        text = f'Маршрут из {len(route)} {_plural(len(route), "точки", "точек", "точек")}: путь {length:.1f} м'
+        text = f'Маршрут из {len(route)} {_plural(len(route), "точки", "точек", "точек")}: путь {_num(length)} м'
         if notes:
             text += ' (' + '; '.join(notes) + ')'
         self.note = {'tone': 'info', 'text': text + ('' if self.mode == 'drive' else '. Нажмите «Ехать»')}
@@ -532,7 +533,7 @@ class Pilot:
                          planner=make_planner(cfg, None, self.seed), recorder=self.rec)
         if self.tracker and cfg.localize:
             self.bot.tracker = self.tracker         # поправка позы не начинается с нуля
-        self.route = []
+        self.route, self.trail = [], []            # на карте остаётся только путь самой миссии
         self.follower.set_path([])
         self.mode = 'mission'
         self._finish_at = None
@@ -586,7 +587,7 @@ class Pilot:
             back = 'вернулся на базу' if r.get('returned') else 'на базу не вернулся'
             text = (f"Миссия окончена ({REASONS.get(r.get('reason'), 'итог судьи')}): собрано "
                     f"{r.get('samples_collected', 0)} из {r.get('samples_total', m.get('total'))}, {back}, "
-                    f"счёт {r.get('score', 0):.1f}")
+                    f"счёт {_num(r.get('score', 0))}")
         self._say('ok' if state == 'finished' else 'info', text)
 
     def _mission_view(self):
@@ -678,6 +679,11 @@ def _thin(pts, k):
 
 def _wrap(a):
     return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+def _num(v, digits=1):
+    """Число для сообщений оператору: с запятой."""
+    return f'{v:.{digits}f}'.replace('.', ',').replace('-', '−')
 
 
 def _plural(n, one, few, many):

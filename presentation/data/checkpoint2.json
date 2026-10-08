@@ -1,0 +1,518 @@
+{
+ "generated": "2026-10-08T04:10:23",
+ "task": {
+  "truth": "task_truth.png",
+  "robot_view": "task_robot_view.png",
+  "sensor": 0.49,
+  "ring_m": 1.03,
+  "samples": 7,
+  "soils": 4,
+  "hazards": 2,
+  "level": "hard",
+  "seed": 1
+ },
+ "story": {
+  "run": "gz_loc/adaptive/hard-1",
+  "backend": "gazebo",
+  "level": "hard",
+  "frames": [
+   {
+    "file": "story_1.png",
+    "t": 36.5,
+    "since_start": 5.0,
+    "battery": 57.7,
+    "collected": 0,
+    "total": 7,
+    "label": "поиск",
+    "quote": {
+     "t": 35.6,
+     "text": "H1: образец лежит около (-1.5; -1.4). Проверка: подъехать вплотную и попробовать собрать"
+    }
+   },
+   {
+    "file": "story_2.png",
+    "t": 58.1,
+    "since_start": 27.0,
+    "battery": 45.4,
+    "collected": 2,
+    "total": 7,
+    "label": "сбор и штраф",
+    "quote": {
+     "t": 57.7,
+     "text": "H6: около (0.2; -2.0) опасная зона радиусом около 0.5 м. Проверка: объезжать; новых штрафов в этом месте быть не должно"
+    }
+   },
+   {
+    "file": "story_3.png",
+    "t": 66.5,
+    "since_start": 35.0,
+    "battery": 38.7,
+    "collected": 2,
+    "total": 7,
+    "label": "сбой датчика",
+    "quote": {
+     "t": 60.7,
+     "text": "H8: датчик образцов неисправен, его показаниям нельзя верить как раньше. Проверка: снизить вес показаний и следить, вернётся ли разброс к норме"
+    }
+   },
+   {
+    "file": "story_4.png",
+    "t": 128.6,
+    "since_start": 98.0,
+    "battery": 8.1,
+    "collected": 5,
+    "total": 7,
+    "label": "возврат",
+    "quote": {
+     "t": 127.2,
+     "text": "Финиш: возврат на базу засчитан. Собрано 5 из 7, заряд 8.1"
+    }
+   }
+  ],
+  "settle_s": 31.0,
+  "result": {
+   "samples_collected": 5,
+   "samples_total": 7,
+   "returned": true,
+   "score": 60.81,
+   "battery_left": 8.1,
+   "time": 127.19,
+   "penalties": 2,
+   "hazard_hits": 2
+  },
+  "hypotheses": {
+   "total": 14,
+   "confirmed": 8,
+   "refuted": 2,
+   "outdated": 0,
+   "open": 4
+  },
+  "detect": {
+   "soil_change": null,
+   "new_hazard": 4.6,
+   "sensor_fault": 3.8
+  },
+  "back": null,
+  "journal_records": 51
+ },
+ "mapping": {
+  "file": "map_lidar.png",
+  "scans": 88,
+  "rays": 120,
+  "coverage": 0.9992,
+  "agreement": 0.9567,
+  "run": "gz_loc/adaptive/medium-1"
+ },
+ "nav": {
+  "file": "path_grid.png",
+  "inflate_m": 0.17,
+  "lookahead_m": 0.22,
+  "grid_m": 0.05,
+  "robot_radius_m": 0.105,
+  "belief_cell_m": 0.1,
+  "soil_cell_m": 0.2,
+  "path_m": 5.06,
+  "path_points": 33,
+  "path_cost": 13.34,
+  "paths_in_run": 63,
+  "free_cells": 7936,
+  "allowed_cells": 6067,
+  "run": "gz_loc/adaptive/medium-1"
+ },
+ "title": "title_run.png",
+ "gazebo": {
+  "runs": [
+   {
+    "level": "easy",
+    "seed": 1,
+    "file": "runs/gz_loc/adaptive/easy-1.json.gz",
+    "gazebo": {
+     "samples_collected": 3,
+     "samples_total": 3,
+     "returned": true,
+     "score": 53.76,
+     "battery_used": 22.37,
+     "time": 93.03,
+     "collisions": 0,
+     "false_collects": 0,
+     "hazard_hits": 0,
+     "distance": 8.577
+    },
+    "pose_fixes": 61,
+    "fastsim": {
+     "samples_collected": 3,
+     "samples_total": 3,
+     "returned": true,
+     "score": 53.77,
+     "battery_used": 22.32,
+     "time": 63.5,
+     "collisions": 0,
+     "false_collects": 0,
+     "hazard_hits": 0,
+     "distance": 8.674
+    },
+    "agent_err_cm": {
+     "median": 1.7,
+     "p95": 2.5,
+     "max": 2.8
+    },
+    "odom_err_cm": {
+     "median": 27.0,
+     "p95": 60.9,
+     "max": 60.9
+    }
+   },
+   {
+    "level": "medium",
+    "seed": 1,
+    "file": "runs/gz_loc/adaptive/medium-1.json.gz",
+    "gazebo": {
+     "samples_collected": 5,
+     "samples_total": 5,
+     "returned": true,
+     "score": 72.02,
+     "battery_used": 39.77,
+     "time": 121.83,
+     "collisions": 0,
+     "false_collects": 0,
+     "hazard_hits": 0,
+     "distance": 12.669
+    },
+    "pose_fixes": 89,
+    "fastsim": {
+     "samples_collected": 5,
+     "samples_total": 5,
+     "returned": true,
+     "score": 71.64,
+     "battery_used": 43.64,
+     "time": 85.2,
+     "collisions": 0,
+     "false_collects": 0,
+     "hazard_hits": 0,
+     "distance": 14.491
+    },
+    "agent_err_cm": {
+     "median": 1.9,
+     "p95": 3.2,
+     "max": 3.6
+    },
+    "odom_err_cm": {
+     "median": 11.3,
+     "p95": 18.5,
+     "max": 19.3
+    }
+   },
+   {
+    "level": "hard",
+    "seed": 1,
+    "file": "runs/gz_loc/adaptive/hard-1.json.gz",
+    "gazebo": {
+     "samples_collected": 5,
+     "samples_total": 7,
+     "returned": true,
+     "score": 60.81,
+     "battery_used": 51.9,
+     "time": 127.19,
+     "collisions": 0,
+     "false_collects": 0,
+     "hazard_hits": 2,
+     "distance": 15.555
+    },
+    "pose_fixes": 96,
+    "fastsim": {
+     "samples_collected": 6,
+     "samples_total": 7,
+     "returned": true,
+     "score": 75.21,
+     "battery_used": 57.87,
+     "time": 99.3,
+     "collisions": 0,
+     "false_collects": 0,
+     "hazard_hits": 1,
+     "distance": 16.515
+    },
+    "agent_err_cm": {
+     "median": 1.7,
+     "p95": 4.3,
+     "max": 4.8
+    },
+    "odom_err_cm": {
+     "median": 5.0,
+     "p95": 16.6,
+     "max": 19.0
+    }
+   }
+  ],
+  "series": {
+   "easy": {
+    "t": [
+     0,
+     4,
+     8,
+     12,
+     16,
+     20,
+     24,
+     28,
+     32,
+     36,
+     40,
+     44,
+     48,
+     52,
+     56,
+     60
+    ],
+    "odom_cm": [
+     2.5,
+     3.5,
+     5.8,
+     7.7,
+     22.6,
+     29.2,
+     28.8,
+     39.6,
+     57.2,
+     60.9,
+     60.9,
+     60.9,
+     53.8,
+     36.7,
+     23.5,
+     23.3
+    ],
+    "agent_cm": [
+     1.9,
+     1.6,
+     1.7,
+     1.7,
+     2.2,
+     2.8,
+     2.1,
+     2.2,
+     2.1,
+     2.0,
+     1.9,
+     1.9,
+     2.0,
+     1.5,
+     1.3,
+     0.9
+    ],
+    "step_s": 4.0
+   },
+   "medium": {
+    "t": [
+     0,
+     4,
+     8,
+     12,
+     16,
+     20,
+     24,
+     28,
+     32,
+     36,
+     40,
+     44,
+     48,
+     52,
+     56,
+     60,
+     64,
+     68,
+     72,
+     76,
+     80,
+     84,
+     88
+    ],
+    "odom_cm": [
+     2.4,
+     2.1,
+     1.7,
+     2.1,
+     2.8,
+     3.6,
+     6.2,
+     7.4,
+     11.6,
+     14.7,
+     15.0,
+     16.5,
+     17.6,
+     18.5,
+     18.5,
+     18.5,
+     18.8,
+     16.0,
+     13.3,
+     9.2,
+     12.1,
+     18.9,
+     19.3
+    ],
+    "agent_cm": [
+     1.7,
+     1.5,
+     1.5,
+     1.0,
+     2.1,
+     2.2,
+     2.2,
+     2.7,
+     2.2,
+     1.5,
+     2.3,
+     2.5,
+     3.1,
+     3.3,
+     3.1,
+     3.2,
+     3.6,
+     3.2,
+     2.4,
+     1.7,
+     1.5,
+     1.5,
+     1.1
+    ],
+    "step_s": 4.0
+   },
+   "hard": {
+    "t": [
+     0,
+     4,
+     8,
+     12,
+     16,
+     20,
+     24,
+     28,
+     32,
+     36,
+     40,
+     44,
+     48,
+     52,
+     56,
+     60,
+     64,
+     68,
+     72,
+     76,
+     80,
+     84,
+     88,
+     92,
+     96
+    ],
+    "odom_cm": [
+     2.4,
+     1.0,
+     1.3,
+     2.5,
+     2.4,
+     2.6,
+     3.6,
+     3.9,
+     2.8,
+     3.3,
+     5.2,
+     7.3,
+     8.5,
+     7.9,
+     6.9,
+     8.3,
+     7.9,
+     5.4,
+     5.9,
+     6.9,
+     10.4,
+     13.8,
+     16.5,
+     18.9,
+     19.0
+    ],
+    "agent_cm": [
+     1.8,
+     0.8,
+     1.1,
+     1.4,
+     1.2,
+     1.1,
+     1.4,
+     1.5,
+     1.4,
+     1.6,
+     2.5,
+     3.1,
+     3.1,
+     2.8,
+     3.3,
+     3.3,
+     3.8,
+     4.4,
+     4.8,
+     3.7,
+     3.4,
+     2.9,
+     2.3,
+     1.5,
+     1.1
+    ],
+    "step_s": 4.0
+   }
+  },
+  "agent_median_cm": [
+   1.7,
+   1.9
+  ],
+  "agent_max_cm": 4.8,
+  "odom_max_cm": 60.9,
+  "before_fix": {
+   "file": "runs/gz_base/pose-medium-1.csv",
+   "odom_median_cm": 83.5,
+   "odom_max_cm": 219.3
+  },
+  "settle_until_s": 35.0
+ },
+ "tests": {
+  "passed": 265,
+  "line": "265 passed, 1 skipped in 32.30s",
+  "ok": true,
+  "when": "2026-10-08T04:02:09",
+  "failed": 0,
+  "skipped": 1,
+  "error": 0
+ },
+ "rules": {
+  "battery_start": 60.0,
+  "drain_per_m": 2.5,
+  "collect_radius_m": 0.3,
+  "sensor_range_m": 2.0,
+  "sensor_hz": 5.0,
+  "sensor_sigma": 0.05
+ },
+ "levels": {
+  "easy": {
+   "samples": 3,
+   "soils": 1,
+   "events": []
+  },
+  "medium": {
+   "samples": 5,
+   "soils": 3,
+   "events": []
+  },
+  "hard": {
+   "samples": 7,
+   "soils": 4,
+   "events": [
+    "soil_change",
+    "new_hazard",
+    "sensor_fault"
+   ]
+  }
+ }
+}

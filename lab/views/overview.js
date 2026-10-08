@@ -2,7 +2,7 @@
 
 import {
   h, fill, icon, badge, mark, loading, errorBox, getIndex, getExperiment, jobs, href, count, when, KINDS,
-  metricInfo, armColors, dot, hypothesisWord,
+  metricInfo, armColors, dot, hypothesisWord, ruLevels,
 } from './common.js';
 import { diffWords } from '../charts.js';
 
@@ -27,14 +27,14 @@ function hero(item, detail) {
       sub = `в среднем ${diffWords(info, cell.pair.mean)} · лучше в ${wins} из ${cell.pair.n} сценариев`;
     }
     return h('li', { class: 'lb-hero__claim' },
-      h('div', null, h('div', { class: 'lb-hero__claim-text', text: c.text || c.metric }), sub ? h('div', { class: 'lb-hero__claim-sub', text: sub }) : null),
+      h('div', null, h('div', { class: 'lb-hero__claim-text', text: ruLevels(c.text || c.metric) }), sub ? h('div', { class: 'lb-hero__claim-sub', text: sub }) : null),
       h('div', { class: 'lb-hero__claim-status' }, badge(c.status)));
   });
   const arms = detail && detail.spec.arms ? detail.spec.arms : [];
   return h('section', { class: 'lb-card lb-hero' },
     h('div', { class: 'lb-hero__main' },
       h('div', { class: 'lb-eyebrow', text: `Главная гипотеза · проверяет опыт ${item.id}` }),
-      h('p', { class: 'lb-hero__text', text: item.hypothesis || '' }),
+      h('p', { class: 'lb-hero__text', text: ruLevels(item.hypothesis || '') }),
       h('div', { class: 'lb-hero__status' },
         badge(item.status, { big: true, word: hypothesisWord(item.status) }),
         item.runs ? h('span', { class: 'lb-muted', text: `${count(item.runs, 'прогон', 'прогона', 'прогонов')} на одинаковых сценариях` }) : null),
@@ -74,11 +74,11 @@ function card(item) {
     h('div', { class: 'lb-exp__top' },
       h('span', { class: 'lb-exp__id', text: item.id }),
       h('span', { class: 'lb-exp__kind', text: KINDS[item.kind] || 'Опыт' })),
-    h('div', { class: 'lb-exp__title', text: item.title || item.id }),
+    h('div', { class: 'lb-exp__title', text: ruLevels(item.title || item.id) }),
     status,
-    h('div', { class: 'lb-exp__q', text: item.question || '' }),
+    h('div', { class: 'lb-exp__q', text: ruLevels(item.question || '') }),
     claims.length
-      ? h('ul', { class: 'lb-exp__claims' }, claims.map((c) => h('li', null, mark(c.status), h('span', { text: c.text || c.metric }))))
+      ? h('ul', { class: 'lb-exp__claims' }, claims.map((c) => h('li', null, mark(c.status), h('span', { text: ruLevels(c.text || c.metric) }))))
       : null,
     foot);
   return { el, paint };
@@ -122,6 +122,7 @@ export async function render(root, ctx) {
       h('nav', { class: 'lb-intro__links', 'aria-label': 'Быстрые ссылки' },
         h('a', { class: 'lb-btn', href: 'explain.html' }, 'Как это устроено', icon('right')),
         h('a', { class: 'lb-btn', href: href('/scenarios') }, 'Сценарии', icon('right')),
+        h('a', { class: 'lb-btn', href: href('/knowledge') }, 'Знания робота', icon('right')),
         h('a', { class: 'lb-btn', href: href('/live') }, 'Живой прогон', icon('right')))),
     hero(mainItem, detail),
     h('div', { class: 'lb-section-head' },

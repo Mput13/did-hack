@@ -128,11 +128,15 @@ function createMap(arena, onClick) {
   const Y = (y) => (by1 - y) * scale;
 
   function resize() {
-    const host = el.parentElement;
-    if (!host) return;
+    const grid = el.closest('.pl-grid');
+    if (!grid) return;
+    // Ширина карты — что осталось от колонок пульта (см. pilot.css), высота — чтобы всё помещалось в экран.
+    const full = grid.clientWidth;
+    const avail = window.innerWidth >= 1280 ? full - 2 * 330 - 2 * 20 : window.innerWidth >= 900 ? full - 360 - 20 : full;
     const top = el.getBoundingClientRect().top + window.scrollY;
-    const maxH = Math.max(380, window.innerHeight - Math.min(top, 260) - 86);
-    const width = Math.min(host.clientWidth, maxH * aspect);
+    const maxH = Math.max(360, window.innerHeight - Math.min(top, 260) - 92);
+    const width = Math.max(300, Math.min(avail, maxH * aspect));
+    if (Math.round(width) === W) return;
     W = Math.round(width);
     H = Math.round(width / aspect);
     el.style.width = `${W}px`;
@@ -189,7 +193,7 @@ function createMap(arena, onClick) {
         const v = src[r * b.w + c] / 255;           // корень из вероятности
         const k = ((b.h - 1 - r) * b.w + c) * 4;
         img.data[k] = 27; img.data[k + 1] = 175; img.data[k + 2] = 122;
-        img.data[k + 3] = v < 0.06 ? 0 : Math.round(255 * clamp(v * 1.5, 0, 0.82));
+        img.data[k + 3] = v < 0.08 ? 0 : Math.round(255 * clamp(v * 2.2, 0, 0.85));
       }
     }
     heatCv.getContext('2d').putImageData(img, 0, 0);
@@ -458,7 +462,7 @@ function createMap(arena, onClick) {
 
   return {
     el,
-    mount() { ro.observe(el.parentElement); resize(); raf = requestAnimationFrame(frame); },
+    mount() { ro.observe(el.closest('.pl-grid')); resize(); raf = requestAnimationFrame(frame); },
     setOpts(o) { opts = { ...opts, ...o }; },
     setGhost(g) { ghost = g; },
     reject(p) { flashes.push({ ...p, until: performance.now() + 1800 }); },
@@ -475,9 +479,10 @@ function createMap(arena, onClick) {
       const m = next && next.map;
       if (m && m.data && m.version !== gridVersion) {
         const g = decode(m.data);
-        if (m.version < gridVersion || !grid) seenAt.fill(0);       // карту сбросили
+        if (m.version < gridVersion) seenAt.fill(0);                // карту сбросили
+        const stamp = grid ? now : now - FRESH_MS;                  // при открытии страницы готовая карта не вспыхивает
         for (let i = 0; i < g.length; i++) {
-          if (g[i] && !seenAt[i]) seenAt[i] = now;
+          if (g[i] && !seenAt[i]) seenAt[i] = stamp;
           else if (!g[i]) seenAt[i] = 0;
         }
         grid = g;
@@ -598,14 +603,14 @@ export async function render(root, ctx) {
   const stopBtn = btn('Стоп', 'pl-btn--stop', () => send('stop'));
   const homeBtn = btn('Домой', '', () => send('home'), 'Вернуться на базу (−2,0; −0,5)');
   const resetBtn = btn('Сбросить', '', () => send('reset'), 'Стереть карту и след, начать прогон заново');
-  const undoBtn = btn('Убрать последнюю', 'pl-btn--small', () => send('route', { points: pending().slice(0, -1) }, true));
+  const undoBtn = btn('Убрать точку', 'pl-btn--small',  () => send('route', { points: pending().slice(0, -1) }, true));
   const clearBtn = btn('Очистить', 'pl-btn--small', () => send('route', { points: [] }, true));
   const routeInfo = h('div', { class: 'pl-route__info' });
   const routeDots = h('div', { class: 'pl-route__dots' });
 
   const tiles = {
     battery: tile('Заряд'), sensor: tile('Датчик образцов'), dist: tile('Пройдено'),
-    cover: tile('Карта построена'), agree: tile('Совпадение с эталоном'), pose: tile('Положение робота'),
+    cover: tile('Карта построена'), agree: tile('Совпадение с эталоном'), pose: tile('Откуда поза'),
   };
 
   const missionBody = h('div', { class: 'pl-mission__body' });
@@ -613,17 +618,16 @@ export async function render(root, ctx) {
   const sourceBody = h('div', { class: 'pl-sourcecard__body' });
   let agentChoice = 'adaptive';
 
-  const side = h('div', { class: 'pl-side' },
+  const colDrive = h('div', { class: 'pl-col' },
     h('section', { class: 'lb-card pl-card pl-status' },
       h('div', { class: 'pl-status__row' }, lamp, statusText),
       statusSub, noteBox),
     h('section', { class: 'lb-card pl-card' },
       h('div', { class: 'pl-card__head' }, h('h2', { class: 'pl-h', text: 'Маршрут' }), routeInfo),
-      routeDots,
-      h('div', { class: 'pl-row' }, goBtn, stopBtn, homeBtn, resetBtn),
-      h('div', { class: 'pl-row pl-row--small' }, undoBtn, clearBtn,
-        h('span', { class: 'lb-muted', text: 'Клик по карте добавляет точку' }))),
-    h('section', { class: 'pl-tiles' }, Object.values(tiles).map((t) => t.el)),
+      h('div', { class: 'pl-route' }, routeDots, h('div', { class: 'pl-route__edit' }, undoBtn, clearBtn)),
+      h('div', { class: 'pl-buttons' }, goBtn, stopBtn, homeBtn, resetBtn)),
+    h('section', { class: 'pl-tiles' }, Object.values(tiles).map((t) => t.el)));
+  const colMission = h('div', { class: 'pl-col' },
     h('section', { class: 'lb-card pl-card pl-mission' },
       h('div', { class: 'pl-card__head' }, h('h2', { class: 'pl-h', text: 'Автономная миссия' })),
       missionBody),
@@ -635,11 +639,11 @@ export async function render(root, ctx) {
       sourceBody));
 
   const legend = h('div', { class: 'pl-legend' },
-    h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__seen' }), 'увидел лидаром'),
-    h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__wall' }), 'преграда по лидару'),
-    h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__fog' }), 'ещё не видел (эталонная карта)'),
+    h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__seen' }), 'пол: увидел лидар'),
+    h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__wall' }), 'преграда'),
+    h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__fog' }), 'ещё не видел'),
     h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__trail' }), 'след'),
-    h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__path' }), 'построенный путь'));
+    h('span', { class: 'pl-key' }, h('i', { class: 'pl-key__path' }), 'путь'));
   const toggles = h('div', { class: 'pl-toggles' },
     check('Показать скрытую правду', false, (v) => map.setOpts({ truth: v })),
     check('Лучи лидара', true, (v) => map.setOpts({ rays: v })),
@@ -653,8 +657,10 @@ export async function render(root, ctx) {
         h('div', { class: 'lb-eyebrow', text: 'Пульт' }),
         h('h1', { class: 'lb-h1 pl-h1', text: 'Поставьте точку на карте — робот поедет' })),
       sourceChip),
-    h('div', { class: 'pl-grid' }, stage, side));
-  map.el.addEventListener('pl-resize', (ev) => { side.style.maxHeight = `${Math.max(ev.detail.height + 64, 420)}px`; });
+    h('div', { class: 'pl-grid' }, stage, colDrive, colMission));
+  map.el.addEventListener('pl-resize', (ev) => {
+    for (const col of [colDrive, colMission]) col.style.maxHeight = `${Math.max(ev.detail.height + 66, 420)}px`;
+  });
   map.mount();
 
   // --- отрисовка состояния ---------------------------------------------------------------------
@@ -751,7 +757,7 @@ export async function render(root, ctx) {
       const speeds = h('div', { class: 'lb-seg', role: 'group', 'aria-label': 'Скорость времени' },
         (s.speeds || [1]).map((v) => h('button', { class: 'lb-seg__btn', type: 'button', 'aria-pressed': String(v === s.speed), onclick: () => send('speed', { value: v }, true) }, `×${v}`)));
       fill(sourceBody,
-        h('p', { class: 'pl-text', text: 'Быстрый симулятор: та же арена, тот же судья и тот же пульт, что в Gazebo. Одометрия уходит так же, как там.' }),
+        h('p', { class: 'pl-text', text: 'Быстрый симулятор: та же арена, тот же судья и тот же пульт, что в Gazebo. Колёса тоже врут — позу поправляет лидар.' }),
         h('div', { class: 'pl-row pl-row--small' }, h('span', { class: 'lb-muted', text: 'Скорость времени' }), speeds),
         form('Перезапустить', false),
         h('div', { class: 'pl-row pl-row--small' },
@@ -809,24 +815,24 @@ export async function render(root, ctx) {
 
     const b = s.battery / s.battery_start;
     tiles.battery.value.textContent = num(s.battery, 1);
-    tiles.battery.sub.textContent = `из ${num(s.battery_start, 0)} · хватит на ${num(s.battery / 2.5, 0)} м`;
+    tiles.battery.sub.textContent = `из ${num(s.battery_start, 0)}, хватит на ${num(s.battery / 2.5, 0)} м`;
     fill(tiles.battery.bar, meter(b, b < 0.25 ? 'bad' : b < 0.5 ? 'warn' : 'ok'));
     tiles.sensor.value.textContent = num(s.sensor, 2);
-    tiles.sensor.sub.textContent = s.sensor > 0.85 ? 'образец совсем рядом' : s.sensor > 0.02 ? 'чем ближе образец, тем больше' : 'рядом образцов нет';
+    tiles.sensor.sub.textContent = s.sensor > 0.85 ? 'образец совсем рядом' : s.sensor > 0.02 ? 'ближе к образцу — больше' : 'образцов рядом нет';
     fill(tiles.sensor.bar, meter(s.sensor, 'green'));
     tiles.dist.value.textContent = `${num(s.distance, 1)} м`;
-    tiles.dist.sub.textContent = `время прогона ${num(s.t, 0)} с`;
+    tiles.dist.sub.textContent = `прогон идёт ${num(s.t, 0)} с`;
     const mp = s.map || {};
     tiles.cover.value.textContent = `${num((mp.coverage || 0) * 100, 0)} %`;
-    tiles.cover.sub.textContent = 'доля пола, увиденная лидаром';
+    tiles.cover.sub.textContent = 'пола увидел лидар';
     fill(tiles.cover.bar, meter(mp.coverage || 0, 'blue'));
     tiles.agree.value.textContent = mp.coverage ? `${num((mp.agreement || 0) * 100, 1)} %` : '—';
-    tiles.agree.sub.textContent = 'клеток, где наша карта и эталон согласны';
+    tiles.agree.sub.textContent = 'клеток совпало';
     const f = s.fix || {};
-    tiles.pose.value.textContent = f.source === 'lidar' ? 'одометрия + лидар' : 'только одометрия';
+    tiles.pose.value.textContent = f.source === 'lidar' ? 'колёса + лидар' : 'только колёса';
     tiles.pose.value.classList.add('pl-tile__value--text');
     tiles.pose.sub.textContent = f.source === 'lidar'
-      ? `поправка ${cm(f.shift || 0)} см и ${num(Math.abs(f.dth || 0) * 180 / Math.PI, 1)}°`
+      ? `поправка по лидару ${cm(f.shift || 0)} см, ${num(Math.abs(f.dth || 0) * 180 / Math.PI, 1)}°`
       : 'поправки по лидару нет';
 
     paintMission(s);

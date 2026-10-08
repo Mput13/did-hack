@@ -3,7 +3,7 @@
 import {
   h, icon, badge, dot, loading, errorBox, emptyBox, select, getExperiment, jobs, href, runHref, compareHref, go,
   num, count, plural, when, KINDS, REASONS, EVENT_NAMES, LEVEL_ORDER, levelName, metricInfo, metricValue, armColors,
-  hypothesisWord, tip, backendName, condName,
+  hypothesisWord, tip, backendName, condName, ruLevels,
 } from './common.js';
 import { stripChart, diffChart, legend } from '../charts.js';
 
@@ -15,16 +15,35 @@ function model(data) {
   const conds = (spec.conditions && spec.conditions.length ? spec.conditions : [BASE_COND]).map((c) => ({ ...c, label: condName(c) }));
   const levels = spec.levels || [];
   const byCond = conds.length > 1;
-  const groups = byCond
-    ? conds.map((c) => ({ id: c.id, label: c.label, cond: c.id, level: levels.length > 1 ? 'all' : levels[0] }))
-    : levels.map((l) => ({ id: l, label: levelName(l), cond: conds[0].id, level: l }));
-  const total = !byCond && levels.length > 1 ? { id: 'all', label: 'Все уровни вместе', cond: conds[0].id, level: 'all', strong: true } : null;
+  // Несколько условий и несколько уровней сразу: строки — условия, а уровень выбирается переключателем.
+  const pickLevel = byCond && levels.length > 1;
+  const view = { level: 'all' };
   const stats = new Map();
   for (const g of data.groups || []) stats.set(`${g.arm}|${g.condition}|${g.level}`, g);
   const runIndex = new Map();
   for (const r of data.runs || []) runIndex.set(`${r.arm}|${r.condition}|${r.level}|${r.seed}`, r);
+  const infos = new Map();
+  const info = (metric) => {
+    if (infos.has(metric)) return infos.get(metric);
+    let max = null;
+    for (const g of data.groups || []) {
+      const st = g.stats && g.stats[metric];
+      if (st && Number.isFinite(st.max)) max = Math.max(max ?? 0, Math.abs(st.max), Math.abs(st.min ?? 0));
+    }
+    const bool = (data.runs || []).some((r) => r.metrics && typeof r.metrics[metric] === 'boolean');
+    const made = metricInfo(metric, data.metrics, { max, bool });
+    infos.set(metric, made);
+    return made;
+  };
   return {
-    data, spec, arms, conds, levels, byCond, groups, total,
+    data, spec, arms, conds, levels, byCond, pickLevel, view,
+    /** Строки сравнения: уровни (если условие одно) либо условия на выбранном уровне. */
+    groups() {
+      if (!byCond) return levels.map((l) => ({ id: l, label: levelName(l), cond: conds[0].id, level: l }));
+      const level = levels.length > 1 ? view.level : levels[0];
+      return conds.map((c) => ({ id: c.id, label: c.label, cond: c.id, level }));
+    },
+    total: !byCond && levels.length > 1 ? { id: 'all', label: 'Все уровни вместе', cond: conds[0].id, level: 'all', strong: true } : null,
     colors: armColors(arms),
     armLabel: (id) => (arms.find((a) => a.id === id) || {}).label || id,
     condLabel: (id) => (conds.find((c) => c.id === id) || {}).label || id,
@@ -34,7 +53,7 @@ function model(data) {
     },
     runsOf: (arm, g) => (data.runs || []).filter((r) => r.arm === arm && r.condition === g.cond && (g.level === 'all' || r.level === g.level)),
     twin: (run, arm) => runIndex.get(`${arm}|${run.condition}|${run.level}|${run.seed}`),
-    info: (metric) => metricInfo(metric, data.metrics),
+    info,
     describe: (run) => `${levelName(run.level)} уровень, сценарий ${run.seed}${byCond ? ` · ${(conds.find((c) => c.id === run.condition) || {}).label || run.condition}` : ''}`,
   };
 }
@@ -116,7 +135,7 @@ function head(m, ctx) {
     h('div', { class: 'lb-exphead__main' },
       h('a', { class: 'lb-back', href: href('/') }, icon('left'), 'Все опыты'),
       h('div', { class: 'lb-eyebrow', text: `Опыт ${spec.id} · ${KINDS[spec.kind] || 'Опыт'}` }),
-      h('h1', { class: 'lb-h1', text: spec.title || spec.id }),
+      h('h1', { class: 'lb-h1', text: ruLevels(spec.title || spec.id) }),
       h('div', { class: 'lb-exphead__status' },
         badge(data.status, { big: true, word: hypothesisWord(data.status) }),
         meta.length ? h('span', { class: 'lb-muted', text: meta.join(' · ') }) : null)),
@@ -162,7 +181,7 @@ function alerts(m) {
 
 function science(m) {
   const { spec } = m;
-  const part = (title, text) => (text ? h('div', { class: 'lb-science__part' }, h('div', { class: 'lb-eyebrow', text: title }), h('p', { text })) : null);
+  const part = (title, text) => (text ? h('div', { class: 'lb-science__part' }, h('div', { class: 'lb-eyebrow', text: title }), h('p', { text: ruLevels(text) })) : null);
   const seeds = m.data.seeds || spec.seeds;
   const setup = [];
   setup.push(h('div', { class: 'lb-setup__row' }, h('span', { class: 'lb-setup__name', text: 'Варианты агента' }),
@@ -175,8 +194,8 @@ function science(m) {
     h('span', { text: `${m.levels.length > 1 ? 'уровни' : 'уровень'}: ${m.levels.map((l) => levelName(l).toLowerCase()).join(', ')} · по ${count(seeds, 'сценарию', 'сценария', 'сценариев')} на уровень, одни и те же для всех вариантов` })));
   return h('section', { class: 'lb-card lb-science' },
     h('div', { class: 'lb-science__top' },
-      h('div', { class: 'lb-science__q' }, h('div', { class: 'lb-eyebrow', text: 'Вопрос' }), h('p', { class: 'lb-science__big', text: spec.question || '' })),
-      h('div', { class: 'lb-science__h' }, h('div', { class: 'lb-eyebrow', text: 'Гипотеза' }), h('p', { class: 'lb-science__big', text: spec.hypothesis || '' }))),
+      h('div', { class: 'lb-science__q' }, h('div', { class: 'lb-eyebrow', text: 'Вопрос' }), h('p', { class: 'lb-science__big', text: ruLevels(spec.question || '') })),
+      h('div', { class: 'lb-science__h' }, h('div', { class: 'lb-eyebrow', text: 'Гипотеза' }), h('p', { class: 'lb-science__big', text: ruLevels(spec.hypothesis || '') }))),
     h('div', { class: 'lb-science__parts' },
       part('Как проверяем', spec.method), part('Чего ждём', spec.expect), part('Что опровергнет', spec.refute)),
     h('div', { class: 'lb-setup' }, setup));
@@ -187,7 +206,8 @@ function science(m) {
 function claimsSection(m) {
   const claims = m.data.claims || [];
   if (!claims.length) return null;
-  const rowsDef = m.total ? [...m.groups, m.total] : m.groups;
+  const groups = m.groups();
+  const rowsDef = m.total ? [...groups, m.total] : groups;
   const cards = claims.map((c) => {
     const info = m.info(c.metric);
     const better = c.better || info.better;
@@ -201,7 +221,7 @@ function claimsSection(m) {
     }
     return h('article', { class: 'lb-card lb-claim' },
       h('div', { class: 'lb-claim__head' },
-        h('h3', { class: 'lb-h3', text: c.text || info.label }),
+        h('h3', { class: 'lb-h3', text: ruLevels(c.text || info.label) }),
         badge(c.status, { big: true })),
       h('div', { class: 'lb-claim__sub' },
         h('span', { class: 'lb-chip' }, dot(m.colors.get(c.a)), m.armLabel(c.a)),
@@ -225,7 +245,8 @@ function claimsSection(m) {
 // --- метрики -----------------------------------------------------------------------------------
 
 function meansTable(m, metrics) {
-  const rowsDef = m.total ? [...m.groups, m.total] : m.groups;
+  const groups = m.groups();
+  const rowsDef = m.total ? [...groups, m.total] : groups;
   const infos = metrics.map((id) => m.info(id));
   const body = [];
   for (const g of rowsDef) {
@@ -260,22 +281,29 @@ function metricsSection(m, ctx) {
   const charts = [];
   for (const id of metrics) {
     const info = m.info(id);
-    const groups = m.groups.map((g) => ({
+    const all = m.groups().map((g) => ({
       label: g.label,
       rows: m.arms.map((a) => ({
+        arm: a.id,
         label: a.label,
         color: m.colors.get(a.id),
         stat: m.statOf(a.id, g, id),
         points: m.runsOf(a.id, g).map((run) => ({ v: metricValue(run, id), run })).filter((p) => p.v != null),
       })),
     }));
+    // Метрика бывает только у части вариантов (расследования ведёт один исследователь) — пустые строки убираем.
+    const filled = new Set(all.flatMap((g) => g.rows.filter((r) => r.stat || r.points.length).map((r) => r.arm)));
+    if (!filled.size) continue;
+    const groups = all.map((g) => ({ label: g.label, rows: g.rows.filter((r) => filled.has(r.arm)) }));
+    const partial = filled.size < m.arms.length;
     const host = h('div', { class: 'lb-chart__plot' });
     grid.append(h('figure', { class: 'lb-card lb-chart' },
       h('figcaption', { class: 'lb-chart__head' },
         h('span', { class: 'lb-chart__title', text: info.title }),
         h('span', { class: 'lb-chart__hint', text: info.betterText })),
-      host));
-    charts.push({ host, cfg: { info, groups, rowLabels, describe: m.describe, onPick: (run) => go(runHref(run.file)), aria: `${info.title}: сравнение вариантов агента` } });
+      host,
+      partial ? h('div', { class: 'lb-chart__note', text: `У остальных вариантов этой величины нет: ${m.arms.filter((a) => !filled.has(a.id)).map((a) => `«${a.label}»`).join(', ')}` }) : null));
+    charts.push({ host, cfg: { info, groups, rowLabels: rowLabels || partial, describe: m.describe, onPick: (run) => go(runHref(run.file)), aria: `${info.title}: сравнение вариантов агента` } });
   }
   const table = meansTable(m, metrics);
   table.hidden = true;
@@ -295,13 +323,13 @@ function metricsSection(m, ctx) {
     h('div', { class: 'lb-toolbar' }, legend(arms), h('div', { class: 'lb-seg', role: 'group', 'aria-label': 'Вид' }, tabs)),
     grid, table);
   // Графики измеряют свою ширину, поэтому рисуются после вставки страницы в документ.
+  const live = [];
   const mount = () => {
-    for (const c of charts) {
-      const ch = stripChart(c.host, c.cfg);
-      ctx.onLeave(() => ch.destroy());
-    }
+    for (const c of charts) live.push(stripChart(c.host, c.cfg));
   };
-  return { section, mount };
+  const destroy = () => { for (const ch of live.splice(0)) ch.destroy(); };
+  ctx.onLeave(destroy);
+  return { section, mount, destroy };
 }
 
 // --- обнаружение изменений ---------------------------------------------------------------------
@@ -314,15 +342,23 @@ function median(values) {
 
 function detectSection(m) {
   const runs = m.data.runs || [];
-  const types = Object.keys(EVENT_NAMES).filter((t) => runs.some((r) => r.metrics && r.metrics.detect && t in r.metrics.detect));
+  const seenTypes = new Set();
+  for (const r of runs) for (const t of Object.keys((r.metrics && r.metrics.detect) || {})) seenTypes.add(t);
+  // Сначала известные события в привычном порядке, затем новые — под своими именами.
+  const types = [...Object.keys(EVENT_NAMES).filter((t) => seenTypes.has(t)), ...[...seenTypes].filter((t) => !(t in EVENT_NAMES))];
   if (!types.length) return null;
   const cell = (arm, type) => {
     const vals = runs.filter((r) => r.arm === arm && r.metrics.detect && type in r.metrics.detect).map((r) => r.metrics.detect[type]);
     if (!vals.length) return h('td', { class: 'lb-muted', text: 'события не было' });
     const seen = vals.filter((v) => v != null);
+    const share = seen.length / vals.length;
     return h('td', null,
-      h('div', { class: 'lb-detect__main', text: `заметил в ${seen.length} из ${vals.length}` }),
-      seen.length ? h('div', { class: 'lb-muted', text: `обычно через ${num(median(seen), 1)} с` }) : null);
+      h('div', { class: 'lb-detect' },
+        h('div', { class: 'lb-detect__meter', role: 'img', 'aria-label': `заметил в ${seen.length} из ${vals.length}` },
+          h('i', { style: { width: `${(share * 100).toFixed(1)}%` } })),
+        h('div', null,
+          h('div', { class: 'lb-detect__main', text: `заметил в ${seen.length} из ${vals.length}` }),
+          h('div', { class: 'lb-muted', text: seen.length ? `обычно через ${num(median(seen), 1)} с` : 'ни разу' }))));
   };
   return h('section', { class: 'lb-section' },
     h('div', { class: 'lb-section-head' },
@@ -331,11 +367,67 @@ function detectSection(m) {
     h('div', { class: 'lb-tablewrap' },
       h('table', { class: 'lb-table lb-table--roomy' },
         h('thead', null, h('tr', null,
-          h('th', { scope: 'col', text: 'Событие' }),
-          m.arms.map((a) => h('th', { scope: 'col' }, h('span', { class: 'lb-cellarm' }, dot(m.colors.get(a.id)), a.label))))),
-        h('tbody', null, types.map((t) => h('tr', null,
-          h('th', { scope: 'row', text: EVENT_NAMES[t] }),
-          m.arms.map((a) => cell(a.id, t))))))));
+          h('th', { scope: 'col', text: 'Вариант' }),
+          types.map((t) => h('th', { scope: 'col', text: EVENT_NAMES[t] || t })))),
+        h('tbody', null, m.arms.map((a) => h('tr', null,
+          h('th', { scope: 'row' }, h('span', { class: 'lb-cellarm' }, dot(m.colors.get(a.id)), a.label)),
+          types.map((t) => cell(a.id, t))))))));
+}
+
+// --- расследования агента ----------------------------------------------------------------------
+
+/** Сводка расследований по вариантам: сколько раз агент нашёл причину странности и сколько раз был прав. */
+function inquiriesSection(m) {
+  const runs = (m.data.runs || []).filter((r) => r.metrics && r.metrics.inquiries && typeof r.metrics.inquiries === 'object');
+  if (!runs.length) return null;
+  const KEYS = [
+    { id: 'correct', label: 'причина названа верно', tone: 'ok' },
+    { id: 'wrong', label: 'причина названа неверно', tone: 'bad' },
+    { id: 'unverifiable', label: 'причина названа, проверить нечем', tone: 'none' },
+    { id: 'insufficient', label: 'честно: данных недостаточно', tone: 'info' },
+  ];
+  const rows = m.arms.map((a) => {
+    const mine = runs.filter((r) => r.arm === a.id);
+    if (!mine.length) return null;
+    const sum = (k) => mine.reduce((acc, r) => acc + (Number(r.metrics.inquiries[k]) || 0), 0);
+    const total = sum('total');
+    const parts = KEYS.map((k) => ({ ...k, n: sum(k.id) }));
+    // В старых сводках нет разбивки «верно / неверно» — тогда показываем «причина найдена» одним куском.
+    const known = parts.reduce((acc, x) => acc + x.n, 0);
+    if (known < total) parts.splice(2, 0, { id: 'identified', label: 'причина названа', tone: 'none', n: Math.max(0, sum('identified') - sum('correct') - sum('wrong') - sum('unverifiable')) });
+    return { arm: a, runs: mine.length, total, tests: sum('tests'), energy: sum('energy'), parts: parts.filter((x) => x.n > 0) };
+  }).filter(Boolean);
+  if (!rows.length || !rows.some((r) => r.total)) return null;
+  const bar = (row) => h('div', { class: 'lb-inq__bar', role: 'img', 'aria-label': row.parts.map((x) => `${x.label}: ${x.n}`).join('; ') },
+    row.parts.map((x) => h('i', { data: { tone: x.tone }, style: { flexGrow: String(x.n) }, title: `${x.label}: ${x.n}` })));
+  return h('section', { class: 'lb-section' },
+    h('div', { class: 'lb-section-head' },
+      h('h2', { class: 'lb-h2', text: 'Расследования агента' }),
+      h('span', { class: 'lb-muted', text: 'Агент замечает странность, выдвигает объяснения и ставит опыт. Судья знает настоящую причину и сверяет с ней вывод' })),
+    h('ul', { class: 'lb-readme' }, KEYS.map((k) => h('li', null, h('i', { class: 'lb-inq__key', data: { tone: k.tone } }), h('span', { text: k.label })))),
+    h('div', { class: 'lb-tablewrap' },
+      h('table', { class: 'lb-table lb-table--roomy lb-table--wraphead' },
+        h('thead', null, h('tr', null,
+          h('th', { scope: 'col', text: 'Вариант' }),
+          h('th', { scope: 'col', class: 'lb-table__num', text: 'Расследований' }),
+          h('th', { scope: 'col', text: 'Чем закончились' }),
+          h('th', { scope: 'col', class: 'lb-table__num', text: 'Верно' }),
+          h('th', { scope: 'col', class: 'lb-table__num', text: 'Неверно' }),
+          h('th', { scope: 'col', class: 'lb-table__num', text: 'Данных недостаточно' }),
+          h('th', { scope: 'col', class: 'lb-table__num', text: 'Опытов на одно расследование' }),
+          h('th', { scope: 'col', class: 'lb-table__num', text: 'Заряд на опыты за прогон' }))),
+        h('tbody', null, rows.map((r) => {
+          const n = (id) => (r.parts.find((x) => x.id === id) || { n: 0 }).n;
+          return h('tr', null,
+            h('th', { scope: 'row' }, h('span', { class: 'lb-cellarm' }, dot(m.colors.get(r.arm.id)), r.arm.label)),
+            h('td', { class: 'lb-table__num' }, String(r.total), h('span', { class: 'lb-table__ci', text: ` в ${count(r.runs, 'прогоне', 'прогонах', 'прогонах')}` })),
+            h('td', null, r.total ? bar(r) : h('span', { class: 'lb-muted', text: 'странностей не было' })),
+            h('td', { class: 'lb-table__num', text: String(n('correct')) }),
+            h('td', { class: 'lb-table__num', text: String(n('wrong')) }),
+            h('td', { class: 'lb-table__num', text: String(n('insufficient')) }),
+            h('td', { class: 'lb-table__num', text: r.total ? num(r.tests / r.total, 1) : '—' }),
+            h('td', { class: 'lb-table__num', text: `${num(r.energy / r.runs, 2)} ед.` }));
+        })))));
 }
 
 // --- таблица прогонов --------------------------------------------------------------------------
@@ -465,8 +557,34 @@ export async function render(root, ctx) {
   if (!ctx.alive()) return;
   if (!data.spec.id) data.spec.id = id;
   const m = model(data);
-  const metrics = metricsSection(m, ctx);
   const hasRuns = (data.runs || []).length > 0;
+  const dataHost = h('div', { class: 'lb-stack' });
+  let metrics = null;
+  const paintData = () => {
+    if (metrics) metrics.destroy();
+    metrics = hasRuns ? metricsSection(m, ctx) : null;
+    dataHost.replaceChildren(...[
+      hasRuns ? claimsSection(m) : null,
+      metrics ? metrics.section : null,
+    ].filter(Boolean));
+    if (metrics) metrics.mount();
+  };
+  // Опыт с несколькими условиями и несколькими уровнями: уровень выбирается здесь, строки графиков — условия.
+  let levelSwitch = null;
+  if (hasRuns && m.pickLevel) {
+    const options = [{ id: 'all', label: 'Все уровни вместе' }, ...m.levels.map((l) => ({ id: l, label: levelName(l) }))];
+    const btns = options.map((o) => h('button', { class: 'lb-seg__btn', type: 'button', 'aria-pressed': String(o.id === m.view.level), text: o.label }));
+    btns.forEach((b, i) => b.addEventListener('click', () => {
+      m.view.level = options[i].id;
+      btns.forEach((x, j) => x.setAttribute('aria-pressed', String(i === j)));
+      tip.hide();
+      paintData();
+    }));
+    levelSwitch = h('div', { class: 'lb-toolbar lb-toolbar--filters' },
+      h('span', { class: 'lb-switch__name', text: 'Уровень сценариев' }),
+      h('div', { class: 'lb-seg', role: 'group', 'aria-label': 'Уровень сценариев' }, btns),
+      h('span', { class: 'lb-muted', text: 'Строки ниже — условия опыта на выбранном уровне' }));
+  }
   root.replaceChildren(...[
     head(m, ctx),
     ...alerts(m),
@@ -476,13 +594,14 @@ export async function render(root, ctx) {
       data.spec.manual
         ? 'Этот опыт запускается командой из терминала — она показана вверху страницы.'
         : data.status === 'not_run'
-          ? 'Нажмите «Запустить серию» вверху страницы: прогоны идут в быстром симуляторе и обычно занимают 5–20 секунд.'
+          ? 'Нажмите «Запустить серию» вверху страницы: прогоны идут в быстром симуляторе и обычно занимают 5–30 секунд.'
           : 'Посмотрите причины выше, исправьте и пересчитайте серию.'),
-    hasRuns ? claimsSection(m) : null,
-    metrics ? metrics.section : null,
+    levelSwitch,
+    hasRuns ? dataHost : null,
+    hasRuns ? inquiriesSection(m) : null,
     hasRuns ? detectSection(m) : null,
     runsSection(m),
   ].filter(Boolean));
-  if (metrics) metrics.mount();
+  if (hasRuns) paintData();
   ctx.onLeave(() => tip.hide());
 }

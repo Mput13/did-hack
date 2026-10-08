@@ -179,3 +179,25 @@ footer { color: var(--ink-3); font-size: 13.5px; margin-top: 50px; }
 
 figure.chart svg text.band { fill: #a52f2f; font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
 .pl-head .lg-i { font-size: 15px; color: var(--ink); }
+
+.iq { margin-top: 6px; }
+.iq-step { border-left: 3px solid var(--line); padding: 2px 0 6px 16px; margin: 14px 0; }
+.iq-step h4 { margin: 0 0 6px; font-size: 16px; }
+.iq-step h4 span { display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center; border-radius: 50%; background: var(--ink); color: #fff; font-size: 13px; margin-right: 8px; }
+.iq-step p { margin: 4px 0; max-width: 84ch; }
+.iq-alt { display: grid; grid-template-columns: minmax(0, 1fr) 90px 44px 18px 90px 48px; gap: 8px; align-items: center; font-size: 14.5px; padding: 3px 0; }
+.iq-name i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+.iq-bar { height: 10px; background: #eef0f2; border-radius: 5px; overflow: hidden; display: block; }
+.iq-bar i { display: block; height: 100%; border-radius: 5px; }
+.iq-bar i.pr { background: var(--ink-3); }
+.iq-p { font-variant-numeric: tabular-nums; text-align: right; font-size: 13.5px; }
+.iq-arrow { color: var(--ink-3); text-align: center; }
+.iq-test { background: #fafbfb; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; opacity: .72; }
+.iq-test.on { opacity: 1; border-color: #cfd4d9; background: #fff; }
+.iq-tname { font-size: 15px; margin-bottom: 4px; }
+.iq-tname small { display: block; color: var(--ink-2); font-size: 13px; }
+svg.iq-scale { width: 100%; max-width: 720px; height: auto; display: block; overflow: visible; }
+svg.iq-scale text { font: 11.5px -apple-system, "Segoe UI", Roboto, Arial, sans-serif; fill: var(--ink-2); }
+svg.iq-scale text.cat { fill: var(--ink); font-size: 12px; }
+svg.iq-scale text.val { fill: var(--ink); font-weight: 700; font-size: 12px; }
+@media (max-width: 760px) { .iq-alt { grid-template-columns: 1fr 60px 40px; } .iq-alt .iq-arrow, .iq-alt .iq-bar:nth-of-type(2) { display: none; } }

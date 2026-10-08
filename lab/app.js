@@ -2,6 +2,7 @@
 //   #/            обзор            #/exp/E1          опыт
 //   #/run?file=   прогон           #/compare?a=&b=   сравнение
 //   #/scenarios   сценарии         #/live            живой прогон
+//   #/knowledge   знания, накопленные между прогонами
 
 import { h, fill, icon, errorBox, emptyBox, parseHash, href, jobs, tip } from './views/common.js';
 import * as overview from './views/overview.js';
@@ -10,6 +11,7 @@ import * as run from './views/run.js';
 import * as compare from './views/compare.js';
 import * as scenarios from './views/scenarios.js';
 import * as live from './views/live.js';
+import * as knowledge from './views/knowledge.js';
 
 const ROUTES = [
   { re: /^\/$/, view: overview, nav: 'home', title: 'Обзор' },
@@ -17,6 +19,7 @@ const ROUTES = [
   { re: /^\/run$/, view: run, nav: 'home', title: 'Прогон', wide: true },
   { re: /^\/compare$/, view: compare, nav: 'home', title: 'Сравнение', wide: true },
   { re: /^\/scenarios$/, view: scenarios, nav: 'scenarios', title: 'Сценарии' },
+  { re: /^\/knowledge$/, view: knowledge, nav: 'knowledge', title: 'Знания' },
   { re: /^\/live$/, view: live, nav: 'live', title: 'Живой прогон', wide: true },
   // #/pilot — пульт: модуль подгружается при первом открытии страницы.
   { re: /^\/pilot$/, view: { render: (...a) => import('./views/pilot.js').then((m) => m.render(...a)) }, nav: 'pilot', title: 'Пульт', wide: true },

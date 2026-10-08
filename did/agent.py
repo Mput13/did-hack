@@ -14,6 +14,7 @@ import numpy as np
 from .belief import ChangeDetector, HazardMap, SampleBelief, SensorHealth, SoilModel
 from .config import BASE, Rules
 from .explore import rank_points
+from .foresight import Advisor
 from .inquiry import Investigator
 from .journal import Journal
 from .localize import PoseTracker
@@ -47,6 +48,8 @@ class AgentConfig:
     async_planner: bool = False       # Gazebo: модель думает в отдельном потоке, робот в это время стоит
     localize: bool = True             # поправлять позу одометрии по лидару и карте (did/localize.py)
     science: bool = False             # вести расследования: несколько объяснений странности и опыт (did/inquiry.py)
+    foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
+    risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
 
     def to_dict(self):
         return asdict(self)
@@ -64,6 +67,9 @@ PRESETS = {
     # Исследователь: сам уточняет модель расхода и расследует странности опытами.
     'scientist': AgentConfig(name='scientist', science=True),
     'scientist_llm': AgentConfig(name='scientist_llm', science=True, planner='llm'),
+    # Те же агенты, но цель и момент возврата выбираются сравнением будущих маршрутов с учётом риска.
+    'scientist_fs': AgentConfig(name='scientist_fs', science=True, foresight=True),
+    'adaptive_fs': AgentConfig(name='adaptive_fs', foresight=True),
     # Отключение по одному механизму: что именно даёт выигрыш.
     'no_soil': AgentConfig(name='no_soil', learn_soil=False, detect_change=False),
     'no_change': AgentConfig(name='no_change', detect_change=False),
@@ -148,6 +154,7 @@ class Agent:
         self._misses = deque(maxlen=6)                      # недавние ложные сборы: (t, x, y)
         self._no_collect_until = -1e9
         self.inv = Investigator(self, knowledge, roles) if config.science else None
+        self.fs = Advisor(self) if config.foresight else None      # сравнение будущих маршрутов
 
     # ======================================================================================
     # один такт цикла
@@ -366,6 +373,8 @@ class Agent:
         return battery - cost_to >= self.cfg.static_reserve
 
     def _check_return(self, obs):
+        if self.fs is not None:
+            return self.fs.check(obs)          # вместо жёсткого запаса — сравнение «ехать дальше» и «домой»
         if self._returning:
             return
         home = self._home_cost(obs.x, obs.y)
@@ -501,7 +510,8 @@ class Agent:
         if self._future is None:
             trigger = self._trigger
             state = self._state(obs, trigger)
-            use_llm = self.cfg.planner == 'llm' and obs.t - self._last_llm_t >= self.cfg.llm_min_interval_s
+            ahead = self.fs.plan(obs, state) if self.fs is not None else None    # выбор сравнением вариантов
+            use_llm =self.cfg.planner == 'llm' and obs.t - self._last_llm_t >= self.cfg.llm_min_interval_s
             planner = self.planner if use_llm or self.cfg.planner != 'llm' else HeuristicPlanner()
             if use_llm:
                 self._last_llm_t = obs.t
@@ -509,7 +519,7 @@ class Agent:
             if self._pool is not None and use_llm:
                 self._future = self._pool.submit(planner.plan, state)
                 return
-            plan = planner.plan(state)
+            plan = ahead or planner.plan(state)
             if use_llm and self.cfg.llm_wait_s:
                 self._wait_until = obs.t + self.cfg.llm_wait_s
         else:
@@ -538,7 +548,7 @@ class Agent:
             self._returning = True
         reasoning = plan['reasoning'] + note
         self.journal.add(t, 'decision', reasoning, source=source, trigger=trigger,
-                         subgoals=[_brief(s) for s in subgoals])
+                         subgoals=[_brief(s) for s in subgoals], **(plan.get('data') or {}))
         for h in plan.get('hypotheses') or []:
             # Предположения модели идут в журнал заметкой: проверить их исполнитель сам не умеет.
             self.journal.add(t, 'llm', f"Модель предполагает: {h['statement']}. Как проверить: {h.get('test', '—')}")
@@ -691,7 +701,7 @@ class Agent:
         moved_goal = self._path_goal is None or math.dist(self._path_goal, target) > 0.08
         stale = self._path_version != self._cost_version and t - self._path_t > 1.5
         if moved_goal or stale:
-            graph = self.home_graph if self._returning else self.graph
+            graph = self.graph if not self._returning else self.fs.home_graph() if self.fs else self.home_graph
             pts, cost = graph.plan((obs.x, obs.y), target)
             if pts is None:
                 self._command(io, 0.0, 0.0)

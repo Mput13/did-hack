@@ -28,7 +28,9 @@ from did.runner import RUNS, run_episode             # noqa: E402
 SRC = ROOT / 'docs' / 'explainer'
 STORIES = [('typical', 1026, 'Типичный трудный сценарий'), ('failure', 1032, 'Сценарий, где адаптивный агент проиграл')]
 KEEP_METRICS = ('score', 'samples_share', 'returned', 'battery_used', 'penalties', 'false_collects',
-                'hazard_hits', 'distance', 'time')
+                'hazard_hits', 'distance', 'time', 'collisions', 'inq_total', 'inq_correct', 'inq_wrong',
+                'inq_insufficient', 'inq_energy', 'faults_found')
+SCIENCE_STORY = 1020      # прогон исследователя, в котором есть утечка, залипший датчик и дорогой грунт
 
 
 def thin(tr):
@@ -54,7 +56,7 @@ def experiment(exp_id):
                                          'refute', 'arms', 'levels', 'conditions', 'metrics', 'seeds',
                                          'seed_start', 'manual')}
     groups = [{'arm': g['arm'], 'condition': g['condition'], 'level': g['level'], 'n': g['n'],
-               'stats': {m: (g['stats'][m] and {k: g['stats'][m][k] for k in ('mean', 'median', 'ci', 'n')})
+               'stats': {m: (g['stats'].get(m) and {k: g['stats'][m][k] for k in ('mean', 'median', 'ci', 'n')})
                          for m in KEEP_METRICS}} for g in s['groups']]
     runs = [{'arm': r['arm'], 'condition': r['condition'], 'level': r['level'], 'seed': r['seed'],
              'backend': r.get('backend'), **{m: r['metrics'].get(m) for m in KEEP_METRICS},
@@ -62,6 +64,7 @@ def experiment(exp_id):
              'llm_calls': r['metrics'].get('llm_calls'), 'llm_failed': r['metrics'].get('llm_failed'),
              'plans': r['metrics'].get('plans'), 'collected': r['metrics'].get('samples_collected'),
              'total': r['metrics'].get('samples_total'), 'reason': r['metrics'].get('reason'),
+             'inq': r['metrics'].get('inquiries'), 'order': r.get('order'),
              'wall_s': r.get('wall_s')} for r in s['runs']]
     return {'spec': spec, 'status': s['status'], 'groups': groups, 'claims': s['claims'], 'runs': runs,
             'errors': len(s['errors']), 'generated': s['generated'], 'metrics': s['metrics']}
@@ -136,6 +139,23 @@ def llm_example():
     return {'error': 'подходящий обмен не найден'}
 
 
+def _json(path):
+    return json.loads(Path(path).read_text(encoding='utf-8')) if Path(path).exists() else None
+
+
+def science_story():
+    """Прогон исследователя при правилах с несколькими причинами расхода: для показа расследований."""
+    try:
+        run_episode('hard', SCIENCE_STORY, 'scientist', experiment='_explainer', rules='science')
+        tr = load_trace(RUNS / '_explainer' / 'scientist' / f'hard-{SCIENCE_STORY}.json.gz')
+    except Exception as exc:       # noqa: BLE001
+        return {'error': str(exc)}
+    out = thin(tr)
+    out.update(inquiries=tr.get('inquiries', []), energy_model=tr.get('energy_model'),
+               fault_durations=tr.get('fault_durations'))
+    return out
+
+
 def main():
     arena = load_arena()
     stories = []
@@ -162,7 +182,12 @@ def main():
         'levels': LEVELS,
         'stories': stories,
         'gazebo': gazebo,
-        'experiments': {e: experiment(e) for e in ('E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7')},
+        'experiments': {p.stem: experiment(p.stem) for p in sorted((ROOT / 'experiments').glob('E*.yaml'))},
+        'science': science_story(),
+        'kb': _json(RUNS / '_knowledge' / 'kb.json'),
+        'llm_real': {p.name.split('.')[0]: {k: v for k, v in _json(p).items() if k not in ('runs',)}
+                     for p in sorted((RUNS / 'llm_real').glob('*.summary.json'))},
+        'roles': {p.stem: _json(p) for p in sorted((RUNS / 'llm_real' / 'roles').glob('*.json'))},
         'soil_demo': soil_demo(arena),
         'route': fixed_route(arena),
         'llm': llm_example(),

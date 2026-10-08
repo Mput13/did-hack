@@ -24,6 +24,10 @@
   pose_fix   [{t, dx, dy, dth}]: поправка позы по лидару раз в секунду — исправленная поза (она же в
              track) минус поза по одометрии; поля нет в записях без локализации
   llm        обмены с языковой моделью: [{t, ok, latency_ms, request, response, errors}]
+  foresight  сравнения будущих маршрутов (did/foresight.py): [{t, trigger, worlds, risk_limit, battery, chosen,
+             route, ms, unknowns, columns: [{key, label, unit}], rows: [{id, label, route, samples, score, value,
+             risk, battery_p5, battery_p50, battery_p95, cost, hits, unknown_m, ok, chosen}]}]; поля нет в
+             записях агентов без такого сравнения
 """
 import base64
 import gzip
@@ -57,6 +61,7 @@ class Recorder:
         self._last_sensor = 0.0
         self._last_soil = None
         self.pose_fix, self._next_fix = [], 0.0
+        self.foresight = []
 
     # --- во время прогона --------------------------------------------------------------------
 
@@ -129,6 +134,9 @@ class Recorder:
     def add_llm(self, t, exchange):
         self.llm.append({'t': round(t, 1), **exchange})
 
+    def add_foresight(self, decision):
+        self.foresight.append(decision)
+
     # --- итог --------------------------------------------------------------------------------
 
     def build(self, *, run_id, experiment, arm, backend, agent, scenario, rules, result, world, journal):
@@ -141,6 +149,7 @@ class Recorder:
             'plans': self.plans, 'paths': self.paths, 'belief': self.belief, 'soil': self.soil,
             'hazards': self.hazards, 'scans': self.scans, 'llm': self.llm,
             **({'pose_fix': self.pose_fix} if self.pose_fix else {}),
+            **({'foresight': self.foresight} if self.foresight else {}),
         }
 
 
