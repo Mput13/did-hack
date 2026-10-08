@@ -7,15 +7,16 @@
   docs/experiments_guide.html  — для докладчика: то же плюс вопросы с ответами и порядок рассказа.
 
 Анимации прогонов (presentation/assets/clips/*.gif) собирает presentation/figures/experiment_clips.py;
-страницы ссылаются на них относительным путём, поэтому открывать их надо из каталога проекта.
+они вшиты прямо в страницы, поэтому каждая страница — один файл, который открывается откуда угодно.
 
 Числа берутся из сводок опытов (runs/<опыт>/summary.json), рисунки — из записей прогонов, тексты — в этом файле.
 Чего нет в основном каталоге:
   - опыт E22b (пережидание сбоя датчика) и миссии R13 считались в рабочих деревьях исследований; их сводка и
     записи читаются оттуда (переменные DID_P1_RUNS и DID_R13_RUNS, по умолчанию ../DID-research/<имя>/runs);
   - главное число E22b перепроверяется на текущем коде отдельно: pixi run python -m tools.showcase_p1_check.
-Кроме гифок и llm_calls.html, внешних ссылок на страницах нет.
+Кроме llm_calls.html, внешних ссылок на страницах нет.
 """
+import base64
 import gzip
 import html
 import json
@@ -334,7 +335,8 @@ def intervals(tr, pred):
 def clip(name, caption):
     """Анимация прогона; первый кадр гифки — итоговая картинка, она же остаётся при печати."""
     meta = {c['name']: c for c in json.loads((CLIPS / 'clips.json').read_text(encoding='utf-8'))}[name]
-    return (f'<figure class="clip"><img src="../presentation/assets/clips/{name}.gif" width="{meta["width"]}" '
+    data = base64.b64encode((CLIPS / f'{name}.gif').read_bytes()).decode('ascii')
+    return (f'<figure class="clip"><img src="data:image/gif;base64,{data}" width="{meta["width"]}" '
             f'height="{meta["height"]}" loading="lazy" alt="{esc(caption)}"><figcaption>{caption}</figcaption></figure>')
 
 
