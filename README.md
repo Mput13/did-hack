@@ -32,8 +32,8 @@
    в Gazebo с окном. Страница «Пульт» откроется по адресу, который напечатает команда.
 
 5. **Подключить языковую модель** (необязательно). Скопируйте `.env.example` в `.env` и впишите адрес,
-   ключ и имя модели; проверка — `pixi run python -m did.llm --kind http`. Без этого работают имитатор
-   (`--llm mock`) и локальная Qwen через Ollama (`--llm ollama`).
+   ключ и имя модели (для моделей МАИ адрес `https://api-ai.mai.ru/v1`); проверка —
+   `pixi run python -m did.llm --kind http`. Без этого работает имитатор (`--llm mock`).
 
 Правила подсчёта очков, расход батареи и поведение датчика в условии задачи не заданы: это наши
 допущения, они собраны в `did/config.py`. Все числа верны при этих правилах.
@@ -44,7 +44,7 @@
 |---|---|---|
 | Платформа | ROS 2 Jazzy, Gazebo Sim Harmonic, TurtleBot3 Burger и мир `turtlebot3_world` из официальных пакетов | условие задачи |
 | Интерфейс агента | топики и сервисы `/cmd_vel`, `/scan`, `/odom`, `/did/*` | условие задачи |
-| Языковая модель | только выбирает подцели; QWEN или DeepSeek, либо любая доступная | условие задачи |
+| Языковая модель | только выбирает подцели; QWEN и DeepSeek с `api-ai.mai.ru` | условие задачи |
 | Язык | Python 3.12 — агент, судья, симулятор, статистика, сервер, узлы ROS; JavaScript без фреймворков — интерфейс | мы |
 | Библиотеки | numpy, scipy, pydantic, httpx, pytest | мы |
 | Установка | pixi и RoboStack: одна команда, без прав администратора | мы |
@@ -83,7 +83,7 @@ pixi run lab                                  # только интерфейс:
 | `pixi run run --level hard --seed 3 --agent scientist --rules science` | исследователь на «научных» правилах |
 | `pixi run gazebo-run --level hard --seed 1 [--gui] [--rules science --agent scientist]` | один прогон в Gazebo целиком |
 | `pixi run stand-gui level:=hard seed:=3` + `pixi run agent-ros --level hard --seed 3` | стенд и агент в двух терминалах |
-| `pixi run run --level medium --seed 1001 --agent adaptive_llm --llm codex` | планировщик на настоящей модели (`ollama` — локальная Qwen, `mock` — имитатор) |
+| `pixi run run --level medium --seed 1001 --agent adaptive_llm --llm http` | планировщик на настоящей модели из `.env` (модели МАИ: `https://api-ai.mai.ru/v1`); `mock` — имитатор |
 | `pixi run preflight` · `pixi run preflight --gazebo` | проверка перед показом: всё ли на месте и запускается ли |
 | `pixi run check` | все автоматические проверки |
 | `pixi run explain` | пересобрать `explain.html` со свежими данными |

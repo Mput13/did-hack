@@ -142,9 +142,10 @@ def main(argv=None):
     ap.add_argument('--max-calls', type=int, default=None, help='codex: потолок настоящих вызовов за всё время')
     ap.add_argument('--no-schema', action='store_true', help='ollama, http: не слать JSON-схему ответа')
     ap.add_argument('--cache', action='store_true', help='ollama, http: класть ответы в кэш на диске')
+    ap.add_argument('--min-tokens', type=int, default=None, help='http, openrouter: нижняя граница лимита ответа')
     ap.add_argument('--no-run', action='store_true', help='не запускать прогоны: пересчитать сводку по записям')
     args = ap.parse_args(argv)
-    default_arm = {'codex': 'gpt-6-luna', 'ollama': 'qwen2.5-3b'}.get(args.kind, args.kind)
+    default_arm = {'codex': 'gpt-6-luna', 'ollama': 'qwen2.5-3b', 'openrouter': 'jev-router'}.get(args.kind, args.kind)
     arm = args.arm or (args.model or default_arm).replace(':', '-')
     if args.no_run:
         print(report(resummarize(arm)))
@@ -156,8 +157,11 @@ def main(argv=None):
         opts['prompt'] = args.prompt
     if args.kind == 'codex' and args.max_calls is not None:
         opts['max_calls'] = args.max_calls
-    if args.kind in ('ollama', 'http'):
+    if args.kind in ('ollama', 'http', 'openrouter'):
         opts.update({'use_schema': False} if args.no_schema else {}, **({'cache': True} if args.cache else {}))
+    if args.kind in ('openrouter', 'http'):
+        opts.update({} if args.no_schema else {'use_schema': True},
+                    **({'min_tokens': args.min_tokens} if args.min_tokens else {}))
     print(report(evaluate(args.kind, arm, args.levels, args.seeds, opts, jobs=args.jobs)))
     return 0
 

@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Несколько прогонов в Gazebo подряд — сверка с быстрым симулятором на новых сценариях (опыт E7).
+
+    pixi run python tools/gazebo_batch.py --level hard --seeds 2 3 4 5 6 7 8 9
+
+Каждый сценарий проходит один раз в Gazebo (без окна) и один раз в быстром симуляторе; записи ложатся в runs/E7.
+Свой номер сети ROS и своё имя раздела Gazebo, чтобы не мешать показу, запущенному рядом. Перед каждым прогоном
+проверяется пауза (research/PAUSE) и не идёт ли показ: пока он идёт, очередной прогон ждёт.
+"""
+import argparse
+import gzip
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def busy():
+    if (ROOT / 'research' / 'PAUSE').exists():
+        return 'пауза'
+    if subprocess.run(['pgrep', '-f', 'tools/demo.py'], stdout=subprocess.DEVNULL).returncode == 0:
+        return 'идёт показ'
+    return None
+
+
+def lagged(path):
+    """Доля тактов записи, пришедших с опозданием: признак того, что компьютер был перегружен."""
+    try:
+        t = json.load(gzip.open(path))['track']['t']
+    except (OSError, ValueError, KeyError):
+        return None
+    gaps = [b - a for a, b in zip(t, t[1:])]
+    return sum(1 for g in gaps if g > 0.45) / max(1, len(gaps))
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--level', default='hard')
+    ap.add_argument('--seeds', nargs='+', type=int, required=True)
+    ap.add_argument('--agent', default='adaptive')
+    ap.add_argument('--exp', default='E7')
+    args = ap.parse_args()
+    env = dict(os.environ, ROS_DOMAIN_ID='23', GZ_PARTITION='did_batch')
+    for seed in args.seeds:
+        while (why := busy()):
+            print(f'жду: {why}', flush=True)
+            time.sleep(30)
+        for attempt in (1, 2):
+            t0 = time.time()
+            r = subprocess.run([sys.executable, str(ROOT / 'tools' / 'gazebo_run.py'), '--level', args.level, '--seed', str(seed),
+                                '--agent', args.agent, '--exp', args.exp], cwd=ROOT, env=env, capture_output=True, text=True)
+            tail = [line for line in r.stdout.strip().splitlines() if line.strip()][-1:] or ['нет вывода']
+            lag = lagged(ROOT / 'runs' / args.exp / 'gazebo' / f'{args.level}-{seed}.json.gz')
+            note = '' if lag is None else f', опоздавших тактов {lag:.0%}'
+            print(f'{args.level}-{seed}: код {r.returncode}, {time.time() - t0:.0f} с{note} — {tail[0][:100]}', flush=True)
+            if lag is None or lag <= 0.03:
+                break
+            print(f'{args.level}-{seed}: компьютер был перегружен, прогон не годится' + ('; повторяю' if attempt == 1 else ''), flush=True)
+    print('BATCH_DONE', flush=True)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

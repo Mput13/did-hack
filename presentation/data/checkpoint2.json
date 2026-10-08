@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-08T05:58:45",
+ "generated": "2026-10-08T10:59:21",
  "task": {
   "truth": "task_truth.png",
   "robot_view": "task_robot_view.png",
@@ -151,7 +151,7 @@
      "false_collects": 0,
      "hazard_hits": 0,
      "distance": 8.674,
-     "wall_s": 1.42
+     "wall_s": 0.23
     },
     "agent_err_cm": {
      "median": 1.7,
@@ -192,7 +192,7 @@
      "false_collects": 0,
      "hazard_hits": 0,
      "distance": 14.491,
-     "wall_s": 2.01
+     "wall_s": 0.33
     },
     "agent_err_cm": {
      "median": 1.9,
@@ -233,7 +233,7 @@
      "false_collects": 0,
      "hazard_hits": 1,
      "distance": 16.515,
-     "wall_s": 2.46
+     "wall_s": 0.4
     },
     "agent_err_cm": {
      "median": 1.7,
@@ -484,7 +484,7 @@
  },
  "tests": {
   "collected": 301,
-  "when": "2026-10-08T05:58:55",
+  "when": "2026-10-08T10:59:23",
   "passed": 300,
   "line": "300 passed, 1 skipped in 74.52s (0:01:14)",
   "ok": true,
