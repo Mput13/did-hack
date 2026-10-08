@@ -224,8 +224,8 @@ studies:
   - id: R14
     title: Агент сам калибрует датчик и расход
     criterion: Работоспособность агента (30%)
-    status: submitted
-    owner: Claude Opus 5.5; на ревью у GPT-6.1 Sol
+    status: returned
+    owner: Claude Opus 5.5; ревью GPT-6.1 Sol — «можно после исправлений»
     experiment: E20
     why: >-
       R8 показал: агент хрупок к дальности и форме закона датчика (при законе «по корню» собирает 1% образцов) и к
