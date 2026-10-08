@@ -12,6 +12,10 @@
 Столкновение роботов: центры ближе суммы радиусов (плюс тот же запас 5 мм, что и у стен). Штраф
 получает каждый участник контакта, который ещё в прогоне: судья не разбирает, кто в кого въехал.
 """
+import math
+
+import numpy as np
+
 from .config import BASE, ROBOT_RADIUS
 
 # Места на базе. Первое — база из условия задачи. Второе — в 0,4 м от неё к оси арены:
@@ -43,7 +47,8 @@ def team_score(scores, collected_times, n_samples, time_limit=UNCOLLECTED_T):
         'samples_collected': got,
         'samples_total': n_samples,
         'samples_share': round(got / max(1, n_samples), 3),
-        'returned': round(sum(bool(s['returned']) for s in scores) / n, 3),     # доля вернувшихся роботов
+        # Доля вернувшихся РОБОТОВ, а не прогонов: 0,5 — вернулся один из двух. «Вернулись все» — returned_all.
+        'returned': round(sum(bool(s['returned']) for s in scores) / n, 3),
         'returned_all': all(s['returned'] for s in scores),
         'battery_left': round(sum(s['battery'] for s in scores), 2),
         'distance': round(sum(s['distance'] for s in scores), 3),
@@ -58,3 +63,27 @@ def team_score(scores, collected_times, n_samples, time_limit=UNCOLLECTED_T):
         # для «сколько собрано», и для «как быстро»: его нельзя улучшить, собрав меньше.
         'mean_sample_time': round((sum(times) + time_limit * (n_samples - got)) / max(1, n_samples), 2),
     }
+
+
+def min_gap(track_a, track_b):
+    """Наименьшее расстояние между центрами двух роботов по их путям {t, x, y}, м; None — пути пусты.
+
+    Пути пишут разные процессы: времена точек и длины у них разные, поэтому сравнивать точки по номеру
+    нельзя. Оба пути приводятся к общим временам (линейно между точками), и на каждом отрезке берётся
+    ближайшее сближение, а не только концы. До первой и после последней точки робот стоит на месте:
+    закончивший прогон остаётся неподвижным препятствием для второго.
+    """
+    ta, tb = np.asarray(track_a['t'], float), np.asarray(track_b['t'], float)
+    if not len(ta) or not len(tb):
+        return None
+    t = np.union1d(ta, tb)
+    dx = np.interp(t, ta, track_a['x']) - np.interp(t, tb, track_b['x'])
+    dy = np.interp(t, ta, track_a['y']) - np.interp(t, tb, track_b['y'])
+    best = float(np.hypot(dx, dy).min())
+    for i in range(len(t) - 1):                 # между общими временами разность положений линейна
+        ux, uy = dx[i + 1] - dx[i], dy[i + 1] - dy[i]
+        uu = ux * ux + uy * uy
+        if uu > 0.0:
+            s = min(1.0, max(0.0, -(dx[i] * ux + dy[i] * uy) / uu))
+            best = min(best, math.hypot(dx[i] + s * ux, dy[i] + s * uy))
+    return best

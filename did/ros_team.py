@@ -95,6 +95,7 @@ class TeamJudgeNode(Node):
         self.pub_truth = self.create_publisher(String, TRUTH_TOPIC, latched)
         self.t0 = None
         self.contacts = 0
+        self.min_gap = None            # наименьшее расстояние между центрами за прогон, по одометрии обоих
         self._touching = False
         self._n = 0
         self.create_timer(1.0 / TICK_HZ, self.tick)
@@ -125,7 +126,9 @@ class TeamJudgeNode(Node):
         # Столкновение роботов: центры ближе суммы радиусов с запасом — штраф каждому, кто ещё в прогоне.
         gap = math.dist(poses[0], poses[1]) if len(poses) > 1 else math.inf
         hit = gap < CONTACT_M + CONTACT_MARGIN_M
-        if hit and not self._touching:
+        self.min_gap = gap if self.min_gap is None else min(self.min_gap, gap)
+        news = hit and not self._touching
+        if news:
             self.contacts += 1
         if gap > CONTACT_M + CONTACT_MARGIN_M + CONTACT_RELEASE_M:
             self._touching = False
@@ -145,7 +148,7 @@ class TeamJudgeNode(Node):
                 self.get_logger().info(f'{name}: {_dumps(ev)}')
             if self._n % 10 == 0:
                 pub['score'].publish(String(data=_dumps(j.score())))
-        if self._n % 20 == 0:
+        if self._n % 20 == 0 or news:                              # о контакте — сразу: итог идёт в запись прогона
             self.pub_truth.publish(String(data=_dumps(self.truth())))
 
     def _act(self, i, what, response):
@@ -157,6 +160,7 @@ class TeamJudgeNode(Node):
         ok, message = getattr(j, what)(x, y)
         response.success, response.message = bool(ok), message
         self.pub[self.names[i]]['score'].publish(String(data=_dumps(j.score())))
+        self.pub_truth.publish(String(data=_dumps(self.truth())))
         return response
 
     def truth(self):
@@ -164,6 +168,8 @@ class TeamJudgeNode(Node):
         times = [t for j in self.judges for _, t in j.collected]
         total = team_score(scores, times, len(self.scenario.samples), self.rules.time_limit_s)
         total['robot_contacts'] = self.contacts
+        total['min_gap_m'] = None if self.min_gap is None or not math.isfinite(self.min_gap) else round(self.min_gap, 3)
+        total['t'] = round(self._now() - self.t0, 2) if self.t0 is not None else 0.0
         return {'scenario': self.scenario.to_dict(), 'rules': self.rules.to_dict(), 'world_log': self.judges[0].world_log,
                 'team': total, 'robots': [{'name': n, **s} for n, s in zip(self.names, scores)],
                 'done': all(j.done for j in self.judges)}
@@ -263,6 +269,10 @@ def agent_main(args):
             time.sleep(0.05)
         time.sleep(1.5)
         bot.tick(io.observe(), io)
+        # Итог судьи на двоих (столкновения роботов, зазор) идёт в запись: ждём сообщение новее конца прогона.
+        t_end, wait = io.now(), time.monotonic() + 3.0
+        while (truth.get('team') or {}).get('t', -1.0) < t_end and time.monotonic() < wait:
+            time.sleep(0.05)
         scenario = truth.get('scenario') or generate(args.level, args.seed, arena).to_dict()
         run_id = f'{args.exp}/{args.mode}/{args.level}-{args.seed}'
         part = rec.build(run_id=run_id, experiment=args.exp, arm=args.mode, backend='gazebo',
@@ -270,6 +280,9 @@ def agent_main(args):
                          result=io.score, world=truth.get('world_log', []), journal=bot.journal)
         part['robot'] = {'name': name, 'home': list(home)}
         part['messages'] = channel.log if channel else []
+        judged = truth.get('team') or {}
+        if 'robot_contacts' in judged:
+            part['judge'] = {k: judged.get(k) for k in ('t', 'robot_contacts', 'min_gap_m')}
         path = save_trace(part, RUNS / args.exp / '_parts' / f'{args.level}-{args.seed}-{name}.json.gz')
         print(f'{name}: {_dumps(io.score)}\n{name}: запись {path}', flush=True)
     finally:
@@ -285,39 +298,11 @@ def agent_main(args):
 def merge(exp, mode, level, seed):
     """Склеить записи двух агентов в одну запись команды (тот же вид, что у did/team_runner.py)."""
     from .recorder import load_trace
+    from .team_runner import merge_parts
     parts = [load_trace(RUNS / exp / '_parts' / f'{level}-{seed}-{n}.json.gz') for n in ROBOT_NAMES]
-    trace = dict(parts[0])
-    robots, scores = [], []
-    for p in parts:
-        s = p['result']
-        scores.append(s)
-        robots.append({'name': p['robot']['name'], 'home': p['robot']['home'], 'result': {'name': p['robot']['name'], **s},
-                       **{k: p[k] for k in ('track', 'modes', 'events', 'journal', 'hypotheses', 'plans', 'paths',
-                                            'belief', 'soil', 'hazards')}})
-    times = [e['t'] for r in robots for e in r['events'] if e['type'] == 'sample_collected']
-    total = team_score(scores, times, scores[0]['samples_total'])
-    gaps = [math.hypot(a - c, b - d) for a, b, c, d in zip(robots[0]['track']['x'], robots[0]['track']['y'],
-                                                             robots[1]['track']['x'], robots[1]['track']['y'])]
-    total['min_gap_m'] = round(min(gaps), 3) if gaps else None
-    total['battery_used'] = round(2 * Rules().battery_start - total['battery_left'], 2)
-    seen, messages = set(), []
-    for m in sorted((m for p in parts for m in p.pop('messages', [])), key=lambda m: m['t']):
-        key = (m['t'], m['from'], m['type'], json.dumps(m, sort_keys=True, ensure_ascii=False))
-        if key not in seen:
-            seen.add(key)
-            messages.append(m)
-    total['messages'] = len(messages)
-    # Доля тактов записи, пришедших с опозданием: признак перегруженной машины (см. tools/gazebo_batch.py).
-    lag = []
-    for r in robots:
-        t = r['track']['t']
-        lag += [b - a > 0.45 for a, b in zip(t, t[1:])]
-    total['lagged_share'] = round(sum(lag) / max(1, len(lag)), 3)
-    trace.pop('robot', None)
-    trace.pop('messages', None)
-    trace.update(result=total, robots=robots, team={'mode': mode, 'config': None, 'messages': messages})
+    trace = merge_parts(parts, mode)
     path = save_trace(trace, RUNS / exp / mode / f'{level}-{seed}.json.gz')
-    return path, total
+    return path, trace['result']
 
 
 def main():

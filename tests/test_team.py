@@ -11,12 +11,12 @@ from did.arena import load_arena
 from did.config import ROBOT_RADIUS, Rules
 from did.fastsim import FastSim
 from did.fastsim_team import TeamSim
-from did.judge_team import CONTACT_M, SLOTS, team_score
+from did.judge_team import CONTACT_M, SLOTS, min_gap, team_score
 from did.robot_io import Observation
 from did.runner import run_episode
 from did.scenario import Scenario, generate
 from did.team import TeamAgent, TeamChannel
-from did.team_runner import run_team_episode
+from did.team_runner import merge_parts, run_team_episode
 
 ARENA = load_arena()
 E1_REFERENCE = Path('/Users/a/MAI/DID/runs/E1/summary.json')
@@ -257,6 +257,28 @@ def test_stale_readings_after_collection_are_dropped():
     assert not np.array_equal(bot.belief.p, before)                       # свежее показание в карту идёт
 
 
+def test_reading_is_sent_with_measurement_time_not_delivery_time():
+    """В ROS показание приходит с опозданием (sensor_age). В канал идёт время измерения: иначе показание,
+    снятое до сбора, но доставленное после, получатель принял бы за свежее."""
+    ch = TeamChannel()
+    sender, bot = _agent('tb2', channel=ch), _agent('tb1', channel=ch)
+    ch.post('tb2', 5.0, 'collected', x=0.5, y=0.5, left=4)
+    bot._receive(_obs(t=5.0))                                              # последний известный сбор — в 5,0
+    before = bot.belief.p.copy()
+    late = Observation(t=5.2, x=0.0, y=0.5, th=0.0, v=0.0, w=0.0, battery=50.0, sensor=0.75, scan=None, sensor_age=0.4)
+    sender._on_reading(0.75, late)                                         # снято в 4,8, доставлено в 5,2
+    sender._flush(5.2)
+    assert ch.log[-1]['type'] == 'obs' and ch.log[-1]['t'] == 5.2
+    assert [r[4] for r in ch.log[-1]['readings']] == [4.8]
+    bot._receive(_obs(t=5.2))
+    assert np.array_equal(bot.belief.p, before)                            # старое измерение карту не меняет
+    fresh = Observation(t=5.6, x=0.0, y=0.5, th=0.0, v=0.0, w=0.0, battery=50.0, sensor=0.0, scan=None, sensor_age=0.4)
+    sender._on_reading(0.0, fresh)                                         # снято в 5,2 — уже после сбора
+    sender._flush(5.6)
+    bot._receive(_obs(t=5.6))
+    assert not np.array_equal(bot.belief.p, before)
+
+
 def test_partner_reading_narrows_my_map():
     ch = TeamChannel()
     bot = _agent('tb1', channel=ch)
@@ -318,6 +340,94 @@ def test_team_trace_has_both_robots_and_messages(tmp_path, monkeypatch):
     assert trace['track'] == trace['robots'][0]['track']                   # прежний проигрыватель видит первого
     assert {'hello', 'claim', 'collected', 'sector', 'obs', 'status'} <= {m['type'] for m in trace['team']['messages']}
     assert trace['result']['score'] == pytest.approx(sum(r['result']['score'] for r in trace['robots']))
+
+
+def test_one_agent_failure_does_not_stop_the_other(monkeypatch):
+    """Агент одного робота упал: робот встаёт и молчит, второй замечает молчание, забирает арену и
+    возвращается на базу; прогон кончается по общему сроку, а не обрывается исключением."""
+    tick = TeamAgent.tick
+
+    def broken(self, obs, io):
+        if self.name == 'tb2' and obs.t >= 12.0:
+            raise RuntimeError('датчик отвалился')
+        return tick(self, obs, io)
+    monkeypatch.setattr(TeamAgent, 'tick', broken)
+    with pytest.raises(RuntimeError):                                      # в опытах ошибка агента видна
+        run_team_episode('medium', 3, 'team', save=False)
+    r = run_team_episode('medium', 3, 'team', save=False, tolerate_errors=True)['metrics']
+    assert list(r['agent_errors']) == ['tb2'] and 'датчик отвалился' in r['agent_errors']['tb2']
+    assert r['reason'] == 'finish+timeout'                                 # tb1 сам закончил на базе, tb2 простоял до срока
+    assert r['returned'] == 0.5 and not r['returned_all']                  # первый вернулся, упавший — нет
+    assert r['time'] == pytest.approx(Rules().time_limit_s, abs=0.2)       # общий срок прогона
+    assert r['samples_collected'] >= 4 and r['robot_contacts'] == 0        # оставшийся доработал один
+
+
+# --- запись Gazebo: склейка частей двух агентов -----------------------------------------------------
+
+def test_min_gap_uses_common_times_not_indices():
+    a = {'t': [0.0, 1.0], 'x': [0.0, 1.0], 'y': [0.0, 0.0]}
+    b = {'t': [0.5, 1.5], 'x': [0.5, 1.5], 'y': [0.0, 0.0]}
+    assert min_gap(a, b) == pytest.approx(0.0)                             # по номерам точек вышло бы 0,5 м
+    # Закончивший робот стоит на месте и остаётся препятствием: второй проезжает мимо уже после конца его пути.
+    stopped = {'t': [0.0, 1.0], 'x': [1.0, 1.0], 'y': [0.3, 0.3]}
+    passing = {'t': [0.0, 5.0, 10.0], 'x': [-4.0, -4.0, 6.0], 'y': [0.0, 0.0, 0.0]}
+    assert min_gap(stopped, passing) == pytest.approx(0.3)                 # и между точками, а не только в них
+    assert min_gap({'t': [], 'x': [], 'y': []}, a) is None
+
+
+def _part(name, home, t, x, collisions=1, judge=None):
+    n = len(t)
+    part = {'id': 'x', 'scenario': {'base': list(SLOTS[0])}, 'robot': {'name': name, 'home': list(home)},
+            'result': {'score': 37.0, 'returned': True, 'battery': 20.0, 'distance': 3.0, 't': t[-1],
+                       'collisions': collisions, 'false_collects': 0, 'hazard_hits': 0, 'samples_total': 5},
+            'track': {'t': list(t), 'x': list(x), 'y': [0.0] * n, 'th': [0.0] * n, 'battery': [50.0] * n,
+                      'sensor': [0.0] * n, 'mode': [0] * n},
+            'modes': ['m'], 'events': [{'t': 1.0, 'type': 'sample_collected', 'sample': 0}], 'journal': [],
+            'hypotheses': [], 'plans': [], 'paths': [], 'belief': None, 'soil': None, 'hazards': [],
+            'pose_fix': [{'t': 0.0, 'dx': 0.01 if name == 'tb1' else 0.07, 'dy': 0.0, 'dth': 0.0}],
+            'messages': [{'t': 0.0, 'from': 'tb1', 'type': 'hello'}]}
+    if judge:
+        part['judge'] = judge
+    return part
+
+
+def test_merged_gazebo_trace_keeps_judge_contacts():
+    """Столкновения роботов друг с другом берутся у судьи на двоих и доходят до итога записи."""
+    t1, t2 = [0.0, 1.0], [0.5, 1.5]
+    parts = [_part('tb1', SLOTS[0], t1, [0.0, 1.0], judge={'t': 1.0, 'robot_contacts': 0, 'min_gap_m': 0.4}),
+             _part('tb2', SLOTS[1], t2, [0.5, 1.5], judge={'t': 1.6, 'robot_contacts': 1, 'min_gap_m': 0.2})]
+    trace = merge_parts(parts, 'team')
+    r = trace['result']
+    assert r['collisions'] == 2 and r['robot_contacts'] == 1               # не «сумма пополам»: что насчитал судья
+    assert (r['min_gap_m'], r['min_gap_source']) == (0.2, 'judge')         # позже закончивший знает больше
+    assert r['min_gap_track_m'] == pytest.approx(0.0)
+    assert r['same_target_s'] is None and r['messages'] == 1               # повтор сообщения из двух журналов убран
+    assert 'judge' not in trace and 'messages' not in trace and 'judge' in parts[0]
+    # У каждого робота своя поправка положения и своё место на базе — для вида «глазами tb2».
+    assert [x['pose_fix'][0]['dx'] for x in trace['robots']] == [0.01, 0.07]
+    assert [x['home'] for x in trace['robots']] == [list(SLOTS[0]), list(SLOTS[1])]
+
+
+def test_merged_gazebo_trace_without_judge_total_is_not_zero_contacts():
+    """Запись, снятая до появления итога судьи: показатель не измерен, а не равен нулю."""
+    parts = [_part('tb1', SLOTS[0], [0.0, 1.0], [0.0, 1.0]), _part('tb2', SLOTS[1], [0.5, 1.5], [0.5, 1.5])]
+    r = merge_parts(parts, 'team')['result']
+    assert r['collisions'] == 2 and r['robot_contacts'] is None
+    assert (r['min_gap_m'], r['min_gap_source']) == (pytest.approx(0.0), 'tracks')
+
+
+def test_lab_shows_unmeasured_contacts_and_own_base():
+    """Интерфейс не подставляет ноль вместо отсутствующего показателя и показывает базу и поправку своего робота."""
+    js = (Path(__file__).resolve().parents[1] / 'lab' / 'views' / 'run.js').read_text(encoding='utf-8')
+    assert 'robot_contacts ?? 0' not in js and 'не измерено' in js
+    assert 'base: r.home' in js and "own('pose_fix')" in js
+
+
+def test_returned_all_is_in_run_metrics():
+    r = run_team_episode('medium', 3, 'team', save=False)['metrics']
+    assert r['returned_all'] is True and r['returned'] == 1.0
+    from did.metrics import LATE_METRICS, METRICS
+    assert 'returned_all' in METRICS and 'returned_all' in LATE_METRICS
 
 
 # --- обычный прогон одного робота не изменился -----------------------------------------------------

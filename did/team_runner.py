@@ -17,7 +17,7 @@ from .agent import Agent, make_config
 from .arena import load_arena
 from .config import SCIENCE, Rules
 from .fastsim_team import TeamSim
-from .judge_team import ROBOT_NAMES, SLOTS
+from .judge_team import ROBOT_NAMES, SLOTS, min_gap, team_score
 from .metrics import run_metrics
 from .planner import HeuristicPlanner
 from .recorder import Recorder, save_trace
@@ -29,12 +29,18 @@ MODES = {'solo': 1, 'pair': 2, 'pair_lidar': 2, 'team': 2}
 # Без связи, но с объездом другого робота по лидару: всё, что делает TeamAgent по сообщениям, выключено.
 NO_LINK = dict(share_readings=False, claims=False, share_collected=False, share_hazards=False, share_soil=False,
                sectors=False, avoid=False, lidar_avoid=True)
-SAME_TARGET_M = 0.6        # цели двух роботов ближе — они едут к одному и тому же
+SAME_TARGET_M = 0.6        # первые цели в планах двух роботов ближе — цели совпадают
 
 
 def run_team_episode(level, seed, mode='team', *, agent='adaptive', experiment='adhoc', arm=None, scenario=None,
-                     scenario_args=None, config=None, rules=None, team=None, sim=None, save=True, quiet=True):
-    """Прогон целиком. Возвращает сводку того же вида, что did.runner.run_episode."""
+                     scenario_args=None, config=None, rules=None, team=None, sim=None, save=True, quiet=True,
+                     tolerate_errors=False):
+    """Прогон целиком. Возвращает сводку того же вида, что did.runner.run_episode.
+
+    tolerate_errors — исключение в агенте одного робота не обрывает прогон: робот останавливается и
+    замолкает (как упавший процесс агента в Gazebo), второй продолжает, прогон идёт до общего срока.
+    Упавшие роботы перечислены в метрике agent_errors. В опытах выключено: там ошибка должна быть видна.
+    """
     arena = load_arena()
     if rules == 'science':
         rules = dict(SCIENCE)
@@ -65,17 +71,31 @@ def run_team_episode(level, seed, mode='team', *, agent='adaptive', experiment='
     wall = time.perf_counter()
     same_target_s = 0.0
     last = [False] * n                 # роботу уже показано последнее наблюдение
+    failed = {}                        # номер робота -> текст исключения его агента
+
+    def tick(i):
+        bot, io = bots[i], world.robots[i]
+        if not tolerate_errors:
+            return bot.tick(io.observe(), io)
+        try:
+            bot.tick(io.observe(), io)
+        except Exception as e:         # noqa: BLE001 — агент упал: робот встаёт, второй работает дальше
+            last[i] = True
+            failed[i] = f'{type(e).__name__}: {e}'
+            io.command(0.0, 0.0)
+            bot.journal.add(io.t, 'alarm', f'Агент остановлен из-за ошибки: {failed[i]}', tag='agent_error')
+
     while not world.done:
-        for i, (bot, io) in enumerate(zip(bots, world.robots)):
+        for i, io in enumerate(world.robots):
             if not last[i]:
                 last[i] = io.done      # закончивший робот получает итоговое наблюдение один раз
-                bot.tick(io.observe(), io)
-        if n > 1 and _same_target(bots):
+                tick(i)
+        if n > 1 and not failed and _same_target(bots):
             same_target_s += world.dt
         world.advance()
-    for i, (bot, io) in enumerate(zip(bots, world.robots)):
+    for i in range(n):
         if not last[i]:
-            bot.tick(io.observe(), io)
+            tick(i)
     wall = time.perf_counter() - wall
 
     score = world.score()
@@ -87,6 +107,8 @@ def run_team_episode(level, seed, mode='team', *, agent='adaptive', experiment='
     metrics['same_target_s'] = round(same_target_s, 1)
     metrics['messages'] = len(channel.log)
     metrics['messages_by_type'] = _count(m['type'] for m in channel.log)
+    if failed:
+        metrics['agent_errors'] = {ROBOT_NAMES[i]: text for i, text in sorted(failed.items())}
     if n == 1:
         # Один робот: те же метрики, что у обычного прогона (журнал, гипотезы, обнаружение событий).
         solo = run_metrics(world.judges[0].score(), rules, bots[0].journal, world_log, recs[0].plans, recs[0].llm)
@@ -114,7 +136,8 @@ def build_team_trace(*, run_id, experiment, arm, backend, mode, agent, scenario,
     проигрыватель), сверх неё два поля:
 
       robots  [{name, home: [x, y], result, track, modes, events, journal, hypotheses, plans, paths, belief,
-                soil, hazards}] — то же, что в обычной записи, по каждому роботу (первый тоже здесь);
+                soil, hazards, pose_fix?}] — то же, что в обычной записи, по каждому роботу (первый тоже
+                здесь); pose_fix — поправка положения этого робота, есть только в записях с локализацией;
       team    {mode, config, messages: [{t, from, type, ...}]} — всё, что роботы сказали друг другу.
     """
     trace = recorders[0].build(run_id=run_id, experiment=experiment, arm=arm, backend=backend, agent=agent,
@@ -126,14 +149,75 @@ def build_team_trace(*, run_id, experiment, arm, backend, mode, agent, scenario,
         robots.append({'name': per_robot[i]['name'], 'home': list(homes[i]), 'result': per_robot[i],
                        'track': rec.track, 'modes': rec.modes, 'events': rec.events, 'journal': journal.entries,
                        'hypotheses': journal.hypotheses, 'plans': rec.plans, 'paths': rec.paths,
-                       'belief': rec.belief, 'soil': rec.soil, 'hazards': rec.hazards})
+                       'belief': rec.belief, 'soil': rec.soil, 'hazards': rec.hazards,
+                       **({'pose_fix': rec.pose_fix} if rec.pose_fix else {})})
     trace['robots'] = robots
     trace['team'] = {'mode': mode, 'config': team_config, 'messages': messages}
     return trace
 
 
+ROBOT_KEYS = ('track', 'modes', 'events', 'journal', 'hypotheses', 'plans', 'paths', 'belief', 'soil', 'hazards')
+LAG_S = 0.45               # между точками пути больше — такт записи опоздал (см. tools/gazebo_batch.py)
+
+
+def merge_parts(parts, mode, battery_start=None):
+    """Склеить записи агентов, писавших каждый свою (Gazebo: по процессу на робота), в запись команды.
+
+    parts — обычные записи с добавками: robot {name, home}, messages (что робот сказал и услышал) и
+    judge — последний итог судьи на двоих, который этот агент успел получить ({t, robot_contacts,
+    min_gap_m}; у записей, снятых до этого поля, его нет).
+
+    Столкновения роботов друг с другом (robot_contacts) берутся только у судьи: он один видит обоих на общих
+    часах. Нет его итога — показатель не измерен (None), а не ноль: из суммы столкновений роботов его не
+    вывести, туда входят стены и контакты с уже закончившим роботом. Зазор min_gap_m — тоже от судьи; нет —
+    по путям агентов, приведённым к общим временам (min_gap_track_m считается всегда).
+    """
+    parts = [dict(p) for p in parts]
+    trace = dict(parts[0])
+    robots, scores = [], []
+    for p in parts:
+        s = p['result']
+        scores.append(s)
+        robots.append({'name': p['robot']['name'], 'home': p['robot']['home'], 'result': {'name': p['robot']['name'], **s},
+                       **{k: p[k] for k in ROBOT_KEYS}, **{k: p[k] for k in ('pose_fix', 'scans') if p.get(k)}})
+    times = [e['t'] for r in robots for e in r['events'] if e['type'] == 'sample_collected']
+    total = team_score(scores, times, scores[0]['samples_total'])
+    start = Rules().battery_start if battery_start is None else battery_start
+    total['battery_used'] = round(len(parts) * start - total['battery_left'], 2)
+    judged = [p['judge'] for p in parts if p.get('judge')]
+    last = max(judged, key=lambda j: j.get('t', 0.0)) if judged else {}
+    total['robot_contacts'] = last.get('robot_contacts')
+    total['same_target_s'] = None                 # считается только в быстром симуляторе: там видны планы обоих
+    track_gap = min_gap(robots[0]['track'], robots[1]['track']) if len(robots) > 1 else None
+    total['min_gap_track_m'] = None if track_gap is None else round(track_gap, 3)
+    if last.get('min_gap_m') is not None:
+        total['min_gap_m'], total['min_gap_source'] = round(last['min_gap_m'], 3), 'judge'
+    else:
+        total['min_gap_m'], total['min_gap_source'] = total['min_gap_track_m'], 'tracks'
+    seen, messages = set(), []
+    for m in sorted((m for p in parts for m in p.pop('messages', [])), key=lambda m: m['t']):
+        key = json.dumps(m, sort_keys=True, ensure_ascii=False)
+        if key not in seen:
+            seen.add(key)
+            messages.append(m)
+    total['messages'] = len(messages)
+    # Доля тактов записи, пришедших с опозданием: признак перегруженной машины.
+    lag = []
+    for r in robots:
+        t = r['track']['t']
+        lag += [b - a > LAG_S for a, b in zip(t, t[1:])]
+    total['lagged_share'] = round(sum(lag) / max(1, len(lag)), 3)
+    for k in ('robot', 'messages', 'judge'):
+        trace.pop(k, None)
+    trace.update(result=total, robots=robots, team={'mode': mode, 'config': None, 'messages': messages})
+    return trace
+
+
 def _same_target(bots):
-    """Оба робота сейчас едут к одной цели (не считая возврата на базу)."""
+    """Первые цели в очередях планов двух роботов совпадают (ближе SAME_TARGET_M; возврат на базу не в счёт).
+
+    Это совпадение целей в планах, а не обязательно одновременная езда: робот с такой целью может в этот
+    такт стоять, уступать дорогу или мерить."""
     goals = []
     for b in bots:
         sg = b.queue[0] if b.queue and not b._returning and not b.finished else None
@@ -161,7 +245,7 @@ def main():
     ap.add_argument('--rules', default=None, choices=['science'])
     args = ap.parse_args()
     run_team_episode(args.level, args.seed, args.mode, agent=args.agent, experiment=args.exp, arm=args.arm,
-                     rules=args.rules, quiet=False)
+                     rules=args.rules, quiet=False, tolerate_errors=True)
 
 
 if __name__ == '__main__':

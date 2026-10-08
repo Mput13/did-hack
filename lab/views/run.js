@@ -32,14 +32,18 @@ export function resultTiles(result, rules) {
 /**
  * Запись команды роботов глазами одного из них: его путь, журнал и карты — на месте обычных полей записи,
  * остальные роботы — в partners (проигрыватель рисует их поверх). События судьи берутся у всех сразу:
- * образец, собранный напарником, исчезает с арены и здесь.
+ * образец, собранный напарником, исчезает с арены и здесь. База — место этого робота (home), поправка
+ * положения и сканы — его собственные; в записях, где у роботов их нет, они есть только у первого
+ * (верхний уровень записи — это он), у остальных пусто, а не чужое.
  */
 export function robotView(trace, k) {
   const r = trace.robots[k];
   const events = trace.robots.flatMap((x) => x.events || []).slice().sort((a, b) => a.t - b.t);
+  const own = (key, none) => r[key] ?? (k === 0 ? trace[key] : none);
+  const scenario = Array.isArray(r.home) && trace.scenario ? { ...trace.scenario, base: r.home } : trace.scenario;
   return {
-    ...trace, track: r.track, modes: r.modes, events, journal: r.journal, hypotheses: r.hypotheses, plans: r.plans,
-    paths: r.paths, belief: r.belief, soil: r.soil, hazards: r.hazards, scans: k === 0 ? trace.scans : [],
+    ...trace, scenario, track: r.track, modes: r.modes, events, journal: r.journal, hypotheses: r.hypotheses, plans: r.plans,
+    paths: r.paths, belief: r.belief, soil: r.soil, hazards: r.hazards, scans: own('scans', []), pose_fix: own('pose_fix'),
     self: r.name, partners: trace.robots.filter((_, i) => i !== k).map((x) => ({ name: x.name, track: x.track })),
   };
 }
@@ -59,6 +63,12 @@ export function teamTiles(trace) {
   if (r.collisions) fines.push(`столкновения: ${r.collisions}`);
   if (r.false_collects) fines.push(`ложные сборы: ${r.false_collects}`);
   if (r.hazard_hits) fines.push(`опасные зоны: ${r.hazard_hits}`);
+  // Показателя в записи может не быть (запись Gazebo без итога судьи на двоих): это «не измерено», а не ноль.
+  const measured = (v, unit) => {
+    const known = v != null && !Number.isNaN(Number(v));
+    const tone = !known ? '' : Number(v) ? ' lb-yn--no' : ' lb-yn--yes';
+    return h('span', { class: `lb-chip lb-chip--plain${unit ? '' : tone}`, text: known ? `${num(v, 0)}${unit || ''}` : 'не измерено' });
+  };
   return h('div', null,
     h('div', { class: 'lb-tiles' },
       tile('Счёт команды', num(r.score, 1), `на одного робота ${num(r.score_per_robot, 1)}`),
@@ -69,10 +79,12 @@ export function teamTiles(trace) {
       tile('Сообщений', said.length ? num(talk, 0) : 'нет', said.length ? `и ${said.length - talk} с показаниями датчиков` : 'роботы не связаны'),
       tile('Штрафы', num(r.penalties ?? 0, 0), fines.join(' · ') || 'нет')),
     h('div', { class: 'lb-detects' },
-      h('span', { class: 'lb-muted', text: 'Оба ехали к одной цели:' }),
-      h('span', { class: 'lb-chip lb-chip--plain', text: `${num(r.same_target_s, 0)} с` }),
+      h('span', { class: 'lb-muted', text: 'Цели в планах совпадали:' }),
+      measured(r.same_target_s, ' с'),
       h('span', { class: 'lb-muted', text: 'Столкновений друг с другом:' }),
-      h('span', { class: `lb-chip lb-chip--plain lb-yn--${r.robot_contacts ? 'no' : 'yes'}`, text: num(r.robot_contacts ?? 0, 0) })));
+      measured(r.robot_contacts),
+      r.min_gap_m != null ? h('span', { class: 'lb-muted', text: 'Ближе всего между центрами:' }) : null,
+      r.min_gap_m != null ? h('span', { class: 'lb-chip lb-chip--plain', text: `${num(r.min_gap_m, 2)} м` }) : null));
 }
 
 /** Заметил ли агент скрытые события среды. */

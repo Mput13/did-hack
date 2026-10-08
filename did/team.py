@@ -7,8 +7,9 @@
 Виды сообщений (поля сверх общих t, from, type):
   hello      {x, y, home}                 я в сети, вот моё место на базе
   obs        {x, y, th, battery, state, claim, readings, soil, safe} — раз в секунду:
-               readings [[x, y, z, sigma, t], ...]  показания моего датчика образцов: напарник вносит их в свою
-                                                 карту вероятностей так же, как свои;
+               readings [[x, y, z, sigma, t], ...]  показания моего датчика образцов (t — когда показание снято,
+                                                 а не когда отправлено): напарник вносит их в свою карту
+                                                 вероятностей так же, как свои;
                soil     [[x, y, ds, mult], ...]  отрезки пути и во сколько раз на них расход выше обычного;
                safe     [[x, y], ...]            где я проехал без штрафа (сужает гипотезы об опасной зоне);
                claim    {kind, x, y, cost}       моя текущая цель и сколько заряда до неё осталось
@@ -514,8 +515,11 @@ class TeamAgent(Agent):
     def _on_reading(self, z, obs):
         super()._on_reading(z, obs)
         sigma = self.health.effective_sigma() if self.cfg.sensor_health else self.rules.sensor_sigma
+        # Время измерения, а не доставки: в ROS показание приходит с опозданием (obs.sensor_age), и напарник
+        # по этому времени решает, снято ли оно до сбора образца.
+        taken = obs.t - (getattr(obs, 'sensor_age', 0.0) or 0.0)
         self._out['readings'].append([round(obs.x, 3), round(obs.y, 3), round(float(z), 3), round(float(sigma), 3),
-                                      round(obs.t, 2)])
+                                      round(taken, 2)])
 
     def _trail_point(self, x, y, t):
         super()._trail_point(x, y, t)
