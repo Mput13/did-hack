@@ -46,11 +46,23 @@ METRICS = {
     'study_time': ('Время исследования', 'с', 'lower'),
     'llm_calls': ('Обращений к модели', 'вызовы', 'lower'),
     'llm_failed': ('Ошибок модели', 'вызовы', 'lower'),
+    # команда роботов (did/judge_team.py, did/team_runner.py); у обычных прогонов этих метрик нет
+    'score_per_robot': ('Счёт на одного робота', 'очки', 'higher'),
+    't_last_collect': ('Время до последнего сбора', 'с', 'lower'),
+    'mean_sample_time': ('Среднее время до образца (несобранный — 600 с)', 'с', 'lower'),
+    'robot_contacts': ('Столкновения роботов друг с другом', 'шт.', 'lower'),
+    'same_target_s': ('Цели в планах двух роботов совпадают', 'с', 'lower'),
+    'messages': ('Сообщений между роботами', 'шт.', 'lower'),
+    # У команды returned — доля вернувшихся роботов (0,5 — один из двух); returned_all — вернулись все.
+    'returned_all': ('Вернулись все роботы', 'доля прогонов', 'higher'),
 }
 
 # Метрики, добавленные после остальных. Их интервалы в сводке опыта считаются на отдельном генераторе:
 # иначе лишние выборки сдвинули бы случайные числа и интервалы всех прежних метрик во всех опытах.
-SIDE_METRICS = ('llm_calls', 'llm_failed')
+SIDE_METRICS = ('llm_calls', 'llm_failed', 'score_per_robot', 't_last_collect', 'mean_sample_time', 'robot_contacts',
+                'same_target_s', 'messages')
+# Добавлены ещё позже (ревью M1): свой генератор, чтобы не сдвинуть интервалы ни основных, ни SIDE_METRICS.
+LATE_METRICS = ('returned_all',)
 
 
 def run_metrics(score, rules, journal, world, plans, llm):

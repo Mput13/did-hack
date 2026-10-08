@@ -29,6 +29,66 @@ export function resultTiles(result, rules) {
     tile('Штрафы', num(r.penalties ?? 0, 0), fines.join(' · ') || 'нет'));
 }
 
+/**
+ * Запись команды роботов глазами одного из них: его путь, журнал и карты — на месте обычных полей записи,
+ * остальные роботы — в partners (проигрыватель рисует их поверх). События судьи берутся у всех сразу:
+ * образец, собранный напарником, исчезает с арены и здесь. База — место этого робота (home), поправка
+ * положения и сканы — его собственные; в записях, где у роботов их нет, они есть только у первого
+ * (верхний уровень записи — это он), у остальных пусто, а не чужое.
+ */
+export function robotView(trace, k) {
+  const r = trace.robots[k];
+  const events = trace.robots.flatMap((x) => x.events || []).slice().sort((a, b) => a.t - b.t);
+  const own = (key, none) => r[key] ?? (k === 0 ? trace[key] : none);
+  const scenario = Array.isArray(r.home) && trace.scenario ? { ...trace.scenario, base: r.home } : trace.scenario;
+  return {
+    ...trace, scenario, track: r.track, modes: r.modes, events, journal: r.journal, hypotheses: r.hypotheses, plans: r.plans,
+    paths: r.paths, belief: r.belief, soil: r.soil, hazards: r.hazards, scans: own('scans', []), pose_fix: own('pose_fix'),
+    self: r.name, partners: trace.robots.filter((_, i) => i !== k).map((x) => ({ name: x.name, track: x.track })),
+  };
+}
+
+/** Плитки с итогом команды и строка по каждому роботу. */
+export function teamTiles(trace) {
+  const r = trace.result || {};
+  const robots = trace.robots || [];
+  const tile = (label, value, sub) => h('div', { class: 'lb-tile' },
+    h('div', { class: 'lb-tile__label', text: label }),
+    h('div', { class: 'lb-tile__value' }, value),
+    sub ? h('div', { class: 'lb-tile__sub', text: sub }) : null);
+  const back = robots.filter((x) => x.result && x.result.returned).length;
+  const said = (trace.team && trace.team.messages) || [];
+  const talk = said.filter((m) => m.type !== 'obs').length;
+  const fines = [];
+  if (r.collisions) fines.push(`столкновения: ${r.collisions}`);
+  if (r.false_collects) fines.push(`ложные сборы: ${r.false_collects}`);
+  if (r.hazard_hits) fines.push(`опасные зоны: ${r.hazard_hits}`);
+  // Показателя в записи может не быть (запись Gazebo без итога судьи на двоих): это «не измерено», а не ноль.
+  const measured = (v, unit) => {
+    const known = v != null && !Number.isNaN(Number(v));
+    const tone = !known ? '' : Number(v) ? ' lb-yn--no' : ' lb-yn--yes';
+    return h('span', { class: `lb-chip lb-chip--plain${unit ? '' : tone}`, text: known ? `${num(v, 0)}${unit || ''}` : 'не измерено' });
+  };
+  // Зазор без min_gap_source — из старых записей, где он считался по несинхронным кадрам: не показываем.
+  const gap = r.min_gap_m != null && r.min_gap_source;
+  return h('div', null,
+    h('div', { class: 'lb-tiles' },
+      tile('Счёт команды', num(r.score, 1), `на одного робота ${num(r.score_per_robot, 1)}`),
+      tile('Образцы', `${r.samples_collected ?? '—'} из ${r.samples_total ?? '—'}`,
+        robots.map((x) => `${x.name}: ${x.result.samples_collected}`).join(' · ')),
+      tile('Вернулись на базу', `${back} из ${robots.length}`, robots.map((x) => `${x.name}: заряд ${num(x.result.battery, 1)}`).join(' · ')),
+      tile('Последний сбор', r.t_last_collect != null ? `${num(r.t_last_collect, 0)} с` : '—', `весь прогон ${num(r.time, 0)} с`),
+      tile('Сообщений', said.length ? num(talk, 0) : 'нет', said.length ? `и ${said.length - talk} с показаниями датчиков` : 'роботы не связаны'),
+      tile('Штрафы', num(r.penalties ?? 0, 0), fines.join(' · ') || 'нет')),
+    h('div', { class: 'lb-detects' },
+      h('span', { class: 'lb-muted', text: 'Цели в планах совпадали:' }),
+      measured(r.same_target_s, ' с'),
+      h('span', { class: 'lb-muted', text: 'Столкновений друг с другом:' }),
+      measured(r.robot_contacts),
+      gap ? h('span', { class: 'lb-muted', text: 'Ближе всего между центрами:' }) : null,
+      gap ? h('span', { class: 'lb-chip lb-chip--plain', text: `${num(r.min_gap_m, 2)} м` }) : null));
+}
+
 /** Заметил ли агент скрытые события среды. */
 export function detectChips(result) {
   const d = (result && result.detect) || {};
@@ -127,6 +187,10 @@ export async function render(root, ctx) {
   const demo = demoKinds(ctx.query);
   if (demo.length) trace = applyDemo(trace, demo);
   const rules = rulesOf(trace);
+  // Прогон команды: показываем глазами выбранного робота (…&robot=tb2), напарники рисуются поверх.
+  const team = Array.isArray(trace.robots) && trace.robots.length > 1 ? trace : null;
+  const who = team ? Math.max(0, team.robots.findIndex((r) => r.name === ctx.query.robot)) : 0;
+  if (team) trace = robotView(team, who);
 
   const sc = trace.scenario || {};
   const run = exp ? (exp.runs || []).find((r) => r.file === file) : null;
@@ -198,7 +262,7 @@ export async function render(root, ctx) {
     }
   } else {
     // Отдельный прогон: соседние сценарии и другие варианты считаются на лету.
-    label = agentLabel(agentId, options);
+    label = team ? ({ team: 'Два робота с координацией', pair: 'Два робота без координации', pair_lidar: 'Два робота без связи, объезд по лидару' }[team.team.mode] || 'Два робота') : agentLabel(agentId, options);
     color = agentColor(agentId);
     back = h('a', { class: 'lb-back', href: href('/scenarios', { level: sc.level, seed: sc.seed }) }, icon('left'), 'Сценарии');
     eyebrow = 'Отдельный прогон';
@@ -269,7 +333,12 @@ export async function render(root, ctx) {
         h('div', { class: 'lb-alert__title', text: 'В запись подмешан пример для проверки вида страницы' }),
         h('div', { class: 'lb-alert__text', text: `${[demo.includes('inquiry') ? 'расследования и сводка по ним' : '', demo.includes('pose') ? 'поправка положения по лидару' : ''].filter(Boolean).join(', ')} — не из этого прогона. Сама запись на диске не меняется.` }),
         h('div', { class: 'lb-alert__actions' }, h('a', { class: 'lb-btn', href: runHref(file) }, 'Показать запись без примера')))) : null,
-    resultTiles(result, trace.rules),
+    team ? teamTiles(team) : resultTiles(result, trace.rules),
+    team ? h('div', { class: 'lb-switches' }, h('div', { class: 'lb-switch' },
+      h('span', { class: 'lb-switch__name', text: 'Журнал, план и карта — глазами робота' }),
+      h('div', { class: 'lb-seg', role: 'group' }, team.robots.map((r, i) => h('a', {
+        class: 'lb-seg__btn', href: href('/run', { file, robot: r.name }), 'aria-current': i === who ? 'true' : null, text: r.name,
+      }))))) : null,
     detectChips(result),
     inquiryChips(trace, showInquiries),
     knowledgeChips(result.knowledge ?? trace.knowledge),
