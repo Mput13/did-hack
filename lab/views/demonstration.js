@@ -17,6 +17,7 @@ export async function render(root, ctx) {
   if (!ctx.alive()) return;
   let state = null, timer, polling = false, mutation = false, tool = 'point', task = 'route';
   let comparison = null, recording = null, notice = null, scenarioKey = '', missionKey = '';
+  let slamNavSeen = false, agentsKey = '';     // режим карты SLAM уже замечен; список агентов уже заполнен
   const noticeBox = h('p', { class: 'dm-notice', role: 'status', 'aria-live': 'polite', hidden: true });
   const say = (text, bad = false) => { notice = { text, bad }; paint(); };
   const btn = (text, fn, cls = '') => h('button', { class: `lb-btn ${cls}`, type: 'button', onclick: fn }, text);
@@ -79,10 +80,17 @@ export async function render(root, ctx) {
   const taskButtons = ['route', 'mission'].map((value, i) => btn(['По заданному маршруту', 'Собрать образцы и вернуться'][i], () => {
     task = value; notice = null; paint();
   }, 'dm-task'));
-  const start = btn('Запустить', () => send(task === 'route' ? 'go' : 'mission', task === 'mission' ? { agent: 'adaptive' } : {}), 'lb-btn--primary dm-start');
+  const start = btn('Запустить', () => send(task === 'route' ? 'go' : 'mission', task === 'mission' ? { agent: agentSel.value || 'adaptive' } : {}), 'lb-btn--primary dm-start');
   const stop = btn('Стоп', () => send('stop'), 'dm-stop');
   const home = btn('На базу', () => send('home'));
   const reset = btn('Сбросить прогон', () => send('reset'));
+  // Режим карты SLAM (pixi run demo --slam-map): готовой карты у робота нет, он достраивает её сам.
+  const explore = btn('Построить карту', () => send('explore'));
+  explore.hidden = true;
+  explore.title = 'Робот сам объедет арену: едет туда, где карта SLAM Toolbox ещё обрывается';
+  // Агент автономной миссии: список присылает пульт (did/pilot.py, MISSION_AGENTS), по умолчанию — первый.
+  const agentSel = h('select', { class: 'lb-select', 'aria-label': 'Агент миссии' });
+  const agentRow = h('label', { class: 'dm-radius', hidden: true }, 'Агент', agentSel);
   const undo = btn('Убрать точку', () => send('route', { points: pending().slice(0, -1) }));
   const clearZones = btn('Убрать зоны', () => send('zones', { zones: [] }));
   const battery = h('strong', null, '—'), distance = h('strong', null, '—'), batterySub = h('span'), distanceSub = h('span');
@@ -95,7 +103,8 @@ export async function render(root, ctx) {
     const box = h('input', { type: 'checkbox', checked, onchange: () => map.setOpts({ [key]: box.checked }) });
     return h('label', { class: 'pl-check' }, box, label);
   };
-  detail.append(h('div', { class: 'pl-toggles' }, check('Лучи лидара', 'rays'), check('Известная геометрия', 'ref', true),
+  const refCheck = check('Известная геометрия', 'ref', true);
+  detail.append(h('div', { class: 'pl-toggles' }, check('Лучи лидара', 'rays'), refCheck,
     check('Оценки агента', 'belief'), check('Скрытые объекты для зрителя', 'truth')));
   const slamCheck = check('Карта SLAM Toolbox', 'slam');
   slamCheck.hidden = true;
@@ -117,10 +126,10 @@ export async function render(root, ctx) {
       h('h2', { class: 'pl-h' }, 'Карта'),
       h('div', { class: 'dm-scenario' }, mapType, seed, apply), mapHelp),
     h('section', { class: 'lb-card dm-card' },
-      h('h2', { class: 'pl-h' }, 'Задание'), h('div', { class: 'dm-tasks' }, taskButtons), hint, routeText,
+      h('h2', { class: 'pl-h' }, 'Задание'), h('div', { class: 'dm-tasks' }, taskButtons), agentRow, hint, routeText,
       h('div', { class: 'dm-small-actions' }, undo, clearZones),
       h('div', { class: 'dm-actions' }, start, stop),
-      h('div', { class: 'dm-small-actions' }, home, reset), status, noticeBox),
+      h('div', { class: 'dm-small-actions' }, home, reset, explore), status, noticeBox),
     h('section', { class: 'dm-metrics' },
       h('div', null, h('span', null, 'Заряд'), battery, batterySub),
       h('div', null, h('span', null, 'Пройдено'), distance, distanceSub)), result, cycle, llm.el,
@@ -153,9 +162,21 @@ export async function render(root, ctx) {
     slamCheck.hidden = !s?.slam;
     const key = active ? `${s.backend}:${s.level}:${s.seed}` : '';
     if (key && key !== scenarioKey) { mapType.value = s.level === 'hard' ? 'hard' : 'medium'; seed.value = s.seed; scenarioKey = key; }
-    source.textContent = active ? `${s.backend === 'gazebo' ? 'Gazebo' : 'Быстрый симулятор'} · №${s.seed}` : 'Робот не подключён';
+    const slamNav = active && !!s.slam_nav;
+    if (slamNav && s.slam && !slamNavSeen) {
+      // Готовой карты у робота нет: показываем ту, по которой он едет, эталон по умолчанию скрыт.
+      slamNavSeen = true;
+      map.setOpts({ slam: true, ref: false });
+      slamCheck.querySelector('input').checked = true; refCheck.querySelector('input').checked = false;
+    }
+    const akey = (s?.agents || []).map((a) => a.id).join(',');
+    if (akey && akey !== agentsKey) { agentsKey = akey; fill(agentSel, s.agents.map((a) => h('option', { value: a.id }, a.label))); }
+    agentRow.hidden = task !== 'mission' || !akey;
+    agentSel.disabled = mutation || moving;
+    source.textContent = active ? `${s.backend === 'gazebo' ? 'Gazebo' : 'Быстрый симулятор'} · №${s.seed}${slamNav ? ' · карта SLAM, готовой нет' : ''}` : 'Робот не подключён';
     mapType.disabled = seed.disabled = apply.disabled = mutation || moving || s?.backend === 'gazebo';
-    mapHelp.textContent = s?.backend === 'gazebo' ? 'Контур эталонный. Для смены сценария нужен перезапуск стенда Gazebo.' :
+    mapHelp.textContent = slamNav ? 'Готовой карты у робота нет: её строит SLAM Toolbox, путь идёт только по увиденному полу.' :
+      s?.backend === 'gazebo' ? 'Контур эталонный. Для смены сценария нужен перезапуск стенда Gazebo.' :
       'Меняются грунты, образцы и события. Контур арены остаётся эталонным.';
     toolButtons.forEach((b, i) => { b.setAttribute('aria-pressed', String(['point', 'yellow', 'danger'][i] === tool)); b.disabled = mutation || moving || task !== 'route'; });
     taskButtons.forEach((b, i) => { b.setAttribute('aria-pressed', String(['route', 'mission'][i] === task)); b.disabled = mutation || moving; });
@@ -170,6 +191,8 @@ export async function render(root, ctx) {
     stop.disabled = mutation || !active || !['drive', 'home', 'mission'].includes(s.mode);
     home.disabled = mutation || !active || moving || s.at_base;
     reset.disabled = mutation || !active || moving;
+    explore.hidden = !slamNav;
+    explore.disabled = mutation || moving || !s?.nav?.ready;
     undo.disabled = mutation || !active || moving || !todo.length || task !== 'route';
     clearZones.disabled = mutation || !active || moving || !s.zones?.length;
     compare.disabled = mutation || moving;
@@ -177,8 +200,12 @@ export async function render(root, ctx) {
     const m = s?.mission;
     status.textContent = !active ? 'Подключите стенд или примените карту для быстрого симулятора.' : s.mode === 'mission' ? 'Идёт автономная миссия' : s.mode === 'drive' ? 'Робот следует заданному маршруту' :
       s.mode === 'home' ? 'Возвращение на базу' : s.mode === 'wait' || s.mode === 'settle' ? 'Робот готовится к запуску' : 'Готов к заданию';
-    noticeBox.hidden = !notice;
-    if (notice) { noticeBox.textContent = notice.text; noticeBox.dataset.bad = String(notice.bad); }
+    const ex = s?.nav?.explore;
+    if (active && s.mode === 'drive' && ex && !ex.done) status.textContent = `Строю карту: подъезд ${ex.visited}, границ увиденного осталось ${s.nav.frontiers}`;
+    // Сообщение самого пульта (почему робот остановлен, что со SLAM) оператор должен видеть, а не только ошибки команд.
+    const told = notice || (active && s.note?.text && (s.note.tone === 'bad' || slamNav) ? { text: s.note.text, bad: s.note.tone === 'bad' } : null);
+    noticeBox.hidden = !told;
+    if (told) { noticeBox.textContent = told.text; noticeBox.dataset.bad = String(told.bad); }
     battery.textContent = active ? num(s.battery, 1) : '—'; batterySub.textContent = active ? `из ${num(s.battery_start, 0)}` : '';
     distance.textContent = active ? `${num(s.distance, 1)} м` : '—'; distanceSub.textContent = active ? `${num(s.t, 0)} с` : '';
     const done = active && !moving && (m?.result || s.route?.length && s.route.every((p) => p.done));
