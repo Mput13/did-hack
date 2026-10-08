@@ -561,6 +561,7 @@
     F['story.seed'] = story.seed;
     for (const arm of ['fixed', 'adaptive']) { const r = story[arm].result; F[`story.${arm}`] = `${r.samples_collected} из ${r.samples_total}`; F[`story.${arm}.score`] = num(r.score, 1); }
     F.route_len = num(D.route.length, 1); F.route_n = D.route.points.length;
+    F.jev_cost = D.llm_budget ? num(D.llm_budget.spent_usd, 2) : '—';
     if (D.code) { F.loc_total = (D.code.py + D.code.js).toLocaleString('ru'); F.loc_py = D.code.py.toLocaleString('ru'); F.loc_js = D.code.js.toLocaleString('ru'); }
     if (D.inq_accuracy) for (const k of ['runs', 'total', 'identified', 'wrong']) F['inq_accuracy.' + k] = D.inq_accuracy[k];
     F.gz_n = D.gazebo.length;
@@ -1030,7 +1031,8 @@
 
   (() => {
     const t = $('llm-real'); if (!t) return;
-    const rows = Object.entries(D.llm_real || {});
+    const rows = Object.entries(D.llm_real || {}).filter(([k]) => !k.startsWith('qwen2.5'));    // локальная модель больше не используется
+    const AG = D.llm_agreement || {};
     if (!rows.length) { t.outerHTML = '<p class="warn">Прогонов с настоящей моделью на момент сборки нет.</p>'; return; }
     const NAME = { 'gpt-6-luna_v1': 'GPT-6 Luna, первый вариант запроса', 'gpt-6-luna': 'GPT-6 Luna, доработанный запрос и схема ответа',
       'jev-router_800': 'Jev Router, лимит ответа 800 токенов', 'jev-router': 'Jev Router, запас на рассуждение и схема ответа',
@@ -1042,8 +1044,8 @@
     const rank = k => { const i = ORDER.indexOf(k); return i < 0 ? 99 : i; };
     rows.sort((a, b) => rank(a[0]) - rank(b[0]));
     const same = v => { const d = v.score_diff || []; return d.length ? `${d.filter(x => Math.abs(x) < 0.05).length} из ${d.length}` : '—'; };
-    t.innerHTML = `<thead><tr><th>Модель и запрос</th><th>Обращений</th><th>Годный план с первого раза</th><th>После исправления</th><th>Отказ в запасное правило</th><th>Время ответа, медиана</th><th>Счёт: модель / правило</th><th>Сценариев, где счёт совпал с правилом</th></tr></thead><tbody>` +
-      rows.map(([k, v]) => `<tr><td>${NAME[k] || k}</td><td>${v.requests}</td><td><b>${pct(v.first_ok_share)}</b></td><td>${pct(v.repaired_share)}</td><td>${pct(v.fallback_share)}</td><td>${num(v.latency_ms.median / 1000, 0)} с</td><td>${num(v.score_mean_complete, 1)} / ${num(v.rule_score_mean_complete, 1)} <small>(${v.complete_runs} прогонов)</small></td><td>${same(v)}</td></tr>`).join('') + '</tbody>';
+    t.innerHTML = `<thead><tr><th>Модель и запрос</th><th>Обращений</th><th>Годный план с первого раза</th><th>После исправления</th><th>Отказ в запасное правило</th><th>Время ответа, медиана</th><th>Счёт: модель / правило</th><th>Решений, совпавших с правилом</th></tr></thead><tbody>` +
+      rows.map(([k, v]) => `<tr><td>${NAME[k] || k}</td><td>${v.requests}</td><td><b>${pct(v.first_ok_share)}</b></td><td>${pct(v.repaired_share)}</td><td>${pct(v.fallback_share)}</td><td>${num(v.latency_ms.median / 1000, 0)} с</td><td>${num(v.score_mean_complete, 1)} / ${num(v.rule_score_mean_complete, 1)} <small>(${v.complete_runs} прогонов)</small></td><td>${AG[k] ? `<b>${pct(AG[k].share)}</b> <small>(${AG[k].same} из ${AG[k].decisions})</small>` : '—'}</td></tr>`).join('') + '</tbody>';
   })();
 
   /* ------------------------------------------------- один такт на настоящих данных */

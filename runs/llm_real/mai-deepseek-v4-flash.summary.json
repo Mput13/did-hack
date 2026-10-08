@@ -1,0 +1,227 @@
+{
+ "arm": "mai-deepseek-v4-flash",
+ "llm": {
+  "kind": "http",
+  "model": "DeepSeek-V4-Flash",
+  "cache": true,
+  "use_schema": true,
+  "min_tokens": 3000
+ },
+ "created": "2026-10-08T11:24:11",
+ "wall_s": 380.2,
+ "scenarios": 6,
+ "requests": 51,
+ "quota_blocked": 0,
+ "first_ok_share": 0.98,
+ "repaired_share": 0.02,
+ "fallback_share": 0.0,
+ "errors": {
+  "ответ обрезан": 1,
+  "ответ не JSON": 1
+ },
+ "latency_ms": {
+  "mean": 15796,
+  "median": 13519,
+  "max": 49505,
+  "total": 821397
+ },
+ "transport_retries": 4,
+ "tokens": {
+  "prompt": 2597,
+  "completion": 1193
+ },
+ "cached_exchanges": 0,
+ "score_mean": 71.3,
+ "rule_score_mean": 71.18,
+ "score_diff": [
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.7
+ ],
+ "complete_runs": 6,
+ "score_mean_complete": 71.3,
+ "rule_score_mean_complete": 71.18,
+ "runs": [
+  {
+   "level": "medium",
+   "seed": 1001,
+   "score": 71.88,
+   "rule_score": 71.88,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 5,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 7,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 10508,
+    "median": 8546,
+    "max": 17254,
+    "total": 73555
+   },
+   "file": "llm_real/mai-deepseek-v4-flash/medium-1001.json.gz"
+  },
+  {
+   "level": "medium",
+   "seed": 1002,
+   "score": 70.75,
+   "rule_score": 70.75,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 4,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 7,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 16662,
+    "median": 16090,
+    "max": 28133,
+    "total": 116632
+   },
+   "file": "llm_real/mai-deepseek-v4-flash/medium-1002.json.gz"
+  },
+  {
+   "level": "medium",
+   "seed": 1003,
+   "score": 72.23,
+   "rule_score": 72.23,
+   "samples": "5/5",
+   "rule_samples": "5/5",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 1,
+    "llm": 7,
+    "rule": 1
+   },
+   "requests": 7,
+   "first_ok": 7,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 19275,
+    "median": 9243,
+    "max": 47853,
+    "total": 134926
+   },
+   "file": "llm_real/mai-deepseek-v4-flash/medium-1003.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1001,
+   "score": 66.8,
+   "rule_score": 66.8,
+   "samples": "5/7",
+   "rule_samples": "5/7",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 4,
+    "llm": 10
+   },
+   "requests": 10,
+   "first_ok": 10,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 13169,
+    "median": 13982,
+    "max": 24739,
+    "total": 131688
+   },
+   "file": "llm_real/mai-deepseek-v4-flash/hard-1001.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1002,
+   "score": 60.0,
+   "rule_score": 60.0,
+   "samples": "6/7",
+   "rule_samples": "6/7",
+   "returned": false,
+   "rule_returned": false,
+   "plans": {
+    "heuristic": 5,
+    "llm": 8,
+    "rule": 1
+   },
+   "requests": 8,
+   "first_ok": 8,
+   "repaired": 0,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 15325,
+    "median": 16024,
+    "max": 23012,
+    "total": 122603
+   },
+   "file": "llm_real/mai-deepseek-v4-flash/hard-1002.json.gz"
+  },
+  {
+   "level": "hard",
+   "seed": 1003,
+   "score": 86.12,
+   "rule_score": 85.42,
+   "samples": "7/7",
+   "rule_samples": "7/7",
+   "returned": true,
+   "rule_returned": true,
+   "plans": {
+    "heuristic": 8,
+    "llm": 12,
+    "rule": 1
+   },
+   "requests": 12,
+   "first_ok": 11,
+   "repaired": 1,
+   "failed": 0,
+   "quota_blocked": 0,
+   "latency_ms": {
+    "mean": 18615,
+    "median": 18571,
+    "max": 49505,
+    "total": 241993
+   },
+   "file": "llm_real/mai-deepseek-v4-flash/hard-1003.json.gz"
+  }
+ ],
+ "rejected": [
+  {
+   "level": "hard",
+   "seed": 1003,
+   "t": 54.7,
+   "attempt": 1,
+   "errors": [
+    "пустой ответ",
+    "ответ обрезан по лимиту токенов, отвечай короче"
+   ],
+   "kinds": [
+    "ответ не JSON",
+    "ответ обрезан"
+   ],
+   "response": ""
+  }
+ ]
+}

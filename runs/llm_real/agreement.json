@@ -1,0 +1,65 @@
+{
+ "jev-router": {
+  "decisions": 63,
+  "same": 60,
+  "share": 0.952,
+  "differences": {
+   "explore вместо investigate": 1,
+   "— вместо return_base": 1,
+   "investigate вместо investigate": 1
+  }
+ },
+ "mai-qwen3.8-flash-next": {
+  "decisions": 51,
+  "same": 49,
+  "share": 0.961,
+  "differences": {
+   "investigate вместо investigate": 1,
+   "explore вместо investigate": 1
+  }
+ },
+ "mai-qwen3.6-35b-a3b": {
+  "decisions": 51,
+  "same": 49,
+  "share": 0.961,
+  "differences": {
+   "explore вместо investigate": 1,
+   "investigate вместо investigate": 1
+  }
+ },
+ "mai-qwen3.5-122b-a10b": {
+  "decisions": 51,
+  "same": 49,
+  "share": 0.961,
+  "differences": {
+   "investigate вместо investigate": 1,
+   "explore вместо investigate": 1
+  }
+ },
+ "mai-qwen3.8-27b": {
+  "decisions": 45,
+  "same": 44,
+  "share": 0.978,
+  "differences": {
+   "investigate вместо investigate": 1
+  }
+ },
+ "mai-deepseek-v4.1-flash": {
+  "decisions": 45,
+  "same": 43,
+  "share": 0.956,
+  "differences": {
+   "investigate вместо investigate": 1,
+   "explore вместо investigate": 1
+  }
+ },
+ "mai-deepseek-v4-flash": {
+  "decisions": 50,
+  "same": 48,
+  "share": 0.96,
+  "differences": {
+   "explore вместо investigate": 1,
+   "investigate вместо investigate": 1
+  }
+ }
+}
