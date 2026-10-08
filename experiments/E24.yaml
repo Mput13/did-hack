@@ -1,0 +1,105 @@
+title: Не стоять, пока модель думает — итог на нетронутых сценариях
+kind: waiting
+question: >-
+  Сколько очков возвращает роботу режим «действовать, пока модель думает» по сравнению с нынешним «стоять и ждать
+  ответа», и чем за это заплачено?
+hypothesis: >-
+  Если до ответа модели робот исполняет план правила, а ответ сверяет с тем, что уже делает, он вернёт не меньше 80%
+  потери от ожидания на трудном уровне и будет не хуже «стоять и ждать» на среднем (допуск 1 очко).
+method: >-
+  Как в R3 (E16, условия wait15 и wait29), настоящей модели нет: имитатор отвечает как правило, но ответ «приходит»
+  через 15 или 29 секунд времени прогона. Варианты: правило и имитатор без ожидания (потолок); «стоять и ждать» (как
+  сейчас); новый режим в двух видах — весь план правила (rule) и привязь (leash: без сбора и не дальше 0,5 м
+  от места вопроса, из опасной зоны — без ожидания). Три условия: имитатор всегда отвечает как правило; в 4% и в 20%
+  решений называет другую достижимую цель — видно, как часто ответ приходит поздно и сколько переходов на план модели.
+  Итог: сценарии 7001–7040, которых не видели ни отладка, ни другие опыты; код к этому прогону заморожен.
+expect: >-
+  «Ехать по правилу» совпадает с правилом без ожидания; «только обратимое» снимает штрафы за стоянку в опасной зоне,
+  но часть времени простоя оставляет.
+refute: >-
+  Гипотеза опровергнута, если на нетронутых сценариях интервал парной разности счёта «новый режим − стоять и ждать»
+  на трудном уровне включает ноль, либо возвращено меньше 80% потери, либо на среднем интервал выходит ниже −1 очка.
+arms:
+  - id: rule
+    label: Правило без модели (потолок)
+    agent: adaptive
+  - id: nowait
+    label: Имитатор без ожидания (мир стоит, пока модель думает)
+    agent: adaptive_llm
+    llm: {kind: mock}
+  - id: stand15
+    label: Стоять и ждать, 15 с на ответ (как сейчас)
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 15}
+  - id: act15
+    label: Ехать по плану правила, 15 с на ответ
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 15, llm_act_while_waiting: rule}
+  - id: safe15
+    label: Привязь (без сбора, не дальше 0,5 м от места вопроса), 15 с на ответ
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 15, llm_act_while_waiting: leash}
+  - id: stand29
+    label: Стоять и ждать, 29 с на ответ
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 29}
+  - id: act29
+    label: Ехать по плану правила, 29 с на ответ
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 29, llm_act_while_waiting: rule}
+  - id: safe29
+    label: Привязь (без сбора, не дальше 0,5 м от места вопроса), 29 с на ответ
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 29, llm_act_while_waiting: leash}
+  - id: act15_drop
+    label: Ехать по плану правила, 15 с; ответ, пришедший после смены плана, отбрасывается
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 15, llm_act_while_waiting: rule, llm_wait_superseded: drop}
+  - id: safe15_drop
+    label: Привязь, 15 с; ответ, пришедший после смены плана, отбрасывается
+    agent: adaptive_llm
+    llm: {kind: mock}
+    config: {llm_wait_s: 15, llm_act_while_waiting: leash, llm_wait_superseded: drop}
+levels: [medium, hard]
+seeds: 40
+seed_start: 7001
+conditions:
+  - id: base
+    label: Имитатор отвечает как правило
+  - id: dev4
+    label: Имитатор в 4% решений называет другую цель (как настоящая модель в R3)
+    llm: {deviate: 0.04}
+  - id: dev20
+    label: Имитатор в 20% решений называет другую цель
+    llm: {deviate: 0.2}
+metrics: [score, hazard_hits, returned, samples_share, idle_s, time, llm_calls, llm_late, llm_switches]
+claims:
+  - {metric: score, a: act15, b: stand15, levels: [hard], conditions: [base], better: higher,
+     text: "hard: ехать по правилу в ожидании (15 с) даёт счёт выше, чем стоять"}
+  - {metric: score, a: act15, b: stand15, levels: [medium], conditions: [base], kind: noninferiority, margin: 1.0,
+     text: "medium: ехать по правилу в ожидании (15 с) не хуже, чем стоять (допуск 1 очко)"}
+  - {metric: score, a: safe15, b: stand15, levels: [hard], conditions: [base], better: higher,
+     text: "hard: только обратимое в ожидании (15 с) даёт счёт выше, чем стоять"}
+  - {metric: score, a: safe15, b: stand15, levels: [medium], conditions: [base], kind: noninferiority, margin: 1.0,
+     text: "medium: только обратимое в ожидании (15 с) не хуже, чем стоять (допуск 1 очко)"}
+  - {metric: score, a: act29, b: stand29, levels: [hard], conditions: [base], better: higher,
+     text: "hard: ехать по правилу в ожидании (29 с) даёт счёт выше, чем стоять"}
+  - {metric: score, a: safe29, b: stand29, levels: [hard], conditions: [base], better: higher,
+     text: "hard: только обратимое в ожидании (29 с) даёт счёт выше, чем стоять"}
+  - {metric: score, a: act15, b: nowait, conditions: [base], kind: equivalence, margin: 1.0,
+     text: "ехать по правилу в ожидании (15 с) не отличается от имитатора без ожидания (допуск 1 очко)"}
+  - {metric: score, a: stand15, b: nowait, text: "цена ожидания: стоять 15 с на решение хуже, чем без ожидания", better: lower}
+  - {metric: hazard_hits, a: act15, b: stand15, levels: [hard], text: "hard: меньше штрафов за опасные зоны, чем у «стоять» (15 с)", better: lower}
+  - {metric: hazard_hits, a: safe15, b: stand15, levels: [hard], text: "hard: меньше штрафов за опасные зоны у «только обратимого» (15 с)", better: lower}
+  - {metric: idle_s, a: act15, b: stand15, text: "простой меньше, чем у «стоять» (15 с)", better: lower}
+  - {metric: idle_s, a: safe15, b: stand15, text: "простой у «только обратимого» меньше, чем у «стоять» (15 с)", better: lower}
+  - {metric: returned, a: act15, b: stand15, text: "возврат на базу чаще, чем у «стоять» (15 с)", better: higher}
+  - {metric: samples_share, a: act15, b: stand15, text: "доля собранных выше, чем у «стоять» (15 с)", better: higher}
+  - {metric: score, a: act15, b: safe15, text: "полный план правила в ожидании лучше «только обратимого» (15 с)", better: higher}

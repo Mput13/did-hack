@@ -35,6 +35,7 @@ from .recorder import Recorder, save_trace
 from .robot_io import Observation
 from .runner import RUNS, make_planner
 from .scenario import Scenario, generate
+from .waiting import wait_metrics
 
 TICK_S = 0.1
 # После появления в мире Burger ещё около 30 с времени симуляции качается на задней опоре: колёса на
@@ -227,8 +228,12 @@ class RosIO(Node):
 
 
 def run(level, seed, agent, experiment, arm=None, llm=None, wait_s=120.0, settle_s=8.0, quiet=False,
-        rules=None, knowledge=None):
-    """Провести один прогон в Gazebo. Стенд (симуляция и судья) должен быть уже запущен."""
+        rules=None, knowledge=None, config=None):
+    """Провести один прогон в Gazebo. Стенд (симуляция и судья) должен быть уже запущен.
+
+    config — поправки к настройкам агента, например {'llm_act_while_waiting': 'rule'}: пока модель думает
+    в своём потоке, робот едет по плану правила (did/waiting.py).
+    """
     arena = load_arena()
     rules = Rules(**SCIENCE) if rules == 'science' else Rules()   # должны совпадать с правилами судьи в стенде
     rclpy.init()
@@ -262,7 +267,7 @@ def run(level, seed, agent, experiment, arm=None, llm=None, wait_s=120.0, settle
         io.restart_clock()
 
         llm_on = make_config(agent).planner == 'llm'
-        cfg = make_config(agent, async_planner=llm_on)
+        cfg = make_config(agent, async_planner=llm_on, **(config or {}))
         arm = arm or cfg.name
         rec = Recorder()
         bot_rules = rules
@@ -312,6 +317,7 @@ def run(level, seed, agent, experiment, arm=None, llm=None, wait_s=120.0, settle
         score = io.score
         truth = io.truth or {}
         metrics = run_metrics(score, rules, bot.journal, truth.get('world_log', []), rec.plans, rec.llm)
+        metrics.update(wait_metrics(rec, bot))
         trace = snapshot({**score, **metrics})
         if bot.inv:
             true_scenario = Scenario.from_dict(truth['scenario']) if truth.get('scenario') else scenario
@@ -357,9 +363,12 @@ def main():
     ap.add_argument('--arm', default=None)
     ap.add_argument('--llm', default=None, choices=['mock', 'http', 'ollama', 'codex'])
     ap.add_argument('--rules', default=None, choices=['science'], help='те же правила, что у судьи в стенде')
+    ap.add_argument('--act-while-waiting', default=None, choices=['rule', 'leash'],
+                    help='пока модель думает: rule — ехать по плану правила, leash — без сбора и не дальше привязи от места вопроса (did/waiting.py)')
     args = ap.parse_args()
     run(args.level, args.seed, args.agent, args.exp, arm=args.arm, llm={'kind': args.llm} if args.llm else None,
-        rules=args.rules)
+        rules=args.rules,
+        config={'llm_act_while_waiting': args.act_while_waiting} if args.act_while_waiting else None)
 
 
 if __name__ == '__main__':
