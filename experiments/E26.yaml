@@ -1,0 +1,56 @@
+title: Результативность — агент v3 (правки P2) против v2 и исходного
+kind: main
+question: Дают ли правки P2 — дорога по хоженому полу, поправка сдвига датчика образцов, сбор с полного радиуса — прибавку счёта на новых сценариях трудного уровня, не ухудшая возврат и средний уровень?
+hypothesis: >-
+  После P1 на базовых правилах недобор трудного уровня складывается из штрафов невидимых опасных зон и нехватки
+  заряда, и без скрытой правды из него возвращается немного: ожидаемая прибавка v3 к v2 — около одного очка, ниже
+  порога приёмки. На научных правилах главная неубранная потеря — сбой «датчик занижает показания»: робот проезжает
+  по образцу и не собирает его; поправка сдвига должна вернуть часть этих образцов агенту без расследований.
+method: >-
+  Шесть агентов (adaptive, adaptive_v2, adaptive_v3, scientist, scientist_v2, scientist_v3) проходят одни и те же
+  сценарии 11001–11040 уровней medium и hard при трёх условиях: базовые правила, «научные» правила и базовые
+  правила без событий среды. Отладка и подбор шли на сценариях 1–80; сценарии 11001–11040 до этого опыта не
+  запускались и не просматривались; код и настройки заморожены до запуска, запуск один. Сравниваются парные
+  разности «v3 − v2» и «v3 − исходный» по счёту и возврату.
+expect: >-
+  Критерий приёмки (задан ведущим до работы): трудный уровень, базовые правила — счёт adaptive_v3 выше adaptive_v2
+  на 3 очка и больше, интервал выше нуля; возврат не ниже; средний уровень — не хуже чем на 1 очко; без событий
+  среды поведение не хуже.
+refute: >-
+  Приёмка не пройдена, если на hard при базовых правилах парная разность счёта adaptive_v3 − adaptive_v2 меньше
+  3 очков или её интервал включает ноль; если возвратов меньше; если на medium потеря больше 1 очка; если без
+  событий среды потеря больше 1 очка.
+arms:
+  - {id: adaptive, label: Адаптивный (исходный), agent: adaptive}
+  - {id: adaptive_v2, label: Адаптивный v2, agent: adaptive_v2}
+  - {id: adaptive_v3, label: Адаптивный v3, agent: adaptive_v3}
+  - {id: scientist, label: Исследователь (исходный), agent: scientist}
+  - {id: scientist_v2, label: Исследователь v2, agent: scientist_v2}
+  - {id: scientist_v3, label: Исследователь v3, agent: scientist_v3}
+levels: [medium, hard]
+seeds: 40
+seed_start: 11001
+conditions:
+  - {id: base, label: Базовые правила}
+  - id: science
+    label: Научные правила
+    rules: {drain_per_rad: 0.12, load_drain: 0.05, battery_sigma: 0.02, faults: true, hazard_battery_hit: 0.0}
+  - {id: no_events, label: Событий среды нет, scenario: {events: []}}
+metrics: [score, samples_share, returned, penalties, hazard_hits, false_collects, time, distance, battery_used]
+claims:
+  - {metric: score, a: adaptive_v3, b: adaptive_v2, focus: hard, conditions: [base],
+     text: Адаптивный v3 набирает больше v2 на базовых правилах}
+  - {metric: score, a: adaptive_v3, b: adaptive_v2, focus: hard, conditions: [science],
+     text: Адаптивный v3 набирает больше v2 на научных правилах}
+  - {metric: returned, a: adaptive_v3, b: adaptive_v2, focus: hard, better: higher, kind: noninferiority, margin: 0.05,
+     conditions: [base, science], text: Адаптивный v3 возвращается не реже v2}
+  - {metric: score, a: adaptive_v3, b: adaptive_v2, focus: medium, kind: noninferiority, margin: 1.0,
+     conditions: [base, science], text: Адаптивный v3 не теряет очков на среднем уровне}
+  - {metric: score, a: adaptive_v3, b: adaptive_v2, focus: hard, kind: noninferiority, margin: 1.0,
+     conditions: [no_events], text: Адаптивный v3 не хуже v2 без событий среды}
+  - {metric: score, a: adaptive_v3, b: adaptive, focus: hard, conditions: [base, science],
+     text: Адаптивный v3 набирает больше исходного}
+  - {metric: score, a: scientist_v3, b: scientist_v2, focus: hard, conditions: [base, science],
+     text: Исследователь v3 набирает больше v2}
+  - {metric: score, a: scientist_v3, b: scientist, focus: hard, conditions: [base, science],
+     text: Исследователь v3 набирает больше исходного}
