@@ -544,8 +544,9 @@
   const story = D.stories[0];
   (() => {
     const all = Object.values(E).filter(Boolean);
-    F.runs_total = all.reduce((n, e) => n + (e.spec.manual ? 0 : e.runs.length), 0).toLocaleString('ru');
-    F.errors_total = all.reduce((n, e) => n + e.errors, 0);
+    const extra = D.research_runs || { runs: 0, errors: 0 };
+    F.runs_total = (all.reduce((n, e) => n + (e.spec.manual ? 0 : e.runs.length), 0) + extra.runs).toLocaleString('ru');
+    F.errors_total = all.reduce((n, e) => n + e.errors, 0) + extra.errors;
     const walls = E.E1.runs.map(r => r.wall_s).filter(Boolean).sort((a, b) => a - b);
     F.wall = num(walls[walls.length >> 1], 1);
     F.built = D.built;
@@ -896,6 +897,18 @@
         for (const [tr, col, dash] of [[pair.fastsim, C.fixed, null], [pair.gazebo, C.third, null]]) polyline(T, tr.track.x.map((x, i) => [x, tr.track.y[i]]), col, 2.4, dash);
       });
     });
+    // все пары «один сценарий — два симулятора», включая те, что без карты
+    const runs = (E.E7 ? E.E7.runs : []), pairs = {};
+    runs.forEach(r => { const k = r.level + '-' + r.seed; (pairs[k] = pairs[k] || { level: r.level, seed: r.seed })[r.arm] = r; });
+    const list = Object.values(pairs).filter(p => p.gazebo && p.fastsim).sort((a, b) => ['easy', 'medium', 'hard'].indexOf(a.level) - ['easy', 'medium', 'hard'].indexOf(b.level) || a.seed - b.seed);
+    if (list.length > D.gazebo.length) {
+      const mean = (xs) => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
+      const hard = list.filter(p => p.level === 'hard');
+      root.appendChild(el('h4', null, `Все сверочные пары: ${list.length} сценариев`));
+      root.appendChild(el('table', 'plain', '<thead><tr><th>Сценарий</th><th>Собрано: Gazebo / быстрый</th><th>Вернулся: Gazebo / быстрый</th><th>Штрафы</th><th>Столкновения в Gazebo</th><th>Счёт: Gazebo / быстрый</th><th>Разность счёта</th></tr></thead><tbody>' +
+        list.map(p => `<tr><td>${p.level} № ${p.seed}</td><td>${pct(p.gazebo.samples_share)} / ${pct(p.fastsim.samples_share)}</td><td>${p.gazebo.returned ? 'да' : '<b>нет</b>'} / ${p.fastsim.returned ? 'да' : '<b>нет</b>'}</td><td>${num(p.gazebo.penalties, 0)} / ${num(p.fastsim.penalties, 0)}</td><td>${num(p.gazebo.collisions, 0)}</td><td>${num(p.gazebo.score, 1)} / ${num(p.fastsim.score, 1)}</td><td>${(p.gazebo.score - p.fastsim.score >= 0 ? '+' : '−') + num(Math.abs(p.gazebo.score - p.fastsim.score), 1)}</td></tr>`).join('') +
+        (hard.length > 1 ? `<tr><td><b>hard, среднее по ${hard.length}</b></td><td><b>${pct(mean(hard.map(p => p.gazebo.samples_share)))} / ${pct(mean(hard.map(p => p.fastsim.samples_share)))}</b></td><td><b>${pct(mean(hard.map(p => +p.gazebo.returned)))} / ${pct(mean(hard.map(p => +p.fastsim.returned)))}</b></td><td>${num(mean(hard.map(p => p.gazebo.penalties)), 1)} / ${num(mean(hard.map(p => p.fastsim.penalties)), 1)}</td><td>${num(mean(hard.map(p => p.gazebo.collisions)), 1)}</td><td><b>${num(mean(hard.map(p => p.gazebo.score)), 1)} / ${num(mean(hard.map(p => p.fastsim.score)), 1)}</b></td><td>${(() => { const d = mean(hard.map(p => p.gazebo.score - p.fastsim.score)); return (d >= 0 ? '+' : '−') + num(Math.abs(d), 1); })()}</td></tr>` : '') + '</tbody>'));
+    }
   })();
 
   /* ------------------------------------------------------------------- опыты */
@@ -1098,7 +1111,7 @@
     const root = $('research-log'); if (!root) return;
     const R = D.research;
     if (!R || !(R.studies || []).length) { root.innerHTML = '<p class="warn">План исследований пуст.</p>'; return; }
-    const ST = { idea: ['inconclusive', 'в очереди'], assigned: ['partial', 'в работе'], submitted: ['partial', 'сдано, перепроверяется'], returned: ['partial', 'возвращено на доработку'],
+    const ST = { idea: ['inconclusive', 'в очереди'], assigned: ['partial', 'в работе'], submitted: ['partial', 'перепроверяется: ревью кода'], returned: ['partial', 'возвращено на доработку'],
       verified: ['supported', 'перепроверено'], published: ['supported', 'готово'], rejected: ['refuted', 'снято'] };
     const esc = t => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
     const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
@@ -1107,7 +1120,7 @@
     R.studies.forEach(s => {
       const st = ST[s.status] || ST.idea;
       const card = el('div', 'study', `<div class="study-head"><span class="study-id">${esc(s.id)}</span><b>${esc(s.title)}</b><span class="chip ${st[0]}">${st[1]}</span></div>
-        <div class="study-meta">${esc(s.criterion || '')}${s.experiment ? ' · опыт ' + esc(s.experiment) : ''}</div>
+        <div class="study-meta">${esc(s.criterion || '')}${s.experiment ? ' · опыт ' + esc(s.experiment) : ''}${s.owner ? ' · ' + esc(s.owner) : ''}</div>
         ${s.why ? `<p>${esc(s.why)}</p>` : ''}
         ${s.question ? `<div class="exp-meta"><div><span>Вопрос</span>${esc(s.question)}</div>${s.hypothesis ? `<div><span>Гипотеза</span>${esc(s.hypothesis)}</div>` : ''}${s.refute ? `<div><span>Что опровергнет</span>${esc(s.refute)}</div>` : ''}</div>` : ''}
         ${s.conclusion ? `<div class="read"><b>Вывод</b><p style="margin:0">${md(s.conclusion)}</p>${s.limits ? `<p style="margin:8px 0 0;color:var(--ink-2)"><i>Ограничения.</i> ${md(s.limits)}</p>` : ''}</div>` : ''}
