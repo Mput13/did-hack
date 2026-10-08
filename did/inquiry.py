@@ -349,7 +349,7 @@ class Investigator:
         state = {'battery': round(obs.battery, 1), 'return_cost': round(a._home_cost(obs.x, obs.y), 1),
                  'carried': a.collected, 'time_s': round(obs.t, 1),
                  'last_penalty_s_ago': round(obs.t - self._penalty_t, 1) if self._penalty_t > 0 else None}
-        first = q.choose()                   # что выбрал бы расчёт до того, как автор сузил список
+        first = q.peek()                     # что выбрал бы расчёт до того, как автор сузил список
         offered = [x.id for x in q.alternatives]
         d = deliberate(self.roles, q.context(state))
         q.restrict(consider=d.proposal.consider, order=[step.test for step in d.proposal.plan])

@@ -136,6 +136,19 @@ class Inquiry:
         best, p = self.best
         return p >= self.accept and best != OTHER
 
+    def peek(self):
+        """Что выбрал бы choose() сейчас. Генератор случайного выбора, запись шагов и причина остановки не меняются
+        (оценки пользы опытов обновляются, как и при choose): это справка для записи, а не решение."""
+        stop, n = self.stop, len(self.steps)
+        state = self.rng.bit_generator.state if self.rng is not None else None
+        try:
+            return self.choose()
+        finally:
+            self.stop = stop
+            del self.steps[n:]
+            if state is not None:
+                self.rng.bit_generator.state = state
+
     def choose(self):
         """Следующий опыт: наибольшая польза на единицу заряда. None — опыты больше не нужны или невозможны.
 

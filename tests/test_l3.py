@@ -113,3 +113,16 @@ def test_explanation_numbers_are_traced_to_input():
     out = check_numbers(text, EXAMPLE_INQUIRY)
     assert out['missing'] == ['77.7'] and out['derived'] == ['4,2']
     assert {'6,8', '2,6', '0.14', '93'} <= set(out['given'])
+
+
+def test_peek_does_not_touch_random_choice_or_step_log():
+    """Ревью: справочный выбор опыта не меняет генератор случайного выбора и запись шагов."""
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location('r12_helpers', Path(__file__).with_name('test_r12.py'))
+    r12 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(r12)
+    for seed in range(1, 6):
+        a, b = r12._inquiry('random', seed=seed), r12._inquiry('random', seed=seed)
+        assert a.peek() is not None and a.steps == [] and a.stop is None
+        assert a.choose().id == b.choose().id            # после справки случайный выбор тот же, что без неё
