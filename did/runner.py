@@ -15,6 +15,7 @@ from .arena import load_arena
 from .config import SCIENCE, Rules
 from .fastsim import FastSim
 from .metrics import SoilProbe, run_metrics, score_hypotheses, score_inquiries
+from .oracle import ORACLES, make_truth
 from .planner import HeuristicPlanner, LLMPlanner
 from .recorder import Recorder, save_trace
 from .scenario import Scenario, generate
@@ -51,6 +52,9 @@ def make_agent(name, config=None):
     from .baselines import BASELINES
     if name == ORACLE:
         return Agent, replace(make_config('no_change'), name=ORACLE, **(config or {}))
+    if name in ORACLES:                    # мерила A1: часть правды сценария отдельным каналом (did/oracle.py)
+        base, own, _ = ORACLES[name]
+        return Agent, replace(make_config(base), name=name, **{**own, **(config or {})})
     if name in BASELINES:
         cls, cfg = BASELINES[name]
         return cls, replace(cfg, **(config or {}))
@@ -122,6 +126,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
         extra['roles'] = planner.client
     if agent == ORACLE:
         extra['soil_truth'] = _soil_truth(world.judge, arena)
+    if agent in ORACLES:
+        extra['truth'] = make_truth(world.judge, scenario, arena, **ORACLES[agent][2])
     bot = cls(arena, cfg, n_samples=len(scenario.samples), rules=bot_rules, planner=planner, recorder=rec, **extra)
 
     probe = SoilProbe(scenario, rules) if soil_probe else None
