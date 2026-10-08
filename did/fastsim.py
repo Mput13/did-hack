@@ -14,12 +14,22 @@ from .robot_io import Observation
 
 LIDAR_OFFSET = -0.032     # лидар Burger стоит чуть позади центра
 W_ACC_MAX = 8.0           # рад/с²: грубая оценка инерции корпуса
+# Упор в преграду, как в Gazebo (опыт tools/gz_bump_test.py, исследование G2): корпус стоит, колёса
+# проскальзывают, и одометрия засчитывает большую часть пути, которого не было; корпус при этом
+# сползает вбок по столбу, а разворот в упоре проходит мимо корпуса. Если давить дольше нескольких
+# секунд, Burger начинает раскачиваться на задней опоре, и лидар смотрит то в пол, то в потолок.
+BUMP_PATH_SLIP = 0.65     # доля заданного пути, которую одометрия засчитывает в упоре
+BUMP_YAW_RATE = 0.13      # рад/с: с такой скоростью корпус сползает вбок, пока робот давит в преграду
+BUMP_TURN_GRIP = 0.4      # доля заданного разворота, которая достаётся корпусу в упоре и сразу после
+BUMP_SHAKE_S = 2.0        # с: столько после упора колёса ещё плохо держат пол
+BUMP_ROCK_S = 3.0         # с: давил в преграду дольше — раскачался (лидар слепнет до конца прогона)
 
 
 class FastSim:
 
     def __init__(self, arena, scenario, rules=None, seed=0, dt=0.1, lidar_hz=2.5, odom_drift=0.0,
-                 odom_turn_slip=0.0, odom_turn_scale=0.0, odom_path_scale=0.0):
+                 odom_turn_slip=0.0, odom_turn_scale=0.0, odom_path_scale=0.0, bump=False,
+                 kick=0.0, kick_every=20.0):
         self.arena = arena
         self.rules = rules or Rules()
         self.judge = Judge(scenario, arena, self.rules, seed=seed)
@@ -44,7 +54,18 @@ class FastSim:
         self._turn_slip = odom_turn_slip      # доля отставания корпуса, попадающая в одометрию (1 — колёса скользят)
         self._turn_scale = odom_turn_scale    # постоянная ошибка масштаба поворота (0.02 — на 2% больше)
         self._path_scale = odom_path_scale    # постоянная ошибка масштаба пути
-        drifting = odom_drift or odom_turn_slip or odom_turn_scale or odom_path_scale
+        # bump — упор в преграду «физический»: одометрия при нём уезжает (см. BUMP_* выше). Без него
+        # столкновение — только штраф судьи: робот стоит, одометрия тоже.
+        self._bump = bump
+        self._push_s = 0.0                    # сколько секунд подряд робот давит в преграду
+        self._shake_until = -1.0
+        self.rocking = False                  # раскачался: дальше лидар бесполезен
+        # kick — рывок курса, которого одометрия не видит (рад, наибольший): в Gazebo так бывает, когда
+        # колёса на миг теряют пол. Случается в среднем раз в kick_every секунд, пока робот едет.
+        self._kick, self._kick_every = kick, kick_every
+        self._kick_rng = np.random.default_rng([int(seed), 13])      # свой датчик случайных чисел: лидар не сбивается
+        self._next_kick = self._kick_rng.exponential(kick_every) if kick else math.inf
+        drifting = odom_drift or odom_turn_slip or odom_turn_scale or odom_path_scale or bump or kick
         self._odom = [self.x, self.y, self.th] if drifting else None     # None — одометрия точная
         self.judge.step(0.0, self.x, self.y)
         self._sense()
@@ -88,16 +109,40 @@ class FastSim:
         nx = self.x + self.v * math.cos(th_mid) * dt
         ny = self.y + self.v * math.sin(th_mid) * dt
         self._blocked = self.arena.clearance(nx, ny) < ROBOT_RADIUS
+        ds_slip = dth_slip = 0.0              # путь и поворот, которые засчитает одометрия, а корпус не сделает
         if self._blocked:
+            if self._bump:
+                ds_slip = BUMP_PATH_SLIP * v_cmd * dt
+                self.th = _wrap(self.th + BUMP_YAW_RATE * dt * self._slide_side(nx, ny))
+                self._push_s += dt
+                self._shake_until = self.t + BUMP_SHAKE_S
+                self.rocking = self.rocking or self._push_s >= BUMP_ROCK_S
             self.v = 0.0                      # упёрся в преграду: стоит на месте, крутиться может
         else:
             self.x, self.y = nx, ny
+            if self.t > self._shake_until:
+                self._push_s = 0.0
+        if self._bump and (self.t <= self._shake_until or self.rocking):
+            dth_slip = (1.0 - BUMP_TURN_GRIP) * self.w * dt
         if self._odom is not None:
-            self._step_odom(self.v * dt, self.w * dt, w_cmd)
-        self.th = _wrap(self.th + self.w * dt)
+            self._step_odom(self.v * dt + ds_slip, self.w * dt, w_cmd)
+        self.th = _wrap(self.th + self.w * dt - dth_slip)
+        if self.t >= self._next_kick and abs(self.v) > 0.05:
+            self.th = _wrap(self.th + self._kick_rng.uniform(-self._kick, self._kick))
+            self._next_kick = self.t + self._kick_rng.exponential(self._kick_every)
         self.t = round(self.t + dt, 6)
         self.judge.step(self.t, self.x, self.y, blocked=self._blocked, th=self.th)
         self._sense()
+
+    def _slide_side(self, nx, ny):
+        """В какую сторону корпус сползает по преграде: от неё, +1 — влево."""
+        best, side = -1.0, 1.0
+        for sign in (1.0, -1.0):
+            a = self.th + sign * 0.6
+            clear = self.arena.clearance(self.x + 0.12 * math.cos(a), self.y + 0.12 * math.sin(a))
+            if clear > best:
+                best, side = clear, sign
+        return side
 
     def _step_odom(self, ds, dth, w_cmd):
         """Шаг одометрии: тот же путь и поворот, но с ошибками колёс."""
@@ -123,6 +168,8 @@ class FastSim:
             ly = self.y + LIDAR_OFFSET * math.sin(self.th)
             r = self.arena.raycast(lx, ly, self.th)
             r = r + self.rng.normal(0.0, LIDAR_SIGMA, r.shape)
+            if self.rocking:                  # корпус качается: лучи бьют в пол и поверх стен
+                r = np.where(self.rng.random(r.shape) < 0.5, self.rng.uniform(0.15, 1.0, r.shape), np.inf)
             r[(r < LIDAR_MIN) | (r > LIDAR_MAX)] = np.inf
             self._scan = r
             self._next_lidar += self._lidar_period

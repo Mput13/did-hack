@@ -18,7 +18,7 @@ from .foresight import Advisor
 from .inquiry import Investigator
 from .journal import Journal
 from .localize import PoseTracker
-from .nav import CostGraph, Follower
+from .nav import ESCAPE_STOP, FRONT_STOP, CostGraph, Follower, corridor_room, escape_plan, free_ahead
 from .planner import HeuristicPlanner, resolve_subgoals
 from .route import survey_route
 
@@ -47,6 +47,8 @@ class AgentConfig:
     llm_wait_s: float = 0.0           # быстрый симулятор: сколько секунд робот стоит, «ожидая ответ модели»
     async_planner: bool = False       # Gazebo: модель думает в отдельном потоке, робот в это время стоит
     localize: bool = True             # поправлять позу одометрии по лидару и карте (did/localize.py)
+    guard: bool = True                # не давить в преграду и не ехать вслепую: отъезд по лидару, остановка при
+    #                                   проскальзывании колёс и при потере положения (False — как до исследования G2)
     science: bool = False             # вести расследования: несколько объяснений странности и опыт (did/inquiry.py)
     foresight: bool = False           # выбирать цель и момент возврата сравнением вариантов плана (did/foresight.py)
     risk_limit: float = 0.05          # допустимая при таком сравнении вероятность не вернуться на базу
@@ -90,6 +92,10 @@ def make_config(name, **overrides):
 
 class Agent:
 
+    SLIP_STOP = 0.04      # м: на столько поправка сдвинула позу против хода за секунду — робот упёрся
+    ALERT_S, ALERT_V = 10.0, 0.12      # осторожная езда после столкновения или сомнения в позе: сколько секунд и м/с
+    LOST_WAIT_S = 5.0     # с: столько робот стоит, потеряв положение, прежде чем переползти на новое место
+
     def __init__(self, arena, config, n_samples, rules=None, planner=None, recorder=None, knowledge=None,
                  roles=None):
         self.arena = arena
@@ -104,7 +110,7 @@ class Agent:
         self.graph = CostGraph(arena)                       # дорога к целям: оценка как есть
         self.home_graph = CostGraph(arena)                  # дорога домой: предпочитает проверенный пол
         self.follower = Follower()
-        self.tracker = PoseTracker(arena, enabled=config.localize)   # одометрия → поза на карте
+        self.tracker = PoseTracker(arena, enabled=config.localize, verify=config.guard)   # одометрия → поза на карте
         self.belief = SampleBelief(arena, n_samples, self.rules.sensor_range_m)
         self.soil = SoilModel(arena, self.rules.drain_per_m, self.rules.drain_idle_per_s)
         self.change = ChangeDetector()
@@ -148,6 +154,12 @@ class Agent:
         self._path_t = -1e9
         self._escape = None
         self._stuck = None                                  # (t, x, y, время с командой «вперёд»)
+        self._scan = None                                   # последний скан лидара: (дальности, шаг лучей, курс робота)
+        self._blocked_t = None                              # с какого времени преграда вплотную по курсу
+        self._alert_until = -1e9                            # до этого времени робот едет осторожно (см. _alert)
+        self._lost_t = None                                 # с какого времени положение потеряно
+        self._slip_pause = -1e9                             # до этого времени проскальзывание не проверяется
+        self._relocations = 0
         self._cands_t = -1e9
         self._cands = []
         self._slow_t = -1e9
@@ -167,6 +179,11 @@ class Agent:
         if self.cfg.localize:              # дальше весь агент работает с позой на карте, а не с одометрией
             x, y, th = self.tracker.update(obs.x, obs.y, obs.th, obs.scan, obs.scan_pose, obs.scan_step)
             obs = replace(obs, x=x, y=y, th=th)
+            if self.tracker.stats['relocations'] != self._relocations:
+                # Поза найдена заново и сдвинулась скачком: отрезок «пути» между старой и новой — не езда.
+                self._relocations = self.tracker.stats['relocations']
+                self._anchor = self._path_goal = self._stuck = None
+                self._trail.clear()
         if obs.done or self.finished:
             io.command(0.0, 0.0)
             self._record(obs)
@@ -189,6 +206,7 @@ class Agent:
     def _perceive(self, obs):
         if obs.scan is not None:
             self._front = float(min(obs.scan[:20].min(), obs.scan[-20:].min()))
+            self._scan = (obs.scan, obs.scan_step, obs.th)
         for ev in obs.events:
             self._on_event(ev, obs)
 
@@ -233,7 +251,35 @@ class Agent:
             self.journal.add(obs.t, 'action', f'Судья сообщил о сборе образца: всего {self.collected} из {self.n_samples}')
         elif kind == 'collision':
             self.journal.add(obs.t, 'alarm', f'Штраф: столкновение в ({obs.x:.2f}; {obs.y:.2f})', tag='collision')
-            self._escape = {'until': obs.t + 1.5, 'v': 0.10 if self._last_cmd[0] < 0 else -0.10}
+            self._alert(obs.t)
+            self._start_escape(obs, back=self._last_cmd[0] >= 0)
+
+    def _alert(self, t):
+        """Только что было столкновение или сомнение в позе: ALERT_S секунд робот едет медленнее и не
+        подходит к преградам вплотную по лидару. В спокойной езде этой осторожности нет — она не меняет
+        прогонов, в которых ничего не случилось."""
+        if self.cfg.guard:
+            self._alert_until = t + self.ALERT_S
+
+    def _room(self, obs, back=False):
+        """Свободный путь по последнему скану вперёд или назад — с учётом того, что робот с тех пор повернулся."""
+        scan, step, th = self._scan
+        return corridor_room(scan, step, back=back, heading=math.remainder(obs.th - th, 2 * math.pi))
+
+    def _start_escape(self, obs, back=True):
+        """Отъезд от преграды на полторы секунды: назад или вперёд, но только туда, где лидар видит место.
+
+        Вслепую робот в Gazebo въезжал задом в столб, у которого только что получил штраф, начинал
+        раскачиваться, и одометрия с лидаром переставали сходиться. Если тесно и спереди, и сзади,
+        робот сначала разворачивается на месте туда, где свободнее.
+        """
+        if not (self.cfg.guard and self._scan):
+            self._escape = {'until': obs.t + 1.5, 'v': -0.10 if back else 0.10}
+            return
+        v, turn = escape_plan(self._scan[0], self._scan[1], back)
+        self._escape = {'until': obs.t + 1.5, 'v': v}
+        if turn:
+            self._escape.update(until=obs.t + 6.0, turn=self._scan[2] + turn)
 
     def _sync_hazards(self, t, new=False):
         """Пересчитать карту риска и сводку по зонам после нового штрафа или уточнения."""
@@ -569,10 +615,20 @@ class Agent:
         if self._future is not None or obs.t < self._wait_until:
             self.mode = 'think'
             return self._command(io, 0.0, 0.0)
+        if self.cfg.guard and self.cfg.localize and self._guard(obs, io):
+            return
         if self._escape:
             if obs.t < self._escape['until']:
                 self.mode = 'escape'
-                return self._command(io, self._escape['v'], 0.0)
+                v = self._escape['v']
+                if 'turn' in self._escape:             # сначала развернуться туда, где свободно
+                    err = math.remainder(self._escape['turn'] - obs.th, 2 * math.pi)
+                    if abs(err) > 0.2:
+                        return self._command(io, 0.0, max(-1.0, min(1.0, 2.4 * err)))
+                    self._escape = {'until': obs.t + 1.5, 'v': v}
+                if self.cfg.guard and v and self._scan and self._room(obs, back=v < 0) < ESCAPE_STOP:
+                    v = self._escape['v'] = 0.0        # преграда уже близко и с этой стороны: дальше стоим
+                return self._command(io, v, 0.0)
             self._escape = None
             self._path_goal = None
             self._stuck = None
@@ -591,6 +647,56 @@ class Agent:
             self._do_return(obs, io)
         else:
             self._do_goto(sg, obs, io)
+
+    def _guard(self, obs, io):
+        """Положение потеряно — стоять; колёса крутятся, а робот не едет — отъехать. True — такт занят.
+
+        Оба признака даёт поправка позы по лидару (did/localize.py). Ехать по позе, которой нельзя
+        верить, хуже, чем стоять: робот упирается в столб и раскачивается, после чего теряется совсем.
+        """
+        st = self.tracker.stats
+        if st['unsure'] or st['lost']:
+            self._alert(obs.t)
+        if st['lost']:
+            if self._lost_t is None:
+                self._lost_t = obs.t
+                self.journal.add(obs.t, 'alarm', f'Положение потеряно около ({obs.x:.2f}; {obs.y:.2f}): лидар не '
+                                 'сходится с картой. Стою и ищу себя заново', tag='lost')
+            self.mode = 'lost'
+            self._escape = self._stuck = None
+            # С одного места карта может не узнаваться (симметрия, мало видно). Раз в несколько секунд
+            # робот понемногу переползает туда, где лидар видит свободное место, и смотрит снова.
+            since = (obs.t - self._lost_t) % (self.LOST_WAIT_S + 1.5)
+            v = 0.0
+            if obs.t - self._lost_t >= self.LOST_WAIT_S and since < 1.5 and self._scan:
+                for back in (False, True):
+                    if self._room(obs, back=back) >= 0.45:
+                        v = -0.08 if back else 0.08
+                        break
+            self._command(io, v, 0.0)
+            return True
+        if self._lost_t is not None:
+            self.journal.add(obs.t, 'action', f'Положение найдено заново через {obs.t - self._lost_t:.0f} с: '
+                             f'({obs.x:.2f}; {obs.y:.2f}). Строю путь заново', tag='relocated')
+            self._lost_t = None
+            self._path_goal = None
+            self._slip_pause = obs.t + 3.0
+        if st['unsure']:
+            # Два скана подряд не сошлись с картой: пережидаем стоя — либо сойдётся, либо это потеря.
+            self._command(io, 0.0, 0.0)
+            return True
+        v = self._last_cmd[0]
+        if abs(v) >= 0.03 and not self._escape and obs.t >= self._slip_pause and st['slip'] >= self.SLIP_STOP:
+            # Поправка тянет позу назад, против хода: по одометрии робот едет, а по лидару стоит.
+            sx, sy = st['slip_vec']
+            way = 1.0 if v > 0 else -1.0
+            if (sx * math.cos(obs.th) + sy * math.sin(obs.th)) * way <= -self.SLIP_STOP:
+                self.journal.add(obs.t, 'alarm', f'Колёса проскальзывают в ({obs.x:.2f}; {obs.y:.2f}): робот упёрся. '
+                                 'Останавливаюсь и отъезжаю', tag='slip')
+                self._slip_pause = obs.t + 2.0     # пока поправка догоняет одометрию, признак ещё держится
+                self._alert(obs.t)
+                self._start_escape(obs, back=v > 0)
+        return False
 
     def _do_investigate(self, sg, obs, io):
         t = obs.t
@@ -721,6 +827,23 @@ class Agent:
             return True
         if v > 0.0 and self._front < 0.15:
             v = 0.0                                   # лидар видит преграду вплотную по курсу
+        if t < self._alert_until:
+            v = min(v, self.ALERT_V)
+        if v > 0.0 and t < self._alert_until and self._scan and free_ahead(
+                self._scan[0], self._scan[1], math.remainder(obs.th - self._scan[2], 2 * math.pi)) < FRONT_STOP:
+            # Преграда прямо перед корпусом: в неё не давим (в Gazebo от этого робот раскачивается). Курс
+            # ещё можно довернуть; если за секунду не помогло — отъезжаем, как после столкновения.
+            v = 0.0
+            self._blocked_t = t if self._blocked_t is None else self._blocked_t
+            if t - self._blocked_t >= 1.0:
+                self._blocked_t = None
+                self.journal.add(t, 'alarm', f'Преграда вплотную по курсу в ({obs.x:.2f}; {obs.y:.2f}): отъезжаю',
+                                 tag='blocked')
+                self._start_escape(obs, back=True)
+                self._command(io, 0.0, 0.0)
+                return False
+        else:
+            self._blocked_t = None
         self._watch_stuck(obs, v)
         self._command(io, v, w)
         return False
@@ -735,7 +858,8 @@ class Agent:
         if obs.t - s[0] >= 4.0:
             if s[3] >= 3.0 and math.hypot(obs.x - s[1], obs.y - s[2]) < 0.03:
                 self.journal.add(obs.t, 'alarm', f'Робот не движется в ({obs.x:.2f}; {obs.y:.2f}): отъезжаю назад')
-                self._escape = {'until': obs.t + 1.5, 'v': -0.10}
+                self._alert(obs.t)
+                self._start_escape(obs, back=True)
             self._stuck = None
 
     def _command(self, io, v, w):
