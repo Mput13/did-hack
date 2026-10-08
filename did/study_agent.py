@@ -113,6 +113,7 @@ class StudyAgent(LawMixin, Agent):
         self._bucket = ['travel', None]
         self._win = None
         self._floor_held = []           # закрытые отрезки дороги, которые ждут решения о потере заряда при штрафе
+        self._wrapped = False           # конец прогона уже досчитан
         # Разовая потеря заряда при штрафе — не цена пола (did/penalty.py): показание батареи и событие штрафа
         # приходят врозь, в стенде батарея — раньше события.
         self._hits = PenaltyLedger(r.hazard_battery_hit, lambda ds, dth, dt, t: self.model.predict(
@@ -232,9 +233,16 @@ class StudyAgent(LawMixin, Agent):
 
     def _wrap_up(self, obs):
         super()._wrap_up(obs)
-        if self._hits.pending or self._floor_held:
-            self._hits.flush(obs.t)
-            self._floor_release()
+        if self._wrapped:
+            return
+        self._wrapped = True
+        # Последнее наблюдение обычным путём не разбиралось: его события штрафа и показание — сначала в учёт.
+        for ev in obs.events:
+            if ev.get('type') == 'hazard_hit':
+                self._hits.event(obs.t)
+        self._hits.reading(obs, None, dth=abs(_wrap(obs.th - self._th_prev)) if self._th_prev is not None else 0.0)
+        self._hits.flush(obs.t)
+        self._floor_release()
 
     def _per_m(self):
         """Заряд на метр дороги: модель плюс то, что на деле уходит на повороты и простой."""
