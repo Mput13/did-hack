@@ -253,7 +253,7 @@ def _separate_events(timeline, t0, t1):
 
 def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, events=None,
              event_window=(20.0, 70.0), fault_kinds=None, hazard_on_soil=False, soil_mults=None,
-             n_soil_changes=1, n_new_hazards=1, soil_change_mode='random'):
+             n_soil_changes=1, n_new_hazards=1, soil_change_mode='random', fault_duration=(25.0, 40.0)):
     """Сценарий уровня easy/medium/hard. Параметры n_* и events переопределяют таблицу уровней.
 
     event_window — в какие секунды прогона случаются события hard: окно подобрано под длительность
@@ -267,6 +267,9 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
     Три параметра строят «ловушки» для проверки расследований: fault_kinds — из каких сбоев выбирать
     (запись вида 'leak+sensor_bias' даёт два сбоя разом), hazard_on_soil — ставить опасные зоны на
     дорогой грунт, soil_mults — заменить множители грунта (например, едва заметные [1.5]).
+
+    fault_duration — в каких пределах (секунды) длится сбой датчика из расписания; остальная расстановка
+    от этого не меняется.
     """
     if soil_change_mode not in ('random', 'route'):
         raise ValueError(f'soil_change_mode: {soil_change_mode!r}, ожидается random или route')
@@ -361,7 +364,7 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
 
     if 'sensor_fault' in events:
         timeline.append({'t': round(float(rng.uniform(t0 + 0.4 * span, t1)), 1), 'type': 'sensor_fault',
-                         'duration': round(float(rng.uniform(25, 40)), 1), 'sigma': 0.25})
+                         'duration': round(float(rng.uniform(*fault_duration)), 1), 'sigma': 0.25})
     if rng_extra is not None:
         # Несколько смен или зон: интервалы событий независимы и после округления времена могли совпасть.
         # Сценарии по умолчанию не трогаются — на них посчитаны прежние серии (tests/test_generator_stable.py).
