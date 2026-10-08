@@ -57,6 +57,7 @@ class PoseTracker:
     AGREE_TOL = 0.12              # м: измеренная и обещанная картой дальность луча «сходятся»
     MIN_AGREE = 0.80              # доля сошедшихся лучей, с которой совпадению можно верить
     RELOC_XY, RELOC_STEP = 0.60, 0.10     # м: где и с каким шагом ищется потерянное положение
+    RELOC_WIDE, RELOC_WIDE_SCANS = 1.50, 10   # м: если за столько сканов рядом не нашлось — искать шире
     RELOC_TH = 0.10               # рад: шаг перебора курса при таком поиске
     RELOC_AGREE = 0.85            # доля сошедшихся лучей у найденной заново позы
     RELOC_LEAD = 0.08             # настолько она должна быть лучше любого другого кандидата
@@ -147,6 +148,10 @@ class PoseTracker:
         if self.verify and not good and not quality[3] and self._good((*quality[:3], True)) \
                 and self._trust(pose, scan, step):
             # Скан лёг на карту, но сдвиг вдоль стены не определяет: это не потеря, просто нечего поправить.
+            # Совпадение подтверждено, поэтому счётчик плохих сканов сбрасывается, как после обычной поправки:
+            # иначе два плохих скана перед такой полосой оставляли «не уверен» навсегда.
+            self._lost = 0
+            self._pending = None
             st['inliers'], st['residual'] = quality[0], quality[1]
             st['skipped'] += 1
             return
@@ -228,10 +233,14 @@ class PoseTracker:
         Принимается только кандидат, который прошёл проверку в обе стороны, заметно лучше остальных
         (симметричных двойников в окрестности нет) и подтвердился на следующем скане.
         """
+        # Пока робот ехал по неверному курсу, одометрия могла увести позу дальше RELOC_XY: не нашлось рядом
+        # за RELOC_WIDE_SCANS сканов — круг поиска шире. Двойник (арена симметрична) в широком круге
+        # попадается чаще, и тогда кандидат не принимается: правило «единственный и подтверждённый» то же.
+        reach = self.RELOC_WIDE if self._lost >= self.LOST_SCANS + self.RELOC_WIDE_SCANS else self.RELOC_XY
         scored = []
-        for start in self._search(guess, qx, qy):
+        for start in self._search(guess, qx, qy, reach):
             pose, quality = self._fit(start, qx, qy, iters=8)
-            if self._good(quality) and math.hypot(pose[0] - guess[0], pose[1] - guess[1]) <= self.RELOC_XY + 0.1:
+            if self._good(quality) and math.hypot(pose[0] - guess[0], pose[1] - guess[1]) <= reach + 0.1:
                 scored.append((self._agree(pose, scan, step), pose, quality))
         scored.sort(key=lambda s: -s[0])
         found = None
@@ -249,12 +258,12 @@ class PoseTracker:
         self.stats['fixes'] += 1
         self.stats['relocations'] += 1
 
-    def _search(self, guess, qx, qy, keep=6):
+    def _search(self, guess, qx, qy, reach, keep=6):
         """Грубый перебор места и курса вокруг предсказанной позы: лучшие непохожие друг на друга кандидаты."""
         gx, gy, gth = guess
-        span = np.arange(-self.RELOC_XY, self.RELOC_XY + 1e-9, self.RELOC_STEP)
+        span = np.arange(-reach, reach + 1e-9, self.RELOC_STEP)
         X, Y = (a.ravel() for a in np.meshgrid(gx + span, gy + span))
-        near = np.hypot(X - gx, Y - gy) <= self.RELOC_XY + 1e-9
+        near = np.hypot(X - gx, Y - gy) <= reach + 1e-9
         dist, _, _ = self._field(X, Y)
         near &= dist > 0.08                  # центр робота не может быть в стене
         X, Y = X[near], Y[near]

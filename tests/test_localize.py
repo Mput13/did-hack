@@ -336,3 +336,26 @@ def test_degenerate_geometry_is_not_a_loss(arena, monkeypatch):
         assert tracker.update(pose[0] + 0.03, pose[1], pose[2], _scan(arena, *pose)) == pytest.approx((pose[0] + 0.03, *pose[1:]))
     assert tracker.stats['skipped'] == 8 and tracker.stats['fixes'] == 0
     assert not tracker.stats['unsure'] and not tracker.lost
+
+
+def test_good_degenerate_scans_clear_the_doubt(arena, monkeypatch):
+    """Ревью G2: два плохих скана, а дальше сканы сходятся с картой, но сдвиг не определяют. Сомнение
+    («не уверен») должно сняться: раньше счётчик плохих сканов оставался на двух навсегда и робот стоял."""
+    tracker = PoseTracker(arena)
+    tracker._calib = None
+    pose = (-1.6, 0.5, 0.4)
+    tracker.update(*pose, _scan(arena, *pose))
+    for _ in range(2):
+        tracker.update(*pose, np.full(360, np.inf))
+    assert tracker.stats['unsure'] and not tracker.lost
+    fit = tracker._fit
+
+    def loose(*args, **kw):
+        found, quality = fit(*args, **kw)
+        return found, (*quality[:3], False)
+
+    monkeypatch.setattr(tracker, '_fit', loose)
+    for _ in range(100):
+        tracker.update(*pose, _scan(arena, *pose))
+    assert tracker._agree(pose, _scan(arena, *pose), None) == 1.0
+    assert tracker._lost == 0 and not tracker.stats['unsure'] and not tracker.lost

@@ -29,7 +29,7 @@ class FastSim:
 
     def __init__(self, arena, scenario, rules=None, seed=0, dt=0.1, lidar_hz=2.5, odom_drift=0.0,
                  odom_turn_slip=0.0, odom_turn_scale=0.0, odom_path_scale=0.0, bump=False,
-                 kick=0.0, kick_every=20.0):
+                 kick=0.0, kick_every=20.0, lidar_fault=0.0, lidar_fault_s=3.0):
         self.arena = arena
         self.rules = rules or Rules()
         self.judge = Judge(scenario, arena, self.rules, seed=seed)
@@ -65,6 +65,12 @@ class FastSim:
         self._kick, self._kick_every = kick, kick_every
         self._kick_rng = np.random.default_rng([int(seed), 13])      # свой датчик случайных чисел: лидар не сбивается
         self._next_kick = self._kick_rng.exponential(kick_every) if kick else math.inf
+        # lidar_fault — сбой лидара в среднем раз в столько секунд, длиной до lidar_fault_s: сканов нет вовсе,
+        # либо все лучи без отражения, либо мусор (как у качнувшегося робота). По умолчанию выключено.
+        self._fault_every, self._fault_s = lidar_fault, lidar_fault_s
+        self._fault_rng = np.random.default_rng([int(seed), 17])
+        self._next_fault = self._fault_rng.exponential(lidar_fault) if lidar_fault else math.inf
+        self._fault = (-1.0, None)            # (до какого времени, какой сбой)
         drifting = odom_drift or odom_turn_slip or odom_turn_scale or odom_path_scale or bump or kick
         self._odom = [self.x, self.y, self.th] if drifting else None     # None — одометрия точная
         self.judge.step(0.0, self.x, self.y)
@@ -171,8 +177,22 @@ class FastSim:
             if self.rocking:                  # корпус качается: лучи бьют в пол и поверх стен
                 r = np.where(self.rng.random(r.shape) < 0.5, self.rng.uniform(0.15, 1.0, r.shape), np.inf)
             r[(r < LIDAR_MIN) | (r > LIDAR_MAX)] = np.inf
-            self._scan = r
+            self._scan = self._faulty(r)
             self._next_lidar += self._lidar_period
+
+    def _faulty(self, r):
+        """Скан с учётом сбоя лидара (lidar_fault): как есть, пусто, мусор или None — скана нет."""
+        if self.t >= self._next_fault:
+            rng = self._fault_rng
+            self._fault = (self.t + rng.uniform(0.5, 1.0) * self._fault_s, ('none', 'blank', 'junk')[rng.integers(3)])
+            self._next_fault = self._fault[0] + rng.exponential(self._fault_every)
+        if self.t >= self._fault[0]:
+            return r
+        if self._fault[1] == 'none':
+            return None
+        if self._fault[1] == 'blank':
+            return np.full(r.shape, np.inf)
+        return np.where(self._fault_rng.random(r.shape) < 0.5, self._fault_rng.uniform(0.15, 1.0, r.shape), np.inf)
 
 
 def _wrap(a):

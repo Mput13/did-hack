@@ -45,7 +45,7 @@ from .fastsim import FastSim
 from .judge import Judge
 from .mapping import LIDAR_OFFSET, OccupancyMapper
 from .metrics import run_metrics
-from .nav import INFLATE, CostGraph, Follower, escape_plan, path_length
+from .nav import ESCAPE_STOP, INFLATE, CostGraph, Follower, corridor_room, escape_plan, moved_since, path_length
 from .recorder import Recorder, encode_grid, save_trace
 from .runner import RUNS, make_planner
 from .scenario import generate
@@ -298,7 +298,8 @@ class Pilot:
         """Отъезд после столкновения — только туда, где лидар видит свободное место (как у агента)."""
         if not self._scan:
             return -0.10 if back else 0.10
-        v, turn = escape_plan(self._scan[3], self._scan[4], back)
+        # Скан снят из позы self._scan[:3], робот с тех пор мог повернуться: стороны считаются от нынешнего курса.
+        v, turn = escape_plan(self._scan[3], self._scan[4], back, moved=moved_since(self._scan[:3], self.pose))
         return 0.0 if turn else v                # оператор рядом: разворот на месте оставляем ему
 
     def _log(self, t, kind, text, **data):
@@ -321,7 +322,11 @@ class Pilot:
     def _drive(self, obs, x, y, th):
         if self._escape:
             if obs.t < self._escape['until']:
-                return self._command(self._escape['v'], 0.0)
+                v = self._escape['v']
+                if v and self._scan and corridor_room(self._scan[3], self._scan[4], back=v < 0, moved=moved_since(
+                        self._scan[:3], (x, y, th))) < ESCAPE_STOP:
+                    v = self._escape['v'] = 0.0         # преграда уже близко и с этой стороны: дальше стоим
+                return self._command(v, 0.0)
             self._escape = self._stuck = None
             self.follower.set_path([])
         while True:

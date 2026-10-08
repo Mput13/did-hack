@@ -30,6 +30,7 @@ conditions:
   - {id: bump, label: Упор физический, sim: {bump: true, odom_turn_slip: 0.2, odom_turn_scale: 0.01, odom_path_scale: 0.01}}
   - {id: kick60, label: И рывки курса до 60°, sim: {bump: true, kick: 1.0, kick_every: 15.0, odom_turn_slip: 0.2, odom_turn_scale: 0.01, odom_path_scale: 0.01}}
   - {id: kick140, label: И рывки курса до 140°, sim: {bump: true, kick: 2.5, kick_every: 15.0, odom_turn_slip: 0.2, odom_turn_scale: 0.01, odom_path_scale: 0.01}}
+  - {id: kick140_fault, label: Рывки до 140° и сбои лидара, sim: {bump: true, kick: 2.5, kick_every: 15.0, lidar_fault: 20.0, lidar_fault_s: 4.0, odom_turn_slip: 0.2, odom_turn_scale: 0.01, odom_path_scale: 0.01}}
 metrics: [score, samples_share, returned, collisions, penalties, time]
 claims:
   - {metric: score, a: guard, b: blind, text: Осторожный агент набирает больше очков (без рывков разницы нет)}
