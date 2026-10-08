@@ -29,6 +29,8 @@
              risk, battery_p5, battery_p50, battery_p95, cost, hits, unknown_m, ok, worth, chosen}]}]; ok — риск
              не выше порога, worth — ожидаемые образцы окупают прибавку риска; поля нет в записях агентов без
              такого сравнения
+  truth      {dt, x, y}: истинная поза центра робота на каждом шаге быстрого симулятора (точка i — время
+             i·dt), в отличие от track — оценки самого агента; поле есть только при run_episode(truth=True)
 """
 import base64
 import gzip
@@ -63,6 +65,7 @@ class Recorder:
         self._last_soil = None
         self.pose_fix, self._next_fix = [], 0.0
         self.foresight = []
+        self.truth = None
 
     # --- во время прогона --------------------------------------------------------------------
 
@@ -135,6 +138,13 @@ class Recorder:
     def add_llm(self, t, exchange):
         self.llm.append({'t': round(t, 1), **exchange})
 
+    def add_truth(self, dt, x, y):
+        """Истинная поза после очередного шага симулятора; первый вызов — поза на старте."""
+        if self.truth is None:
+            self.truth = {'dt': dt, 'x': [], 'y': []}
+        self.truth['x'].append(round(float(x), 4))
+        self.truth['y'].append(round(float(y), 4))
+
     def add_foresight(self, decision):
         self.foresight.append(decision)
 
@@ -151,6 +161,7 @@ class Recorder:
             'hazards': self.hazards, 'scans': self.scans, 'llm': self.llm,
             **({'pose_fix': self.pose_fix} if self.pose_fix else {}),
             **({'foresight': self.foresight} if self.foresight else {}),
+            **({'truth': self.truth} if self.truth else {}),
         }
 
 
