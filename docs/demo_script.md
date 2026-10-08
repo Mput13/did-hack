@@ -46,7 +46,7 @@
    обновили).
    Перед выходом нажать «Сбросить прогон»: карта и след сотрутся, судья начнёт прогон заново.
 5. За полчаса до выхода — репетиция без человека (4 минуты):
-   `pixi run python tools/demo_check.py --agent scientist_v2 --tour short --no-goal --expect hard 2`.
+   `pixi run python tools/demo_check.py --agent scientist_v2 --tour short --no-goal --expect hard 2 --min-samples 7 --clean`.
 
 ## Шаги показа (4 минуты)
 
@@ -229,10 +229,13 @@ Gazebo: измерено в быстром симуляторе, в Gazebo — �
 Gazebo. Ключевые кадры — в `demo/shots/`.
 
 **Репетиция без человека.** При запущенном показе команда
-`pixi run python tools/demo_check.py --agent scientist_v2 --tour short --no-goal --expect hard 2` сама проходит
+`pixi run python tools/demo_check.py --agent scientist_v2 --tour short --no-goal --expect hard 2 --min-samples 7 --clean` сама проходит
 сценарий показа (объезд по четырём точкам, миссия) и печатает, что получилось на каждом шаге: счёт, собрано, возврат,
 штрафы, наибольший простой, реакцию на три изменения среды и долю опоздавших тактов (больше 3 % — компьютер был
-перегружен, репетиция не засчитывается). Без ключей — прежний полный сценарий: шесть точек, цель, домой, миссия.
+перегружен, репетиция не засчитывается). «Репетиция прошла» значит: объезд пройден по всем точкам, миссия шла на
+новом прогоне судьи (сброс подтверждён), робот вернулся без столкновений, запись прогона найдена; `--min-samples 7`
+требует все семь образцов сценария 2, `--clean` — ни одного заезда в опасную зону и ни одного ложного сбора
+(есть ещё `--min-score X`). Без ключей — прежний полный сценарий: шесть точек, цель, домой, миссия.
 Ключ `--save runs/F1demo` сохраняет запись миссии. Разбор любой записи по секундам:
 `pixi run python tools/demo_pick.py --story runs/F1demo/scientist_v2-hard-2-h2-r1.json.gz`.
 
@@ -248,7 +251,7 @@ pixi run demo --slam                   # обычный показ, рядом �
 pixi run demo --slam-map               # бонусный трек: без готовой карты, робот едет по карте SLAM Toolbox
 pixi run demo --slam-map --slam-start settle   # то же, но SLAM Toolbox стартует после оседания робота (опыт F1: не помогло)
 pixi run python tools/slam_check.py    # сверка карты SLAM с готовой картой и со столбами мира
-pixi run python tools/demo_check.py --agent scientist_v2 --tour short --no-goal --expect hard 2   # репетиция показа
+pixi run python tools/demo_check.py --agent scientist_v2 --tour short --no-goal --expect hard 2 --min-samples 7 --clean   # репетиция показа
 pixi run python -m did.team_runner --level hard --seed 5 --mode team --exp M1demo   # запись прогона двух роботов
 pixi run python tools/gz_record.py --out demo/gazebo.mp4 --view iso   # записать окно Gazebo
 ```

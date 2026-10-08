@@ -175,6 +175,7 @@ export async function render(root, ctx) {
     if (akey && akey !== agentsKey) {
       agentsKey = akey; fill(agentSel, s.agents.map((a) => h('option', { value: a.id }, a.label)));
       if (s.agents.some((a) => a.id === ctx.query.agent)) agentSel.value = ctx.query.agent;      // показ: агент из адреса страницы
+      else if (ctx.query.agent) notice = { text: `В адресе страницы указан агент «${ctx.query.agent}», такого нет. Выбран «${agentSel.selectedOptions[0]?.textContent}» — проверьте список «Агент». Допустимые: ${s.agents.map((a) => a.id).join(', ')}`, bad: true };
     }
     agentRow.hidden = task !== 'mission' || !akey;
     agentSel.disabled = mutation || moving;
