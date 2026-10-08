@@ -157,18 +157,21 @@ def paired_binary(a, b):
 def exchange_stats(exchanges):
     """Сводка по обменам с моделью: запросы, годные сразу и после исправления, отказы, время ответа.
 
-    Время — только по ответам, пришедшим по сети в исходном прогоне (у ответа из кэша хранится время того вызова).
-    Ответы быстрее 1,5 с при сотнях токенов — кэш самого сервера; в медиану они не идут.
+    Время — по ответам, пришедшим за одну попытку: от 1,5 с (быстрее отвечает только кэш самого сервера) до срока
+    ответа 90 с. Ответ с временем больше срока — это таймаут и повтор транспорта; такие считаются отдельно
+    (retried), а в медиану не идут. no_answer — запросы, на которые сервер не ответил вовсе (не ошибка модели).
     """
-    from did.llm import llm_stats
+    from did.llm import error_kind, llm_stats
     st = llm_stats(exchanges)
     n = max(1, st['requests'])
-    ms = sorted(int(ex.get('latency_ms') or 0) for ex in exchanges
-                if ex.get('response') and int(ex.get('latency_ms') or 0) >= 1500)
+    got = [int(ex.get('latency_ms') or 0) for ex in exchanges if ex.get('response')]
+    ms = sorted(x for x in got if 1500 <= x <= 90000)
+    lost = sum(1 for ex in exchanges if ex.get('response') is None
+               and any(error_kind(str(e)) == 'нет ответа модели' for e in ex.get('errors') or []))
     return {'requests': st['requests'], 'exchanges': st['exchanges'], 'first_ok': st['first_ok'],
-            'repaired': st['repaired'], 'failed': st['failed'],
+            'repaired': st['repaired'], 'failed': st['failed'], 'no_answer': lost,
             'first_ok_share': round(st['first_ok'] / n, 3), 'failed_share': round(st['failed'] / n, 3),
-            'errors': st['errors'], 'tokens': st['tokens'],
+            'errors': st['errors'], 'tokens': st['tokens'], 'retried': sum(x > 90000 for x in got),
             'latency_s': {'median': round(ms[len(ms) // 2] / 1000, 1) if ms else None,
                           'mean': round(sum(ms) / len(ms) / 1000, 1) if ms else None,
                           'max': round(ms[-1] / 1000, 1) if ms else None, 'n': len(ms)}}
