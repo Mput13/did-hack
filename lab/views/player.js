@@ -43,6 +43,7 @@ export async function mountPlayer(host, opts) {
       const controller = await mod.mountReplay(box, {
         trace: opts.trace, arena: opts.arena, compact: !!opts.compact, follow: !!opts.follow,
         startAt: typeof opts.startAt === 'number' ? opts.startAt : undefined,
+        viewSwitch: opts.viewSwitch, layers: opts.layers,
       });
       return { ok: true, controller: controller || {} };
     } catch (e) {
@@ -66,7 +67,7 @@ export async function mountPair(host, opts) {
     const box = h('div', { class: 'lb-player' });
     host.replaceChildren(box);
     try {
-      const controller = await mod.mountCompare(box, { traces: opts.traces, labels: opts.labels, arena: opts.arena });
+      const controller = await mod.mountCompare(box, { traces: opts.traces, labels: opts.labels, arena: opts.arena, layers: opts.layers });
       return { ok: true, controller: controller || {} };
     } catch (e) {
       console.error('Проигрыватель упал при запуске:', e);

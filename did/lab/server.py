@@ -45,6 +45,7 @@ from ..runner import RUNS, run_episode
 from ..scenario import generate
 from ..pilot import HUB as PILOT
 from .. import study as STUDY             # конструктор исследования: /api/study, /api/study/plan, /api/study/presets
+from .demonstration import comparison_catalog
 
 STATIC = ROOT / 'lab'
 LIVE = RUNS / '_live' / 'state.json'
@@ -178,6 +179,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, load_arena().to_dict())
             if path == '/api/options':
                 return self._send(200, options())
+            if path == '/api/demo/comparisons':
+                return self._send(200, comparison_catalog())
             if path.startswith('/api/experiment/'):
                 exp_id = path.split('/')[3]
                 if exp_id not in list_specs():
