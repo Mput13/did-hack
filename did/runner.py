@@ -90,7 +90,7 @@ def _soil_truth(judge, arena):
 
 def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, scenario=None,
                 scenario_args=None, config=None, rules=None, agent_rules=None, llm=None, sim=None, save=True, quiet=True,
-                knowledge=None, study=None, truth=False, soil_probe=False, roles=None):
+                knowledge=None, study=None, truth=False, soil_probe=False, roles=None, lab=None):
     """Прогон целиком. Возвращает сводку: идентификаторы, метрики, путь к записи.
 
     study — задание исследования (словарь did.study.StudySpec) для агента 'study'.
@@ -103,6 +103,7 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     roles — модель в ролях автора, критика и рассказчика расследований отдельно от планировщика:
     опции did.llm.make_client или {'client': готовый клиент}. None — как раньше: роли ведёт модель
     планировщика, если он llm, иначе расследования идут без модели.
+    lab — память о лаборатории для вариантов с lab_memory: то, что вернул did.labmemory.LabMemory.priors().
     """
     arena = load_arena()
     if rules == 'science':                 # набор правил с несколькими причинами расхода и сбоями
@@ -136,6 +137,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     rec = Recorder()
     planner = make_planner(cfg, llm, seed)
     extra = {'knowledge': knowledge} if getattr(cfg, 'science', False) else {}
+    if getattr(cfg, 'lab_memory', False):           # L4b: что робот узнал об этой арене в прошлых прогонах
+        extra['lab'] = lab
     if agent == 'study':                            # проверка задания и план; из сценария берётся только контур области
         from .study import prepare
         extra['study'] = prepare(study, arena, bot_rules, scenario)
@@ -217,6 +220,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
         print(json.dumps(summary, ensure_ascii=False, indent=1))
     if knowledge is not None:
         summary['science'] = science          # для памяти между прогонами (did/memory.py)
+    if getattr(bot, 'lab', None) is not None:
+        summary['lab'] = bot.lab.export(world.t)      # для памяти о лаборатории (did/labmemory.py)
     return summary
 
 

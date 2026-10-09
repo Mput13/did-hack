@@ -21,6 +21,7 @@ from .foresight import Advisor
 from .frugal import Frugal
 from .inquiry import Investigator
 from .journal import Journal
+from .labmemory import LabPrior, LabSoilModel
 from .localize import PoseTracker
 from .nav import (ESCAPE_ROOM, ESCAPE_STOP, ESCAPE_V, FRONT_STOP, CostGraph, Follower, corridor_room, escape_plan,
                   free_ahead, freest_turn, moved_since, straighten)
@@ -106,6 +107,10 @@ class AgentConfig:
     neighbor_replay: str = ''         # пересчёт карты после сбора: '' — прежний; gated_clean — без показаний, снятых при
                                       # распознанном сбое датчика, и точный там, где прежний стирает известное место;
                                       # gated и full — варианты, отвергнутые на отладке (did/replay.py)
+    # --- память о лаборатории между прогонами (research/findings/L4b.md, логика — did/labmemory.py):
+    # по умолчанию выключена; включена в пресетах *_lab
+    lab_memory: bool = False          # начинать прогон с того, что робот узнал об этой арене раньше: зоны и грунт
+    lab_opts: dict = field(default_factory=dict)      # настройки: поля did.labmemory.Settings
     # --- абляция R12 (research/findings/R12.md): как исследователь выбирает опыт; gain — прежнее поведение
     inquiry_choice: str = 'gain'      # gain | bits | random | cheapest | fixed | worst | blind (did.science.CHOICES)
     inquiry_seed: int = 0             # зерно случайного выбора; прогон подставляет номер сценария (did/runner.py)
@@ -181,6 +186,11 @@ PRESETS = {
     # Правки P2 (версия 3) и P3 (версия 4) в неё не входят.
     'adaptive_v5': AgentConfig(name='adaptive_v5', fault_wait=True, **V5),
     'scientist_v5': AgentConfig(name='scientist_v5', science=True, fault_wait=True, **V5),
+    # Версия 2 с памятью о лаборатории между прогонами (research/findings/L4b.md). Без памяти (первый прогон)
+    # ведёт себя ровно как версия 2.
+    'adaptive_v2_lab': AgentConfig(name='adaptive_v2_lab', fault_wait=True, lab_memory=True),
+    'scientist_v2_lab': AgentConfig(name='scientist_v2_lab', science=True, fault_wait=True, lab_memory=True),
+    'adaptive_llm_lab': AgentConfig(name='adaptive_llm_lab', planner='llm', lab_memory=True),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
                                avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
@@ -247,7 +257,7 @@ class Agent:
     IDLE_MAX_S = 10.0     # с: стоит без движения дольше по любой другой причине — развернуться и строить путь заново
 
     def __init__(self, arena, config, n_samples, rules=None, planner=None, recorder=None, knowledge=None,
-                 roles=None, soil_truth=None, truth=None):
+                 roles=None, soil_truth=None, truth=None, lab=None):
         self.arena = arena
         self.cfg = config
         self.rules = rules or Rules()
@@ -263,7 +273,8 @@ class Agent:
         self.tracker = PoseTracker(arena, enabled=config.localize, verify=config.guard)   # одометрия → поза на карте
         power = LAW_POWER[self.rules.sensor_law] if config.law_known else 1.0
         self.belief = SampleBelief(arena, n_samples, self.rules.sensor_range_m, power=power)
-        self.soil = SoilModel(arena, self.rules.drain_per_m, self.rules.drain_idle_per_s)
+        self.soil = (LabSoilModel if config.lab_memory else SoilModel)(arena, self.rules.drain_per_m,
+                                                                       self.rules.drain_idle_per_s)
         self.change = ChangeDetector()
         self.health = SensorHealth(self.rules.sensor_sigma)
         self.hazard_map = HazardMap()                       # гипотезы о том, где опасные зоны
@@ -348,6 +359,7 @@ class Agent:
         if config.scheme != 'rule':                         # A1: другая схема выбора целей и возврата
             from .tour import TourScheme
             self.tour = TourScheme(self)
+        self.lab = LabPrior(self, lab) if config.lab_memory else None   # L4b: память о лаборатории (did/labmemory.py)
         self._oracle = truth                                # оракул (только быстрый симулятор): did/oracle.py
         if truth is not None:
             truth.attach(self)
@@ -376,6 +388,8 @@ class Agent:
         if obs.t - self._slow_t >= 1.0:
             self._slow_t = obs.t
             self._soil_hypotheses(obs.t)
+            if self.lab:
+                self.lab.tick(obs.t)
             self._check_return(obs)
             if self.cfg.mission_triggers:
                 self._ask_at_battery_floor(obs)
@@ -440,6 +454,8 @@ class Agent:
                 # Штраф уже получен, поэтому робот не пятится, а выезжает из зоны туда, куда ему нужно:
                 # на несколько секунд эта зона для маршрута не считается, потом объезжается.
                 self._grace = (obs.t + 4.0, self.hazard_map.hit(obs.x, obs.y, heading, list(self._trail)))
+                if self.lab:
+                    self.lab.on_hit(obs, self._grace[1])
                 self._trail.clear()
                 self._trail_pause = obs.t + 4.0            # пока робот выезжает из зоны, его путь не «безопасный»
                 self._sync_hazards(obs.t, new=len(self.hazard_map.zones) > known)
@@ -513,6 +529,8 @@ class Agent:
         """Ещё одна точка, пройденная без штрафа: она уточняет, где опасных зон нет."""
         if self.cfg.avoid_hazards and t > self._trail_pause:
             self._trail.append((x, y))
+            if self.lab:
+                self.lab.safe(x, y, t)             # и зоны из памяти тоже
             if self.hazard_map.zones:
                 self.hazard_map.safe(x, y)                 # проехал без штрафа — часть гипотез о зоне отпадает
                 if self.hazard_map.version != self._risk_version:
@@ -554,6 +572,8 @@ class Agent:
             if math.hypot(h['x'] - x, h['y'] - y) <= 0.8:
                 self.journal.close(t, h['key'], 'outdated', 'расход на участке перестал совпадать с оценкой')
         self._soil_h = [h for h in self._soil_h if math.hypot(h['x'] - x, h['y'] - y) > 0.8]
+        if self.lab:
+            self.lab.on_mismatch(x, y, t, self.soil.prior_at(x, y))
         if self.cfg.fresh_soil:
             # Старое вокруг стирается целиком, а отрезки, на которых расход разошёлся с прогнозом, вносятся
             # заново с полным весом: оценка сразу показывает новую цену пола, а не возвращается к «обычному».
@@ -660,6 +680,9 @@ class Agent:
             mult = self._truth
         # Риск опасной зоны — штраф к стоимости клетки: чем вероятнее зона, тем дальше её объезжать.
         danger = 1.0 + self.cfg.hazard_weight * self._risk if self.hazards else None
+        if self.lab and self.lab.active():                 # зоны из памяти: дороже, но не запрещены
+            risk = self.lab.risk(self._risk)
+            danger = 1.0 + self.cfg.hazard_weight * risk if risk is not self._risk or self.hazards else None
         self.graph.set_cost(mult, bias=self.frugal.outbound_bias(danger) if self.frugal else danger)
         # Домой — по проверенному: там, где робот уже ездил, нет ни опасных зон, ни сюрпризов с грунтом.
         # Оракулу грунт известен везде, и надбавка за непроверенный пол ему не нужна.
@@ -838,6 +861,7 @@ class Agent:
             'recent_events': [],
             'alarms': alarms,
             'open_hypotheses': [{'id': h['id'], 'statement': h['statement']} for h in self.journal.open_list()][-6:],
+            **({'lab_memory': self.lab.summary()} if self.lab and self.lab.runs else {}),
         }
 
     def _rank_by_gain(self, raw, obs, dist, pred):
