@@ -1,8 +1,8 @@
 {
  "lab": "hard-2",
  "made_by": "tools/build_memory_page.py",
- "file": "{\"hazards\":[{\"id\":\"Z1\",\"x\":-1.0,\"y\":-0.5,\"r\":0.45,\"hits\":1,…}],\"soil_zones\":[{\"x\":-0.69,\"y\":-0.12,\"mult\":2.45,…}],…}",
- "request": "\"lab_memory\":{\"hazards\":[{\"id\":\"M1\",\"x\":-1.0,\"y\":-0.5,\"radius\":0.45,\"confidence\":0.75,\"status\":\"не проверялась\"}],…}",
+ "file": "{\"hazards\":[{\"x\":-1.0, \"y\":-0.5, \"r\":0.45, \"hits\":1, …}], \"soil_zones\":[{\"x\":-0.69, \"y\":-0.12, \"mult\":2.45, …}], …}",
+ "request": "\"lab_memory\":{\"hazards\":[{\"id\":\"M1\", \"x\":-1.0, \"y\":-0.5, \"confidence\":0.75, \"status\":\"не проверялась\", …}], …}",
  "hypotheses": 51,
  "file_bytes": 6873,
  "prompt_tokens": 2467,

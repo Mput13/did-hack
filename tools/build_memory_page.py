@@ -336,14 +336,14 @@ return [{'type': 'return_base'}]                                                
 </main></body></html>"""
     OUT.write_text(page, encoding='utf-8')
     # Для слайда: по одной строке из файла и из запроса. Поля взяты как есть, пропуски помечены многоточием.
-    one = lambda v: json.dumps(v, ensure_ascii=False, separators=(',', ':'))                     # noqa: E731
+    one = lambda v: json.dumps(v, ensure_ascii=False, separators=(', ', ':'))                    # noqa: E731
     m1 = st0['lab_memory']['hazards'][0]
     DECK.write_text(json.dumps({
         'lab': f'{LEVEL}-{SEED}', 'made_by': 'tools/build_memory_page.py',
-        'file': '{"hazards":[' + one({k: hz[k] for k in ('id', 'x', 'y', 'r', 'hits')})[:-1] + ',…}],"soil_zones":['
-                + one({k: sz[0][k] for k in ('x', 'y', 'mult')})[:-1] + ',…}],…}',
-        'request': '"lab_memory":{"hazards":[' + one({k: m1[k] for k in ('id', 'x', 'y', 'radius', 'confidence', 'status')})
-                   + '],…}',
+        'file': '{"hazards":[' + one({k: hz[k] for k in ('x', 'y', 'r', 'hits')})[:-1] + ', …}], "soil_zones":['
+                + one({k: sz[0][k] for k in ('x', 'y', 'mult')})[:-1] + ', …}], …}',
+        'request': '"lab_memory":{"hazards":[' + one({k: m1[k] for k in ('id', 'x', 'y', 'confidence', 'status')})[:-1]
+                   + ', …}], …}',
         'hypotheses': len(hz['cloud']), 'file_bytes': size, 'prompt_tokens': usage0['prompt_tokens'],
         'reply': rep0['reasoning']}, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
     print(OUT, len(page) // 1024, 'КБ; запросов', len(sent), 'совпало начал', same, '; решений', len(plans), dict(by))
