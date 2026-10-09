@@ -2,9 +2,10 @@
 // но с рисунками из записей прогонов, слайдом математики и примерами «обычный робот — наш робот».
 //
 //   /usr/local/bin/python3 presentation/team/figures.py     # рисунки из runs/ (один раз или после новых прогонов)
-//   cd presentation/team && node build_team.js              # DID_v2.pptx, DID_v2.pdf, slides/, preview.jpg, speech.md
+//   cd presentation/team && node build_team.js              # DID_final.pptx, DID_final.pdf, slides/, preview.jpg, speech.md
+//   node build_team.js --all                                # то же плюс варианты и запасные слайды: DID_all.*
 //
-// Состав: основной поток (14 слайдов, 7 минут) → варианты на выбор → запасные слайды.
+// Состав итоговой колоды: 14 слайдов на 7 минут.
 // Числа — из research/findings/*.md, runs/*/summary.json и записей прогонов (presentation/team/data/facts.json);
 // у каждой константы ниже назван источник.
 const fs = require("fs");
@@ -24,12 +25,13 @@ const { applyTheme } = require(path.join(SKILL, "scripts/apply_theme.js"));
 const ROOT = path.join(__dirname, "..", "..");
 const FIG = path.join(__dirname, "fig");
 const LOGOS = path.join(__dirname, "..", "assets", "logos");
-const NAME = "DID_v2";
+const ALL = process.argv.includes("--all");      // вместе с вариантами и запасными слайдами
+const NAME = ALL ? "DID_all" : "DID_final";
 const OUT = path.join(__dirname, `${NAME}.pptx`);
 const PDF = path.join(__dirname, `${NAME}.pdf`);
-const SLIDES = path.join(__dirname, "slides");
-const PREVIEW = path.join(__dirname, "preview.jpg");
-const SPEECH = path.join(__dirname, "speech.md");
+const SLIDES = path.join(__dirname, ALL ? "slides_all" : "slides");
+const PREVIEW = path.join(__dirname, ALL ? "preview_all.jpg" : "preview.jpg");
+const SPEECH = path.join(__dirname, ALL ? "speech_all.md" : "speech.md");
 
 // ---------- числа ----------
 const COMMITS = (() => {
@@ -96,7 +98,7 @@ pres.defineSlideMaster({
 let SECTION = "Основной поток";
 const SPEECH_PARTS = [];
 function content(title, lead, notes, seconds) {
-  const s = pres.addSlide({ masterName: "CONTENT", sectionTitle: SECTION });
+  const s = pres.addSlide(ALL ? { masterName: "CONTENT", sectionTitle: SECTION } : { masterName: "CONTENT" });
   s.addText(title, { placeholder: "title" });
   s.addText(lead, { placeholder: "body" });
   s.addNotes(`≈ ${seconds} с. ${notes}`);
@@ -160,10 +162,10 @@ const ciText = ([m, lo, hi], d = 1) => `${sgn(m, d)} [${sgn(lo, d)}; ${sgn(hi, d
 // =====================================================================================================
 // ОСНОВНОЙ ПОТОК
 // =====================================================================================================
-pres.addSection({ title: SECTION });
+if (ALL) pres.addSection({ title: SECTION });
 
 function slideTitle(withMap) {
-  const s = pres.addSlide({ masterName: "TITLE", sectionTitle: SECTION });
+  const s = pres.addSlide(ALL ? { masterName: "TITLE", sectionTitle: SECTION } : { masterName: "TITLE" });
   oval(s, 5.72, 4.0, 1.2, C.accent2, "circle-lavender");
   oval(s, 8.72, 0.5, 0.8, C.accent3, "circle-mint");
   oval(s, 6.2, 1.1, 3.3, C.accent1, "circle-blue");
@@ -230,8 +232,8 @@ function hypothesisChecks(s, y) {
   interval(s, 4.56, [E1.mean, E1.lo, E1.hi], scale, true, "hyp-e1");
 }
 
-// ---------- 4. математика ----------
-{
+// ---------- запасной: постановка задачи и формулы ----------
+function mathFormal(variant) {
   const s = content("Математическая постановка и метрики", "Поиск при частичной наблюдаемости с бюджетом энергии: среда скрыта, робот её оценивает",
     "Формально это поиск при частичной наблюдаемости с ограничением по энергии. Цель — счёт судьи: десять очков за образец, двадцать за возврат, штрафы за столкновения, ложные сборы и опасные зоны. Робот ведёт карту вероятностей по правилу Байеса, оценивает цену грунта по расходу, строит маршрут с этой ценой и едет к цели, только если хватит заряда на дорогу домой. Сравниваем всегда парно, на одних сценариях, и говорим «лучше» только если интервал выше нуля.", 40);
   box(s, X0, 1.36, CW, 1.2, C.accent1, "goal-card", 0.3);
@@ -268,12 +270,68 @@ function hypothesisChecks(s, y) {
     });
     T(s, runs, { x: x + 0.22, y: y + 0.46, w: w - 0.4, h: 1.84, objectName: `math-${i + 1}-rows` });
   });
+  tag(s, variant);
 }
 
-// ---------- 5. архитектура и инструменты ----------
+// ---------- 5. архитектура: как всё связано ----------
+// Состав — по коду: did/scenario.py, judge.py, fastsim.py, ros_agent.py (каналы /did/*), slam_map.py; agent.py, belief.py,
+// inquiry.py и science.py, planner.py и llm.py, nav.py, sensorguard.py, labmemory.py, team.py; recorder.py → did/lab,
+// did/experiments.py → research/findings, tools/build_explainer.py.
 {
-  const s = content("Архитектура и инструменты", "Быстрый цикл управления и отдельный уровень планирования — один слайд вместо трёх",
+  const s = content("Архитектура: как всё связано", "Один агент и один судья на двух симуляторах; каждый прогон записывается и идёт в показ и в опыты",
+    "Сверху стенд: генератор сценариев, судья и симулятор — Gazebo с TurtleBot3 или быстрый симулятор с тем же интерфейсом. Агент видит только каналы ROS 2 из условия задачи. Внутри агента — картина мира, научный цикл, планировщик и исполнитель; планировщик может спросить языковую модель с сервера МАИ, скоростями она не управляет. Каждый прогон записывается: запись открывается в лаборатории и идёт в серии опытов, из которых получаются числа с интервалами.", 35);
+  const part = (x, y, w, h, head, sub, name) => {
+    box(s, x, y, w, h, C.background2, `${name}-pill`, 0.18);
+    T(s, [{ text: head, options: { fontSize: 10.5, breakLine: true } }, { text: sub, options: { fontSize: 9, color: C.text2 } }],
+      { x: x + 0.12, y, w: w - 0.2, h, valign: "middle", objectName: `${name}-text`, paraSpaceAfter: 1 });
+  };
+  // стенд
+  box(s, X0, 1.34, CW, 0.86, C.accent1, "stand-band", 0.26);
+  T(s, "Стенд", { x: X0 + 0.22, y: 1.34, w: 0.8, h: 0.86, fontSize: 12.5, valign: "middle", objectName: "stand-label" });
+  [["Генератор сценариев", "образцы, грунты, зоны, события"], ["Судья", "заряд, датчик, штрафы, счёт"],
+    ["Gazebo + TurtleBot3", "или быстрый симулятор"], ["SLAM Toolbox", "своя карта арены"]]
+    .forEach(([head, sub], i) => part(1.75 + i * 1.86, 1.44, 1.78, 0.66, head, sub, `stand-${i + 1}`));
+  // каналы
+  box(s, X0, 2.3, 6.02, 0.3, C.background2, "bus-strip", 0.15);
+  T(s, [{ text: "ROS 2    ", options: {} }, { text: "↓ лидар, одометрия, заряд, датчик    ↑ скорости, «собрать», «финиш»", options: { color: C.text2 } }],
+    { x: X0 + 0.2, y: 2.3, w: 5.7, h: 0.3, fontSize: 9, valign: "middle", objectName: "bus-text" });
+  // агент
+  box(s, X0, 2.68, 6.02, 1.34, C.accent3, "agent-band", 0.26);
+  T(s, "Агент", { x: X0 + 0.22, y: 2.68, w: 0.8, h: 1.34, fontSize: 12.5, valign: "middle", objectName: "agent-label" });
+  [["Картина мира", "образцы, грунт, зоны, поза"], ["Научный цикл", "гипотезы → опыт → вывод"], ["Планировщик", "правило или LLM → подцели"],
+    ["Исполнитель", "Дейкстра → v, ω; сторожа"], ["Память", "о лаборатории, между прогонами"], ["Два робота", "обмен сообщениями"]]
+    .forEach(([head, sub], i) => part(1.75 + (i % 3) * 1.66, 2.77 + Math.floor(i / 3) * 0.62, 1.58, 0.54, head, sub, `agent-${i + 1}`));
+  // языковая модель
+  box(s, 7.07, 2.3, 2.2, 1.72, C.accent2, "llm-card", 0.26);
+  T(s, [{ text: "Языковая модель", options: { fontSize: 12, breakLine: true } },
+    ...["сервер МАИ: QWEN, DeepSeek", "вход: миссия + сводка состояния", "выход: подцели в JSON", "проверка ответа, запасное правило, кэш"]
+      .map((t, i, a) => ({ text: t, options: { fontSize: 9, color: C.text2, breakLine: i < a.length - 1 } }))],
+  { x: 7.24, y: 2.38, w: 1.9, h: 1.56, valign: "middle", objectName: "llm-text", paraSpaceAfter: 3 });
+  arrow(s, 6.68, 2.96, 7.04, "arrow-planner-llm");
+  arrow(s, 7.04, 3.12, 6.68, "arrow-llm-planner");
+  // запись и то, что из неё получается
+  const flow = [[X0, 2.05, C.accent2, "Лаборатория", "страница показа и пульт, проигрыватель"],
+    [3.0, 1.86, C.accent1, "Запись прогона", "путь, заряд, решения, гипотезы"],
+    [5.08, 2.1, C.accent3, "Серии опытов", "сценарии × варианты → интервалы"],
+    [7.4, 1.87, C.accent1, "Выводы", "отчёты, страница-объяснение"]];
+  flow.forEach(([x, w, fill, head, sub], i) => {
+    box(s, x, 4.22, w, 0.64, fill, `flow-${i + 1}-card`, 0.2);
+    T(s, [{ text: head, options: { fontSize: 10.5, breakLine: true } }, { text: sub, options: { fontSize: 9, color: C.text2 } }],
+      { x: x + 0.16, y: 4.22, w: w - 0.26, h: 0.64, valign: "middle", objectName: `flow-${i + 1}-text`, paraSpaceAfter: 1 });
+  });
+  s.addShape(pres.shapes.LINE, { x: 3.93, y: 4.03, w: 0, h: 0.17, line: { color: C.text2, width: 1.25, endArrowType: "triangle" }, objectName: "arrow-agent-record" });
+  arrow(s, 2.98, 4.54, 2.8, "arrow-record-lab");
+  arrow(s, 4.88, 4.54, 5.06, "arrow-record-series");
+  arrow(s, 7.2, 4.54, 7.38, "arrow-series-reports");
+  T(s, "Разработка: человек задаёт цель → ведущий агент → исследователи, инженеры и независимое ревью",
+    { x: X0, y: 4.92, w: CW, h: 0.2, fontSize: 9, color: C.text2, valign: "middle", objectName: "dev-line" });
+}
+
+// ---------- архитектура, короткий вариант: три блока и судья ----------
+function archSimple(variant) {
+  const s = content("Архитектура и инструменты", "Короткий вариант: быстрый цикл управления и отдельный уровень планирования",
     "Среда — Gazebo с TurtleBot3; для серий опытов — быстрый симулятор с тем же судьёй. Агент получает по ROS 2 лидар, одометрию, заряд и число датчика и отдаёт скорости. Внутри агента — картина мира, планировщик и исполнитель. Планировщик — правило или языковая модель: она получает текст миссии и сводку наблюдений и возвращает подцели в JSON; скоростями модель не управляет. Судья считает заряд и штрафы, истинное состояние среды от агента скрыто.", 35);
+  tag(s, variant);
   oval(s, X0, 1.5, 2.2, C.accent1, "env-circle");
   T(s, [{ text: "Gazebo + робот", options: { fontSize: 14, breakLine: true } },
     { text: "TurtleBot3 Burger: лидар, одометрия, колёса", options: { fontSize: 10, breakLine: true } },
@@ -309,29 +367,104 @@ function hypothesisChecks(s, y) {
     { x: X0, y: 4.82, w: CW, h: 0.22, fontSize: 9.5, color: C.text2, valign: "middle", objectName: "resources" });
 }
 
-// ---------- 6. как агент ищет образец ----------
+// ---------- 5. ресурсы и инструменты ----------
+// Версии — из окружения pixi (Python 3.12, gz-sim 8 = Harmonic, ROS 2 Jazzy); машина — sysctl (Apple M4, 10 ядер, 16 ГБ).
 {
-  const b = F.belief;
-  const s = content("Как агент ищет образец: из числа — место", "Тот же прогон, первые девять секунд. Зелёное кольцо — настоящий образец: робот его не видит",
-    "Датчик даёт одно число без направления. Одно показание — это кольцо: образец где-то на этом расстоянии, а ближе пусто. Робот отъехал, получил второе показание — кольцо сузилось. К восьмой секунде вероятность одного места — больше половины: это гипотеза «образец здесь». Робот подъезжает, пробует собрать и так её проверяет.", 35);
-  const h = img(s, "belief.png", X0, 1.36, CW, "Три карты вероятностей: кольцо после первого показания, суженное кольцо после второго и пик у настоящего образца");
-  const cy = 1.36 + h + 0.06, cw = CW / 3;
-  caption(s, X0 + 0.1, cy, cw - 0.25, `${ru(b[0].t, 0)} с · z = ${ru(b[0].z, 2)}`, "одно показание — кольцо: образец на этом расстоянии, ближе пусто", "bel-1");
-  caption(s, X0 + cw + 0.1, cy, cw - 0.25, `${ru(b[1].t, 0)} с · z = ${ru(b[1].z, 2)}`, "показание с другого места: кольцо сузилось", "bel-2");
-  caption(s, X0 + 2 * cw + 0.1, cy, cw - 0.25, `${ru(b[2].t, 0)} с · вероятность ${Math.round(b[2].pmax * 100)}%`, "гипотеза «образец здесь» → подъезд → сбор на 9-й секунде", "bel-3");
-  box(s, X0, 4.62, CW, 0.42, C.accent3, "chain-pill", 0.21);
-  T(s, "показание z → карта вероятностей → кандидат → маршрут с ценой грунта → проверка запаса на возврат → скорости v, ω",
-    { x: X0 + 0.3, y: 4.62, w: CW - 0.6, h: 0.42, fontSize: 10.5, valign: "middle", objectName: "chain-text" });
+  const s = content("Ресурсы и инструменты", "Что использовали в работе и для чего",
+    "Робот и симуляция — стандартные: ROS 2 Jazzy, Gazebo Harmonic, TurtleBot3 и SLAM Toolbox. Свой код — на Python с NumPy и SciPy; для серий опытов мы написали быстрый симулятор с тем же судьёй. Языковые модели робота — с сервера МАИ. Разрабатывали с ИИ-агентами: Claude пишет код, GPT независимо проверяет, Gemini читает литературу.", 20);
+  const logo = (file, x, y, name) => s.addImage({ path: path.join(LOGOS, file), x, y, w: 0.2, h: 0.2, objectName: name, altText: name });
+  const cards = [
+    [C.accent1, "Робот и симуляция", [["ROS 2 Jazzy", "датчики и команды"], ["Gazebo Harmonic", "физика и мир"], ["TurtleBot3 Burger", "модель робота"], ["SLAM Toolbox", "своя карта арены"]]],
+    [C.accent3, "Код и расчёты", [["Python, NumPy, SciPy", "логика агента"], ["Быстрый симулятор", "свой: серии опытов"], ["pytest", "1000+ проверок"], ["pixi + RoboStack", "сборка окружения"]]],
+    [C.accent2, "Языковые модели", [["Сервер МАИ", "QWEN, DeepSeek"], ["Ответ в JSON", "проверка по схеме"], ["Кэш ответов", "повторяемые опыты"], ["Jev 1.13", "один опыт, OpenRouter"]]],
+    [C.accent1, "ИИ в разработке", [["Claude Code", "Opus: код и опыты", "claude.png"], ["Codex", "GPT Sol: ревью", "openai.png"], ["Antigravity", "Gemini: литература", "gemini.png"], ["Git и GitHub", "план и история"]]],
+  ];
+  const w = 2.0, gap = (CW - 4 * w) / 3;
+  cards.forEach(([fill, head, rows], i) => {
+    const x = X0 + i * (w + gap), y = 1.45;
+    box(s, x, y, w, 3.4, fill, `res-${i + 1}-card`, 0.26);
+    T(s, head, { x: x + 0.2, y: y + 0.16, w: w - 0.24, h: 0.34, fontSize: 12, valign: "middle", objectName: `res-${i + 1}-head` });
+    rows.forEach(([name, why, icon], k) => {
+      const ry = y + 0.74 + k * 0.64;
+      if (icon) logo(icon, x + 0.2, ry + 0.02, `res-${i + 1}-logo-${k + 1}`);
+      T(s, [{ text: name, options: { fontSize: 11.5, breakLine: true } }, { text: why, options: { fontSize: 9.5, color: C.text2 } }],
+        { x: x + (icon ? 0.48 : 0.2), y: ry, w: w - (icon ? 0.56 : 0.3), h: 0.5, objectName: `res-${i + 1}-row-${k + 1}`, paraSpaceAfter: 2 });
+    });
+  });
 }
+
+// ---------- 6. математика: карта вероятностей ----------
+// Рисунки считает код робота (presentation/team/mathdata.py → did.belief.SampleBelief) на трёх показаниях из прогона в Gazebo.
+{
+  const b = F.bayes, law = F.sensor_law;
+  const s = content("Математика: карта вероятностей", "Датчик даёт одно число — близость к образцу, без направления. Место находим по правилу Байеса",
+    "Датчик образцов сообщает одно число. По нему известно расстояние, но не направление: образец где-то на кольце вокруг робота. Робот делит арену на клетки и для каждой хранит вероятность, что образец там. Каждое новое показание — ещё одно кольцо: вероятность клетки умножается на то, насколько показание с ней согласуется. Где кольца сходятся, вероятность растёт. После трёх показаний остаётся одно место — это и есть цель.", 40);
+  T(s, "1. Показание → расстояние", { x: X0, y: 1.34, w: 2.3, h: 0.26, fontSize: 11.5, valign: "middle", objectName: "law-head" });
+  const hl = img(s, "sensor_law.png", X0, 1.64, 2.12, "График закона датчика: показание линейно падает с расстоянием до образца");
+  T(s, `z = 1 − d/2. Показание ${ru(law.z, 2)} — образец примерно в метре, а в какой стороне, неизвестно`,
+    { x: X0, y: 1.64 + hl + 0.05, w: 2.2, h: 0.6, fontSize: 9.5, color: C.text2, objectName: "law-cap" });
+  T(s, "2. Каждое показание — кольцо. Где кольца сходятся, там образец", { x: 3.2, y: 1.34, w: 6.07, h: 0.26, fontSize: 11.5, valign: "middle", objectName: "rings-head" });
+  const hb = img(s, "bayes_steps.png", 3.2, 1.64, 6.07, "Три карты вероятностей: после одного показания — кольцо, после двух — два места, после трёх — одно место у настоящего образца");
+  const caps = ["одно показание: кольцо", "два: осталось два места", `три: одно место, ${Math.round(b[2].top * 100)}%`];
+  caps.forEach((t, i) => T(s, t, { x: 3.2 + i * (6.07 / 3) + 0.05, y: 1.64 + hb + 0.03, w: 6.07 / 3 - 0.1, h: 0.22, fontSize: 9.5, color: C.text2, align: "center", valign: "middle", objectName: `rings-cap-${i + 1}` }));
+  T(s, "Пунктир — кольцо показания, синее — вероятность, зелёный кружок — настоящий образец",
+    { x: 3.2, y: 1.64 + hb + 0.25, w: 6.07, h: 0.2, fontSize: 9, color: C.text2, align: "center", valign: "middle", objectName: "rings-legend" });
+  box(s, X0, 4.02, CW, 0.58, C.accent2, "bayes-card", 0.26);
+  T(s, [{ text: "3. Правило Байеса — для каждой клетки карты", options: { fontSize: 11.5, breakLine: true } },
+    { text: "новая вероятность  ∝  прежняя вероятность  ×  насколько показание подходит этой клетке", options: { fontSize: 10.5, color: C.text2 } }],
+  { x: X0 + 0.28, y: 4.02, w: CW - 0.5, h: 0.58, valign: "middle", objectName: "bayes-text", paraSpaceAfter: 2 });
+  box(s, X0, 4.68, CW, 0.38, C.accent3, "max-pill", 0.19);
+  T(s, "4. Цель робота — максимум карты: гипотеза «образец здесь» → подъехать → проверить сбором", { x: X0 + 0.28, y: 4.68, w: CW - 0.5, h: 0.38, fontSize: 11, valign: "middle", objectName: "max-text" });
+}
+
+// ---------- 7. математика: цель, путь и запас ----------
+// Доли собранных — runs/E9/summary.json (средний уровень, 40 сценариев); путь — did.nav.CostGraph (mathdata.py).
+{
+  const d = F.dijkstra;
+  const s = content("Математика: куда ехать и как доехать", "Три расчёта перед каждым движением: цель, путь и запас заряда",
+    "Перед каждым движением робот считает три вещи. Первое — цель: это максимум карты вероятностей. Простой подъём по сигналу — градиентный подъём, когда робот шагает туда, где показание растёт, — собирает заметно меньше: он теряется, когда образцов несколько. Второе — путь: алгоритм Дейкстры по сетке, где шаг по дорогому грунту стоит дороже, поэтому робот выбирает не самый короткий, а самый дешёвый по заряду путь. Третье — запас: к цели он едет, только если заряда хватит и туда, и домой.", 35);
+  const cw = 2.72, cg = (CW - 3 * cw) / 2, cx = (i) => X0 + i * (cw + cg);
+  ["Цель — максимум карты", "Путь — Дейкстра по цене грунта", "Запас — хватит ли домой"].forEach((t, i) =>
+    T(s, t, { x: cx(i), y: 1.44, w: cw, h: 0.26, fontSize: 11.5, valign: "middle", objectName: `calc-${i + 1}-head` }));
+  s.addChart(pres.charts.BAR, [{ name: "Собрано образцов", labels: ["спираль", "подъём по сигналу", "карта вероятностей"], values: [67.5, 82.0, 99.5] }], {
+    x: cx(0) - 0.1, y: 1.76, w: cw + 0.1, h: 1.95, barDir: "bar", barGapWidthPct: 60, chartColors: [HEX.bar0, HEX.bar0, THEME.colors.accent4],
+    catAxisOrientation: "maxMin", valAxisHidden: true, valAxisMaxVal: 125, valAxisMinVal: 0, valGridLine: { style: "none" }, catGridLine: { style: "none" },
+    catAxisLabelColor: THEME.colors.dk1, catAxisLabelFontSize: 9.5, catAxisLabelFontFace: FONT, catAxisLineShow: false,
+    showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: '0.0"%"', dataLabelFontSize: 9.5, dataLabelColor: THEME.colors.dk1, dataLabelFontFace: FONT,
+    showLegend: false, objectName: "search-chart", altText: "Доля собранных образцов: спираль 67,5%, подъём по сигналу 82%, карта вероятностей 99,5%",
+  });
+  T(s, "Доля собранных образцов. Подъём по сигналу (градиентный подъём) теряется, когда образцов несколько",
+    { x: cx(0), y: 3.78, w: cw, h: 0.62, fontSize: 9.5, color: C.text2, objectName: "calc-1-cap" });
+  const hd = img(s, "dijkstra.png", cx(1), 1.78, cw, "Арена с участком дорогого грунта и двумя путями: короткий через дорогой грунт и путь Дейкстры в обход");
+  T(s, `Вес шага = длина × цена грунта. Пунктир короче, но стоит ${ru(d.short.energy)} ед. заряда; синий путь — ${ru(d.cheap.energy)}`,
+    { x: cx(1), y: 3.78, w: cw, h: 0.62, fontSize: 9.5, color: C.text2, objectName: "calc-2-cap" });
+  // полоска заряда: из чего складывается проверка запаса
+  const bx = cx(2), by = 2.16, parts = [[0.82, THEME.colors.accent4, "до цели", "FFFFFF"], [0.98, C.accent1, "домой × 1,1", THEME.colors.dk1], [0.42, C.accent3, "запас", THEME.colors.dk1], [0.5, C.background2, "", THEME.colors.dk1]];
+  T(s, "заряд батареи", { x: bx, y: by - 0.26, w: cw, h: 0.22, fontSize: 9.5, color: C.text2, valign: "middle", objectName: "reserve-top" });
+  let px = bx;
+  parts.forEach(([w, fill, label, color], i) => {
+    s.addShape(pres.shapes.RECTANGLE, { x: px, y: by, w, h: 0.44, fill: { color: fill }, line: { color: "FFFFFF", width: 1 }, objectName: `reserve-part-${i + 1}` });
+    if (label) T(s, label, { x: px, y: by, w, h: 0.44, fontSize: 9, color, align: "center", valign: "middle", objectName: `reserve-label-${i + 1}` });
+    px += w;
+  });
+  T(s, [{ text: "К цели робот едет, только если", options: { fontSize: 10, color: C.text2, breakLine: true } },
+    { text: "заряд − путь до цели − 1,1 × путь домой − 4 ≥ 0", options: { fontSize: 10.5, breakLine: true } },
+    { text: "Иначе — сразу на базу", options: { fontSize: 9.5, color: C.text2 } }],
+  { x: bx, y: by + 0.6, w: cw, h: 1.5, objectName: "reserve-text", paraSpaceAfter: 6 });
+  box(s, X0, 4.56, CW, 0.48, C.accent1, "goal-pill", 0.24);
+  T(s, [{ text: "Цель всех расчётов — счёт судьи:  ", options: { fontSize: 10.5, color: C.text2 } }, { text: "J = 10·образцы + 20·возврат + 0,1·остаток заряда − штрафы", options: { fontSize: 11 } }],
+  { x: X0 + 0.28, y: 4.56, w: CW - 0.5, h: 0.48, valign: "middle", objectName: "goal-text" });
+}
+
 
 // ---------- 7. сценарий на карте ----------
 {
   const s = content("Сценарий на карте: один прогон в Gazebo", "Трудный уровень, сценарий 2 — его же показываем вживую. Скрытое нарисовано для зрителя",
     "Это запись прогона в Gazebo. За первые полминуты робот собирает три образца. На тридцать первой секунде судья делает грунт дороже — робот замечает перерасход и ставит опыт. На сорок второй шумит датчик — робот делает вывод «сбой» и ждёт тридцать шесть секунд, потому что стоять дешевле, чем ехать вслепую. Потом собирает ещё четыре образца и возвращается: семь из семи, без штрафов.", 45);
   img(s, "scenario.png", X0, 1.36, 3.98, "Карта арены с путём робота и пятью отмеченными событиями прогона");
-  const rows = [[C.text1, "0–30 с · три образца", "каждая цель — гипотеза «образец здесь»: подъехал, собрал, подтвердил"],
-    [HEX.amber, "31 с · судья сделал грунт дороже", "расход 5,7 ед/м при прогнозе 2,9 → опыт «постоять 2 с» → вывод: грунт; участок внесён в карту стоимости"],
-    [HEX.orange, "42 с · датчик зашумел", "вывод «сбой датчика»; ждёт 36 с: стоять стоит 0,01 ед/с, ехать вслепую — около 0,22"],
+  const rows = [[C.text1, "0–30 с · три образца", "гипотеза «образец здесь» → подъехал → собрал"],
+    [HEX.amber, "31 с · грунт стал дороже", "заметил перерасход, поставил опыт, внёс участок в карту стоимости"],
+    [HEX.orange, "42 с · датчик шумит", "распознал сбой и переждал 36 секунд"],
     [C.text1, "82–134 с · ещё четыре образца", "шум спал — поиск продолжается"],
     [C.text1, `${DEMO.t} с · на базе`, `7 из 7 образцов, счёт судьи ${DEMO.score}, без штрафов`]];
   rows.forEach(([fill, head, body], i) => {
@@ -345,8 +478,9 @@ function hypothesisChecks(s, y) {
 }
 
 // ---------- 8–10. примеры «обычный — наш» ----------
-function pairSlide({ title, lead, notes, seconds, figure, alt, left, right, value, valueColor, lines, bottom }) {
+function pairSlide({ title, lead, notes, seconds, figure, alt, left, right, value, valueColor, lines, bottom, variant }) {
   const s = content(title, lead, notes, seconds);
+  if (variant) tag(s, variant);
   const w = 5.55, h = img(s, figure, X0, 1.4, w, alt);
   const cy = 1.4 + h + 0.07;
   caption(s, X0 + 0.05, cy, w / 2 - 0.2, left[0], left[1], "cap-left");
@@ -364,7 +498,7 @@ function pairSlide({ title, lead, notes, seconds, figure, alt, left, right, valu
 {
   const [f, a] = F.pair_e1;
   pairSlide({
-    title: "Пример 1. План заранее против робота с адаптацией",
+    title: "Пример: план заранее против робота с адаптацией",
     lead: `Один сценарий (№${E1.seed}): слева маршрут составлен заранее, справа — поиск по карте вероятностей`,
     notes: "Один и тот же сценарий. Слева робот едет по маршруту, составленному до старта, и берёт только то, что оказалось по пути: четыре образца из семи. Справа — наш робот: он едет туда, где образец вероятнее, и собирает шесть. В среднем по сорока сценариям разница — тринадцать очков.", seconds: 25,
     figure: "pair_fixed_adaptive.png", alt: "Две карты одного сценария: путь робота с планом заранее и путь робота-исследователя",
@@ -374,42 +508,47 @@ function pairSlide({ title, lead, notes, seconds, figure, alt, left, right, valu
     bottom: `Тот же заряд, та же арена — больше образцов: выше в ${E1.wins} сценариев. По возврату на базу различие не показано`,
   });
 }
+// ---------- 10. научный подход ----------
 {
-  const s = content("Пример 2. Расход вырос вдвое — робот ставит опыт", "31-я секунда того же прогона: судья сделал грунт дороже и роботу об этом не сказал",
-    "Заряд уходит вдвое быстрее прогноза. Робот не гадает, а выдвигает объяснения: подорожал грунт, течёт батарея, дорогие повороты. И выбирает опыт, который их различит и почти ничего не стоит: постоять две секунды. Стоя заряд не уходит — значит, не утечка. Разворот на месте дешёвый — значит, не повороты. Остаётся грунт: участок попадает в карту стоимости.", 35);
-  const steps = [[C.accent1, "Странность", "расход 5,7 ед/м при прогнозе 2,9"],
-    [C.accent2, "Объяснения", "грунт подорожал · батарея течёт · дорогие повороты · другая причина"],
-    [C.accent3, "Опыт", "постоять 2 с: 1,07 бит за 0,02 ед. заряда. Проехать 0,3 м дало бы 0,50 бит за 1,4 ед. — не выбран"],
-    [C.accent1, "Измерено", "стоя — 0,01 ед/с: утечки нет; разворот — 0,06 ед/рад: повороты дешёвые"],
-    [C.accent3, "Вывод и действие", "грунт дороже в 2,1 раза; участок внесён в карту стоимости"]];
+  const s = content("Научный подход: робот сам ставит опыт", "Если измерение расходится с прогнозом, робот выдвигает объяснения и проверяет их действием",
+    "Это научный цикл внутри робота. Когда измерение расходится с прогнозом — например, заряд уходит быстрее, чем должен, — робот не гадает. Он выдвигает несколько объяснений с вероятностями и выбирает опыт, который различит их дешевле всего: например, постоять две секунды. По результату вероятности пересчитываются, и робот действует: вносит участок в карту стоимости и меняет запас на возврат. Справа пример из прогона: до опыта объяснений четыре, после — одно.", 30);
+  const steps = [[C.accent1, "Расхождение", "измерение не сходится с прогнозом"],
+    [C.accent2, "Гипотезы", "несколько объяснений с вероятностями"],
+    [C.accent3, "Опыт", "тот, что различит объяснения дешевле всего"],
+    [C.accent1, "Вывод и действие", "обновляет карту, маршрут и запас на возврат"]];
   steps.forEach(([fill, head, body], i) => {
-    const y = 1.42 + i * 0.62;
-    oval(s, X0, y + 0.03, 0.3, fill, `step-${i + 1}-dot`);
-    T(s, String(i + 1), { x: X0, y: y + 0.03, w: 0.3, h: 0.3, fontSize: 10, align: "center", valign: "middle", objectName: `step-${i + 1}-n` });
-    T(s, [{ text: head, options: { fontSize: 11.5, breakLine: true } }, { text: body, options: { fontSize: 10, color: C.text2 } }],
-      { x: X0 + 0.44, y, w: 3.65, h: 0.6, objectName: `step-${i + 1}-text`, paraSpaceAfter: 2 });
+    const y = 1.42 + i * 0.66;
+    oval(s, X0, y, 0.44, fill, `step-${i + 1}-dot`);
+    T(s, String(i + 1), { x: X0, y, w: 0.44, h: 0.44, fontSize: 12, align: "center", valign: "middle", objectName: `step-${i + 1}-n` });
+    T(s, [{ text: head, options: { fontSize: 12.5, breakLine: true } }, { text: body, options: { fontSize: 10, color: C.text2 } }],
+      { x: X0 + 0.6, y: y - 0.04, w: 3.3, h: 0.56, valign: "middle", objectName: `step-${i + 1}-text`, paraSpaceAfter: 1 });
+    if (i < steps.length - 1) s.addShape(pres.shapes.LINE, { x: X0 + 0.22, y: y + 0.47, w: 0, h: 0.16, line: { color: C.text2, width: 1, endArrowType: "triangle" }, objectName: `step-${i + 1}-arrow` });
   });
-  T(s, "Вероятность объяснений до опытов и после них", { x: 5.15, y: 1.42, w: 4.12, h: 0.24, fontSize: 11, valign: "middle", objectName: "chart-title" });
-  s.addChart(pres.charts.BAR, [
-    { name: "до опытов", labels: ["грунт подорожал", "батарея течёт", "дорогие повороты", "другая причина"], values: [47.2, 22.6, 11.3, 18.9] },
-    { name: "после двух замеров", labels: ["грунт подорожал", "батарея течёт", "дорогие повороты", "другая причина"], values: [99.8, 0, 0.2, 0] },
-  ], {
-    x: 5.05, y: 1.66, w: 4.22, h: 2.78, barDir: "bar", barGrouping: "clustered", barGapWidthPct: 55, chartColors: [HEX.bar0, THEME.colors.accent4],
-    catAxisOrientation: "maxMin", valAxisHidden: true, valAxisMaxVal: 115, valAxisMinVal: 0, valGridLine: { style: "none" }, catGridLine: { style: "none" },
+  T(s, "Расход заряда вырос: вероятности объяснений", { x: 4.95, y: 1.36, w: 4.32, h: 0.24, fontSize: 10.5, valign: "middle", objectName: "chart-title" });
+  const labels = ["грунт стал дороже", "утечка заряда", "дорогие повороты", "другая причина"];
+  s.addChart(pres.charts.BAR, [{ name: "до опыта", labels, values: [47, 23, 11, 19] }, { name: "после опыта", labels, values: [100, 0, 0, 0] }], {
+    x: 4.85, y: 1.6, w: 4.42, h: 2.42, barDir: "bar", barGrouping: "clustered", barGapWidthPct: 55, chartColors: [HEX.bar0, THEME.colors.accent4],
+    catAxisOrientation: "maxMin", valAxisHidden: true, valAxisMaxVal: 118, valAxisMinVal: 0, valGridLine: { style: "none" }, catGridLine: { style: "none" },
     catAxisLabelColor: THEME.colors.dk1, catAxisLabelFontSize: 10, catAxisLabelFontFace: FONT, catAxisLineShow: false,
-    showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: '0.0"%"', dataLabelFontSize: 9.5, dataLabelColor: THEME.colors.dk1, dataLabelFontFace: FONT,
+    showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: '0"%"', dataLabelFontSize: 9.5, dataLabelColor: THEME.colors.dk1, dataLabelFontFace: FONT,
     showLegend: true, legendPos: "b", legendFontSize: 10, legendColor: THEME.colors.dk2, legendFontFace: FONT,
-    objectName: "inquiry-chart", altText: "Вероятности четырёх объяснений до опытов и после двух замеров: «грунт подорожал» — с 47 до 99,8 процента",
+    objectName: "inquiry-chart", altText: "Вероятности четырёх объяснений до и после опыта: «грунт стал дороже» — с 47 до 100 процентов",
   });
-  box(s, X0, 4.6, CW, 0.44, C.accent3, "takeaway-pill", 0.22);
-  T(s, "В сериях 9 из 10 подтверждённых гипотез верны по скрытой правде. Выигрыш в очках от учёта грунта не показан: +1,0 [−3,6; +5,4]",
-    { x: X0 + 0.3, y: 4.6, w: CW - 0.6, h: 0.44, fontSize: 10.5, valign: "middle", objectName: "takeaway-text" });
+  const tiles = [[C.accent3, "9 из 10", "гипотез, которые робот счёл подтверждёнными, верны по скрытой правде"],
+    [C.accent1, "в 6–7 раз", "меньше заряда на опыт, чем при случайном выборе опыта"]];
+  tiles.forEach(([fill, value, label], i) => {
+    const x = X0 + i * 4.36;
+    box(s, x, 4.24, 4.18, 0.78, fill, `metric-${i + 1}`, 0.3);
+    T(s, value, { x: x + 0.28, y: 4.24, w: 1.35, h: 0.78, fontSize: 17, valign: "middle", objectName: `metric-${i + 1}-value` });
+    T(s, label, { x: x + 1.62, y: 4.24, w: 2.42, h: 0.78, fontSize: 9.5, color: C.text2, valign: "middle", objectName: `metric-${i + 1}-label` });
+  });
 }
-{
+function faultExample(variant) {
   const [a, v] = FAULT.results;
   const dur = Math.round(FAULT.fault[1] - FAULT.fault[0]);
   pairSlide({
-    title: "Пример 3. Датчик зашумел: ехать или ждать",
+    title: "Пример: датчик зашумел — ехать или ждать",
+    variant,
     lead: `Сценарий №${P1.seed}: сбой датчика с ${Math.round(FAULT.fault[0])}-й по ${Math.round(FAULT.fault[1])}-ю секунду — оранжевый участок пути`,
     notes: "Датчик образцов зашумел — тоже без объявления. Слева робот продолжает ехать по шумным показаниям: за это время он проезжает четыре метра и тратит двадцать две единицы заряда из шестидесяти — и на последний образец заряда не хватает. Справа робот сбой переждал: потратил четыре единицы и собрал все семь. Сбой замечают оба — различие в том, что делать дальше. В среднем это даёт шесть очков.", seconds: 25,
     figure: "pair_sensor_fault.png", alt: "Две карты одного сценария: робот, который едет во время сбоя датчика, и робот, который пережидает сбой",
@@ -441,10 +580,11 @@ function llmSlide({ title, mission, notes, figure, alt, left, right, quoteHead, 
     { x: X0, y: 4.7, w: CW, h: 0.34, fontSize: 9.5, color: C.text2, objectName: "llm-note" });
   return s;
 }
-{
+function llmPenalty(variant) {
   const m = F.pair_llm_m4;
   llmSlide({
-    title: "Пример 4. LLM читает миссию и меняет план",
+    title: "Языковая модель: задание словами",
+    variant,
     mission: "«После первого же штрафа немедленно возвращайся на базу»",
     notes: "Миссию задаём словами: после первого штрафа — сразу домой. На двадцать седьмой секунде оба робота задевают опасную зону. Правило текста не читает и собирает дальше — миссия нарушена. Языковая модель видит в сводке состояния штраф, сверяет с миссией и возвращает одну подцель: на базу. Это настоящий ответ модели с сервера МАИ. Всего по четырём типам миссий модель выполняет сорок пять — сорок шесть прогонов из сорока восьми, правило — ни одного. Выигрыш здесь — выполненная миссия, а не очки судьи.",
     figure: "pair_llm_m4.png", alt: "Две карты одного сценария: после штрафа робот с правилом продолжает собирать, робот с языковой моделью едет на базу",
@@ -456,6 +596,27 @@ function llmSlide({ title, mission, notes, figure, alt, left, right, quoteHead, 
     input: "Модель получает текст миссии и сводку состояния со счётчиком штрафов.",
   });
 }
+
+// ---------- 11. языковая модель: задание словами (запретная половина арены) ----------
+// Записи runs/L3d/M3_*/medium-1002.json.gz; доли — research/findings/L3-results.json (M3: 11 из 12, правило 0 из 12).
+{
+  const z = F.pair_llm_zone;
+  const s = content("Языковая модель: задание словами", "Один и тот же робот; подцели выбирает правило или языковая модель",
+    "Языковая модель нужна там, где задание дано словами. Миссия: не заезжай в правую половину арены. Слева робот с обычным правилом: текст он не читает и едет за образцами через запретную половину. Справа подцели выбирает языковая модель: она читает миссию и работает только в разрешённой половине — собирает там все три образца и возвращается. Так же словами можно задать, например, сколько образцов собрать. Модель выполняет такую миссию в одиннадцати прогонах из двенадцати, правило — ни разу.", 35);
+  box(s, X0, 1.34, CW, 0.4, C.accent2, "mission-pill", 0.2);
+  T(s, [{ text: "Миссия:  ", options: { color: C.text2 } }, { text: "«Не заезжай в правую половину арены: работай только в левой»", options: {} }],
+    { x: X0 + 0.28, y: 1.34, w: CW - 0.56, h: 0.4, fontSize: 12, valign: "middle", objectName: "mission-text" });
+  const w = 5.5, h = img(s, "pair_llm_zone.png", X0, 1.86, w, "Две карты одной арены с запретной правой половиной: робот с правилом заезжает в неё, робот с языковой моделью остаётся в левой");
+  const cy = 1.86 + h + 0.05;
+  caption(s, X0 + 0.05, cy, w / 2 - 0.2, "Правило: текст не читает", "заехал в запретную половину", "cap-left");
+  caption(s, X0 + w / 2 + 0.1, cy, w / 2 - 0.15, "С языковой моделью", `остался в разрешённой: ${z.right.collected} из ${z.right.left_total} образцов там`, "cap-right");
+  oval(s, 6.62, 1.9, 2.5, C.accent2, "stat-circle");
+  T(s, "11 из 12", { x: 6.62, y: 2.42, w: 2.5, h: 0.6, fontSize: 30, color: THEME.colors.accent5, align: "center", valign: "middle", objectName: "stat-value" });
+  T(s, [{ text: "прогонов с этой миссией", options: { breakLine: true } }, { text: "выполняет модель;", options: { breakLine: true } }, { text: "правило — 0 из 12", options: {} }],
+    { x: 6.82, y: 3.04, w: 2.1, h: 0.75, fontSize: 10, align: "center", objectName: "stat-lines", paraSpaceAfter: 2 });
+  T(s, "Быстрый симулятор; время ответа модели не учитывается", { x: 6.4, y: 4.5, w: 2.87, h: 0.4, fontSize: 9, color: C.text2, align: "center", objectName: "llm-note" });
+}
+
 
 // ---------- 12. итоги ----------
 function resultsSlide() {
@@ -515,26 +676,31 @@ resultsSlide();
   T(s, "Гипотеза → код и опыт → ревью → исправления → принятие", { x: X0, y: 3.06, w: CW, h: 0.42, fontSize: 11.5, align: "center", valign: "middle", objectName: "cycle-text" });
   const nums = [[String(COMMITS), ["правок в Git"]], [N.checks, ["автоматических проверок"]], [N.runs, ["записанных прогонов"]], [N.returned, ["работ ревью вернуло", "на доработку"]]];
   nums.forEach(([value, lines], i) => stat(s, X0 + i * 2.2, 3.6, 2.05, value, lines, `num-${i + 1}`, C.text1, 24));
-  T(s, "Ревью нашло 7 ошибок в первых исследованиях: исправлены 2 вывода, отклонены 2 выдуманные ссылки. Инструменты: Claude Code, Codex, Antigravity; модели робота — сервер МАИ",
+  T(s, "Ревью нашло 7 ошибок в первых исследованиях: исправлены 2 вывода, отклонены 2 выдуманные ссылки",
     { x: X0, y: 4.68, w: CW, h: 0.36, fontSize: 9.5, color: C.text2, objectName: "ai-note" });
 }
 
-// ---------- 14. команда ----------
+// ---------- 14. команда и что сделано ----------
 {
   const s = content("Команда и роли", "Спасибо! Дальше — живой показ и вопросы",
-    "Команда — три человека. Дальше покажем робота вживую.", 10);
+    "Команда — три человека. Сделаны все уровни задания, научный цикл, задания словами через языковую модель, своя карта и два робота. Дальше покажем робота вживую.", 15);
   [[C.accent1, "Ефремова\nАнастасия", "ML (LLM)"], [C.accent2, "Путиловский\nМихаил", "аналитик\n(исследователь)"], [C.accent3, "Журавлева\nПолина", "разработчик\n(Back/ROS)"]]
     .forEach(([fill, name, role], i) => {
-      const x = X0 + 0.25 + i * 2.85, d = 2.35;
-      oval(s, x, 1.75, d, fill, `member-${i + 1}-circle`);
+      const d = 2.1, x = X0 + 0.55 + i * 2.85;
+      oval(s, x, 1.5, d, fill, `member-${i + 1}-circle`);
       T(s, [{ text: name, options: { fontSize: 14, breakLine: true } }, { text: role, options: { fontSize: 11, color: C.text2 } }],
-        { x: x + 0.2, y: 2.3, w: d - 0.4, h: 1.25, align: "center", valign: "middle", objectName: `member-${i + 1}-text`, paraSpaceAfter: 4 });
+        { x: x + 0.2, y: 1.98, w: d - 0.4, h: 1.15, align: "center", valign: "middle", objectName: `member-${i + 1}-text`, paraSpaceAfter: 4 });
     });
+  box(s, X0, 3.95, CW, 1.05, C.background2, "done-card", 0.3);
+  T(s, [{ text: "Что сделано", options: { fontSize: 12.5, breakLine: true } },
+    { text: "Все уровни задания · научный цикл с журналом гипотез · задания словами через языковую модель · своя карта через SLAM · два робота с координацией · память о лаборатории между прогонами", options: { fontSize: 10.5, color: C.text2 } }],
+  { x: X0 + 0.3, y: 3.98, w: CW - 0.6, h: 0.99, valign: "middle", objectName: "done-text", paraSpaceAfter: 4 });
 }
 
 // =====================================================================================================
 // ВАРИАНТЫ НА ВЫБОР
 // =====================================================================================================
+if (ALL) {
 SECTION = "Варианты на выбор";
 pres.addSection({ title: SECTION });
 
@@ -584,7 +750,7 @@ pres.addSection({ title: SECTION });
 {
   const s = content("Математика на одном прогоне", "Те же формулы, подставлены числа из прогона в Gazebo (трудный уровень, сценарий 2)",
     "Покажу формулы на числах одного прогона. Датчик показал ноль пятьдесят три — значит, образец примерно в девяноста пяти сантиметрах. Расход пять и семь при прогнозе два и девять — грунт дороже вдвое. Из опытов выбран тот, что даёт больше информации на единицу заряда. И счёт: семь образцов, возврат и остаток заряда — девяносто один и восемь.", 40);
-  tag(s, "Вариант Б · вместо слайда 4");
+  tag(s, "Запасной · к слайдам 6–7");
   const h = img(s, "scenario.png", X0, 1.38, 3.55, "Карта прогона в Gazebo с пятью отмеченными событиями");
   T(s, "Прогон в Gazebo, из записи которого взяты числа: ② — перерасход на 31-й секунде, ⑤ — финиш", { x: X0, y: 1.38 + h + 0.05, w: 3.55, h: 0.34, fontSize: 9.5, color: C.text2, objectName: "math-cap" });
   const steps = [[C.accent1, "Датчик → расстояние", "z = 1 − d/2", `z = ${ru(F.truth_vs_robot.z, 2)}  →  d ≈ (1 − ${ru(F.truth_vs_robot.z, 2)})·2 = ${ru(F.truth_vs_robot.d, 2)} м: образец на кольце`],
@@ -601,11 +767,13 @@ pres.addSection({ title: SECTION });
   });
   T(s, "Сравнение вариантов — разность счёта на одних сценариях, 95% интервал", { x: 4.6, y: 4.86, w: 4.67, h: 0.2, fontSize: 9.5, color: C.text2, objectName: "math-note" });
 }
+archSimple("Вариант Б · вместо слайда 4");
+llmPenalty("Вариант Б · вместо слайда 11");
 // ---------- LLM, вариант Б: «ровно два образца» ----------
 {
   const m = F.pair_llm_m1;
   llmSlide({
-    title: "Пример 4. LLM читает миссию и меняет план",
+    title: "Языковая модель: задание словами",
     mission: "«Собери ровно два образца и сразу возвращайся на базу»",
     notes: "Миссию задаём словами: собери ровно два образца и возвращайся. Правило текста не читает и собирает все семь. Языковая модель после второго образца возвращает одну подцель: на базу.",
     figure: "pair_llm_m1.png", alt: "Две карты одного сценария: робот с правилом собирает все образцы, робот с языковой моделью собирает два и едет на базу",
@@ -615,24 +783,8 @@ pres.addSection({ title: SECTION });
     quote: "Миссия: ровно 2 образца и возврат. Собрано 2 из требуемых 2 — цель выполнена. Заряд 44,3, возврат 12,5, запас 31,8. Время 27,5 из 600. Возвращаюсь на базу.",
     plan: "подцели: [ return_base ]",
     input: "Модель получает текст миссии и сводку состояния.",
-    variant: "Вариант Б · вместо слайда 11",
+    variant: "Вариант В · вместо слайда 11",
   });
-}
-// ---------- итоги, вариант Б: «что готово / что дальше» в исходной вёрстке ----------
-{
-  const s = content("Что готово и что дальше", "В вёрстке исходного слайда «Что готово / что в работе», с нынешним состоянием",
-    "Готово всё, что требует условие, бонусные треки и память о лаборатории между прогонами. Дальше — гипотезы от языковой модели внутри контура и проверка на настоящем роботе.", 25);
-  tag(s, "Вариант Б · вместо слайда 12");
-  oval(s, 0.95, 1.38, 3.6, C.accent3, "done-circle");
-  T(s, [{ text: "Готово", options: { fontSize: 16, breakLine: true } },
-    ...["ROS 2 + Gazebo, карта и движение по точкам", "Поиск образцов и адаптация: +13,3 очка (быстрый симулятор)", "Научный цикл: гипотезы, опыты, журнал", "LLM читает миссии словами: 45–46 из 48", "Память о лаборатории между прогонами: +4,3", "SLAM-карта и два робота с координацией"]
-      .map((t, i, a) => ({ text: t, options: { fontSize: 10, breakLine: i < a.length - 1 } }))],
-  { x: 1.4, y: 1.82, w: 2.7, h: 2.75, align: "center", valign: "middle", objectName: "done-text", paraSpaceAfter: 5 });
-  oval(s, 5.45, 1.38, 3.6, C.accent2, "next-circle");
-  T(s, [{ text: "Дальше", options: { fontSize: 16, breakLine: true } },
-    ...["Гипотезы от LLM внутри контура: сейчас их выдвигает программа", "Память при другом расписании событий лаборатории", "Не стоять, пока модель думает: режим есть, по умолчанию выключен", "Проверка на настоящем роботе"]
-      .map((t, i, a) => ({ text: t, options: { fontSize: 10, breakLine: i < a.length - 1 } }))],
-  { x: 5.95, y: 1.9, w: 2.6, h: 2.6, align: "center", valign: "middle", objectName: "next-text", paraSpaceAfter: 6 });
 }
 // ---------- титул без карты ----------
 SECTION = "Варианты на выбор";
@@ -643,6 +795,8 @@ slideTitle(false);
 // =====================================================================================================
 SECTION = "Запасные слайды";
 pres.addSection({ title: SECTION });
+mathFormal("Запасной · постановка и формулы");
+faultExample("Запасной пример");
 {
   const s = content("Бонусные треки: своя карта и два робота", "SLAM измерен в Gazebo, координация — в быстром симуляторе; запись двух роботов — из Gazebo",
     "Два бонусных трека. Робот сам строит карту через SLAM Toolbox: она совпадает с готовой на девяносто шесть — девяносто девять процентов клеток. И два робота с координацией: они делят арену и обмениваются сообщениями — прогон короче на двадцать шесть секунд.", 30);
@@ -663,10 +817,11 @@ pres.addSection({ title: SECTION });
   const hl = img(s, "lab_mission.png", 4.5, 1.42, 4.77, "Страница показа во время миссии: карта с путём робота, заряд, счёт судьи и журнал решений");
   caption(s, 4.5, 1.42 + hl + 0.08, 4.77, "Страница показа", "путь робота, заряд, счёт судьи и последние решения агента — в реальном времени", "lab-cap");
 }
+}
 
 // ---------- текст доклада и хронометраж ----------
 function writeSpeech() {
-  const lines = ["# Текст доклада к колоде DID_v2", "",
+  const lines = [`# Текст доклада к колоде ${NAME}`, "",
     "Собирается вместе с колодой (`node build_team.js`); тот же текст лежит в заметках к слайдам.", ""];
   let section = null, n = 0;
   for (const p of SPEECH_PARTS) {

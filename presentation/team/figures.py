@@ -73,7 +73,7 @@ def zone(ax, z, kind, label=None, z0=1):
         ax.add_patch(Rectangle((z['x'] - z['w'] / 2, z['y'] - z['h'] / 2), z['w'], z['h'], facecolor=face, edgecolor=edge,
                                lw=0.9, zorder=z0))
     if label:
-        ax.text(z['x'], z['y'], label, ha='center', va='center', fontsize=8, color=edge, fontweight='bold', zorder=z0 + 1)
+        ax.text(z['x'], z['y'], label, ha='center', va='center', fontsize=8, color=edge, fontweight='bold', zorder=z0 + 1, clip_on=True)
 
 
 def soils_at(sc, t=None):
@@ -328,17 +328,122 @@ def fig_team():
     return {'keys': list(rec.keys()), 'robots': len(robots), 'result': rec.get('result')}
 
 
+# ---------------------------------------------------------------- 8. математика: карта вероятностей по шагам
+# Данные считает presentation/team/mathdata.py кодом робота (did.belief.SampleBelief) на трёх настоящих показаниях.
+def fig_bayes():
+    m = json.loads((HERE / 'data' / 'math.json').read_text())['belief']
+    cmap = LinearSegmentedColormap.from_list('b', ['#E9F0FF', '#B9CEFA', '#7F9FEF', BLUE, '#1F3C9C'])
+    ext = (m['x0'], m['x0'] + m['w'] * m['res'], m['y0'], m['y0'] + m['h'] * m['res'])
+    fig, axes = panels(3, 3.0)
+    info = []
+    for k, ax in enumerate(axes):
+        arena(ax)
+        st = m['steps'][k]
+        p = np.array(st['grid'])
+        v = np.clip(p / 0.35, 0.0, 1.0) ** 0.35           # степень: видно и слабое кольцо первого показания, и пик
+        ax.imshow(np.where(p > 0.0068, v, np.nan), origin='lower', extent=ext, cmap=cmap, vmin=0.0, vmax=1.0, interpolation='nearest', zorder=1)
+        for j, q in enumerate(m['steps'][:k + 1]):                       # кольца всех учтённых показаний
+            r = q['reading']
+            new = j == k
+            ax.add_patch(Circle((r['x'], r['y']), r['d'], facecolor='none', edgecolor=INK if new else MUTED,
+                                lw=1.5 if new else 0.9, ls=(0, (4, 3)), zorder=6, alpha=1.0 if new else 0.55))
+            ax.plot(r['x'], r['y'], 'o', ms=7 if new else 4.5, mfc=INK if new else MUTED, mec='white', mew=1.1, zorder=9)
+        ax.plot(*m['sample'], 'o', ms=12, mfc='none', mec=GREEN, mew=2.2, zorder=8)
+        base(ax)
+        ax.set_xlim(LIM[0], 0.9)                                            # левая часть арены крупнее: всё происходит у базы
+        ax.set_ylim(-2.0, 1.6)
+        info.append({'t': st['reading']['t'], 'z': round(st['reading']['z'], 2), 'd': round(st['reading']['d'], 2),
+                     'top': round(st['top'][0]['mass'], 2), 'to_sample': round(st['top'][0]['to_sample'], 2)})
+    save(fig, 'bayes_steps.png')
+    return info
+
+
+def fig_sensor_law():
+    m = json.loads((HERE / 'data' / 'math.json').read_text())['belief']
+    r = m['steps'][0]['reading']
+    fig, ax = plt.subplots(figsize=(2.5, 1.9))
+    fig.subplots_adjust(left=0.2, right=0.97, top=0.95, bottom=0.24)
+    ax.set_facecolor(BG)
+    d = np.linspace(0, m['range'], 50)
+    ax.fill_betweenx([0, r['z']], r['d'] - 2 * m['sigma'] * m['range'], r['d'] + 2 * m['sigma'] * m['range'], color='#DCE8FF', lw=0, zorder=1)
+    ax.plot(d, 1 - d / m['range'], '-', color=INK, lw=2.0, zorder=3)
+    ax.plot([0, r['d']], [r['z'], r['z']], '--', color=BLUE, lw=1.3, zorder=2)
+    ax.plot([r['d'], r['d']], [r['z'], 0], '--', color=BLUE, lw=1.3, zorder=2)
+    ax.plot(r['d'], r['z'], 'o', ms=7, mfc=BLUE, mec='white', mew=1.2, zorder=4)
+    ax.set_xlim(0, m['range'])
+    ax.set_ylim(0, 1.02)
+    ax.set_xticks([0, 1, 2])
+    ax.set_yticks([0, 0.5, 1])
+    ax.set_yticklabels(['0', '0,5', '1'])
+    ax.tick_params(colors=MUTED, labelsize=8.5, length=0)
+    for side in ('top', 'right'):
+        ax.spines[side].set_visible(False)
+    for side in ('left', 'bottom'):
+        ax.spines[side].set_color('#B9C6DA')
+    ax.set_xlabel('расстояние до образца, м', color=MUTED, fontsize=8.5, labelpad=2)
+    ax.set_ylabel('показание z', color=MUTED, fontsize=8.5, labelpad=2)
+    save(fig, 'sensor_law.png')
+    return {'z': round(r['z'], 2), 'd': round(r['d'], 2)}
+
+
+# ---------------------------------------------------------------- 9. математика: путь Дейкстры по карте стоимости
+def fig_dijkstra():
+    m = json.loads((HERE / 'data' / 'math.json').read_text())['path']
+    fig, (ax,) = panels(1, 3.6)
+    arena(ax)
+    for z in m['soils']:
+        zone(ax, z, 'soil', '×' + num(z['mult']).replace(',0', ''))
+    for key, color, ls, lw in (('short', GREY, (0, (3, 2.5)), 2.0), ('cheap', BLUE, '-', 2.4)):
+        pts = m[key]['pts']
+        ax.plot([q[0] for q in pts], [q[1] for q in pts], color=color, ls=ls, lw=lw, solid_capstyle='round', zorder=6)
+    ax.plot(*m['start'], 'o', ms=9, mfc=INK, mec='white', mew=1.3, zorder=9)
+    ax.plot(*m['goal'], 'o', ms=10, mfc=GREEN, mec='white', mew=1.3, zorder=9)
+    ax.set_xlim(-2.02, 1.45)
+    ax.set_ylim(-1.27, 1.27)
+    save(fig, 'dijkstra.png')
+    return {k: {'meters': m[k]['meters'], 'energy': m[k]['energy']} for k in ('short', 'cheap')}
+
+
+# ---------------------------------------------------------------- 10. миссия словами: запретная половина арены
+def fig_pair_llm_zone(seed='medium-1002', limit=0.5):
+    rule = load('L3d', 'M3_rule', f'{seed}.json.gz')
+    llm = load('L3d', 'M3_qwen3.8-flash-next', f'{seed}.json.gz')
+    info = {}
+    fig, axes = panels(2, 3.4)
+    for ax, rec, color, side in zip(axes, (rule, llm), (GREY, VIOLET), ('left', 'right')):
+        arena(ax)
+        ax.add_patch(Rectangle((limit, LIM[2]), LIM[1] - limit, LIM[3] - LIM[2], facecolor='#F8D2D2', edgecolor='none', alpha=0.55, zorder=0.8))
+        ax.imshow(np.where(FREE, np.nan, 1.0), origin='lower', extent=EXT, cmap=LinearSegmentedColormap.from_list('o', [BG, BG]),
+                  interpolation='nearest', zorder=0.9)
+        ax.plot([limit, limit], [LIM[2] + 0.35, LIM[3] - 0.35], color=RED, lw=1.6, ls=(0, (5, 3)), zorder=4)
+        truth(ax, rec['scenario'])
+        tr = rec['track']
+        ax.plot(tr['x'], tr['y'], '-', color=color, lw=2.1, solid_capstyle='round', zorder=5)
+        inside = [i for i, x in enumerate(tr['x']) if x > limit]
+        if inside:                                           # участки пути в запретной половине
+            xs = [x if x > limit else np.nan for x in tr['x']]
+            ax.plot(xs, tr['y'], '-', color=RED, lw=2.6, solid_capstyle='round', zorder=6)
+        samples(ax, rec)
+        base(ax)
+        left_total = sum(1 for sx, _ in rec['scenario']['samples'] if sx <= limit)
+        info[side] = {'collected': rec['result']['samples_collected'], 'total': rec['result']['samples_total'], 'left_total': left_total,
+                      'share_inside': round(len(inside) / len(tr['x']), 2), 'returned': rec['result']['returned'], 'max_x': round(max(tr['x']), 2)}
+    save(fig, 'pair_llm_zone.png')
+    return info
+
+
 if __name__ == '__main__':
     facts = {}
     for key, fn in (('scenario', fig_scenario), ('truth_vs_robot', fig_truth_vs_robot), ('belief', fig_belief),
                     ('pair_e1', fig_pair_e1), ('pair_fault', fig_pair_fault),
                     ('pair_llm_m4', lambda: fig_pair_llm('M4', 'hard-1003', 'pair_llm_m4.png')),
                     ('pair_llm_m1', lambda: fig_pair_llm('M1', 'hard-1006', 'pair_llm_m1.png')),
-                    ('team', fig_team)):
+                    ('team', fig_team), ('bayes', fig_bayes), ('sensor_law', fig_sensor_law), ('dijkstra', fig_dijkstra),
+                    ('pair_llm_zone', fig_pair_llm_zone)):
         try:
             facts[key] = fn()
         except Exception as e:  # рисунок не получился — остальные всё равно нужны
             facts[key] = {'error': repr(e)}
             print('ОШИБКА', key, repr(e))
     (HERE / 'data' / 'facts.json').write_text(json.dumps(facts, ensure_ascii=False, indent=1, default=str))
-    print(json.dumps({k: v for k, v in facts.items() if k not in ('pair_llm_m4', 'pair_llm_m1')}, ensure_ascii=False, default=str)[:3000])
+    print(json.dumps({k: facts[k] for k in ('bayes', 'sensor_law', 'dijkstra', 'pair_llm_zone')}, ensure_ascii=False, default=str)[:2500])

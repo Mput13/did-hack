@@ -2283,5 +2283,60 @@
    "messages": 187,
    "lagged_share": 0.003
   }
+ },
+ "bayes": [
+  {
+   "t": 0.4,
+   "z": 0.48,
+   "d": 1.04,
+   "top": 0.18,
+   "to_sample": 0.49
+  },
+  {
+   "t": 5.5,
+   "z": 0.57,
+   "d": 0.86,
+   "top": 0.26,
+   "to_sample": 0.23
+  },
+  {
+   "t": 7.9,
+   "z": 0.79,
+   "d": 0.43,
+   "top": 0.45,
+   "to_sample": 0.23
+  }
+ ],
+ "sensor_law": {
+  "z": 0.48,
+  "d": 1.04
+ },
+ "dijkstra": {
+  "short": {
+   "meters": 2.77,
+   "energy": 10.49
+  },
+  "cheap": {
+   "meters": 2.86,
+   "energy": 7.16
+  }
+ },
+ "pair_llm_zone": {
+  "left": {
+   "collected": 5,
+   "total": 5,
+   "left_total": 3,
+   "share_inside": 0.33,
+   "returned": true,
+   "max_x": 1.53
+  },
+  "right": {
+   "collected": 3,
+   "total": 5,
+   "left_total": 3,
+   "share_inside": 0.0,
+   "returned": true,
+   "max_x": 0.3
+  }
  }
 }
