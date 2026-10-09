@@ -26,7 +26,7 @@ from .nav import (ESCAPE_ROOM, ESCAPE_STOP, ESCAPE_V, FRONT_STOP, CostGraph, Fol
                   free_ahead, freest_turn, moved_since, straighten)
 from .pickup import Pickup
 from .planner import MISSION, HeuristicPlanner, resolve_subgoals
-from .replay import exact_replay
+from .replay import NeighborReplay, exact_replay
 from .route import survey_route
 from .sensorguard import SensorGuard
 from .waiting import ActWhileWaiting, answer_delay
@@ -102,6 +102,10 @@ class AgentConfig:
     pickup: bool = False              # собирать попутно: образец уже в радиусе сбора, а робот едет к другой цели или домой
     exact_replay: bool = False        # проба: после сбора пересчитывать карту образцов с собранным образцом на ней,
                                       # чтобы не терять соседний (did/replay.py); в *_v4 не входит
+    # --- правка B1 (research/findings/B1.md, логика — did/replay.py): по умолчанию выключена; включена в *_v5
+    neighbor_replay: str = ''         # пересчёт карты после сбора: '' — прежний; gated_clean — без показаний, снятых при
+                                      # распознанном сбое датчика, и точный там, где прежний стирает известное место;
+                                      # gated и full — варианты, отвергнутые на отладке (did/replay.py)
     # --- абляция R12 (research/findings/R12.md): как исследователь выбирает опыт; gain — прежнее поведение
     inquiry_choice: str = 'gain'      # gain | bits | random | cheapest | fixed | worst | blind (did.science.CHOICES)
     inquiry_seed: int = 0             # зерно случайного выбора; прогон подставляет номер сценария (did/runner.py)
@@ -109,6 +113,9 @@ class AgentConfig:
     def to_dict(self):
         return asdict(self)
 
+
+# Правка B1, включённая в пресеты *_v5 (research/findings/B1.md).
+V5 = {'neighbor_replay': 'gated_clean'}
 
 # Правка P3, включённая в пресеты *_v4 (research/findings/P3.md).
 V4 = {'pickup': True}
@@ -170,6 +177,10 @@ PRESETS = {
     # Версия 4 (research/findings/P3.md): версия 2 плюс попутный сбор. Правки P2 (версия 3) в неё не входят.
     'adaptive_v4': AgentConfig(name='adaptive_v4', fault_wait=True, **V4),
     'scientist_v4': AgentConfig(name='scientist_v4', science=True, fault_wait=True, **V4),
+    # Версия 5 (research/findings/B1.md): версия 2 плюс пересчёт карты, не теряющий соседний образец.
+    # Правки P2 (версия 3) и P3 (версия 4) в неё не входят.
+    'adaptive_v5': AgentConfig(name='adaptive_v5', fault_wait=True, **V5),
+    'scientist_v5': AgentConfig(name='scientist_v5', science=True, fault_wait=True, **V5),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
                                avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
@@ -326,6 +337,8 @@ class Agent:
         self.frugal = Frugal(self) if Frugal.wanted(config) else None   # правки P2: бережный расход (did/frugal.py)
         if config.exact_replay and self.cal is None:
             self.belief.replay = exact_replay
+        if config.neighbor_replay and self.cal is None:
+            self.belief.replay = NeighborReplay(self.rules.sensor_sigma, config.candidate_mass, config.neighbor_replay)
         self.pickup = Pickup(self) if config.pickup else None           # правка P3: попутный сбор (did/pickup.py)
         self._battery_threshold_triggered = False
         self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
