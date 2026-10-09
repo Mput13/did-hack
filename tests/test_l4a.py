@@ -269,3 +269,64 @@ def test_mission_n2_two_empty_approaches_in_a_row():
     assert verify('N2', none)['success'] is None and verify('N1', none)['success'] is None
     assert verify('N3', none)['outcome'] == 'no_occasion'
     assert set(MISSIONS) == {'N1', 'N2', 'N3'}
+
+
+# --- инструмент: вторая мера повторов, точный критерий, контроль шума ----------------------------
+
+def _tool():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
+    import l4a_memory
+    return l4a_memory
+
+
+def test_fisher_exact_for_small_shares():
+    f = _tool().fisher_p
+    assert f(5, 5, 0, 4) == round(1 / 126, 4)                  # 5 из 5 против 0 из 4: одна таблица из 126
+    assert f(1, 2, 0, 2) == 1.0 and f(3, 5, 3, 5) == 1.0
+    assert f(5, 5, 3, 5) == round(2 * 10 / 45, 4)              # 8 успехов на 10: крайние таблицы с двух сторон
+    assert f(0, 0, 1, 2) is None
+
+
+def test_revisits_by_memory_do_not_depend_on_who_saw_the_memory():
+    """Вторая мера считает по спискам памяти, а они одинаково лежат и в снимке (on), и рядом с ним (track)."""
+    tool = _tool()
+    memory = {'checked_empty': [{'x': 1.0, 'y': 1.0, 'near': ['C1', 'E2']}], 'penalty_places': [{'near': ['C3']}]}
+    plans = [{'subgoals': [{'type': 'investigate', 'target': 'C1', 'x': 1.1, 'y': 1.0}]},
+             {'subgoals': [{'type': 'investigate', 'target': 'C3', 'x': 3.0, 'y': 0.0}]},      # у штрафа — не повтор
+             {'subgoals': [{'type': 'explore', 'target': 'E2', 'x': 1.2, 'y': 1.2}]},
+             {'subgoals': [{'type': 'return_base'}]}, {'subgoals': []}]
+    track = {'plans': [{**p, 'state': {'candidates': []}, 'memory': memory} for p in plans]}
+    on = {'plans': [{**p, 'state': {'candidates': [], **memory}} for p in plans]}
+    assert tool.revisits_by_memory(track) == tool.revisits_by_memory(on) == 2
+    assert tool.revisits_by_memory({'plans': plans}) is None           # память не велась — меры нет, а не ноль
+
+
+def test_main_metric_ignores_memory_fields(runs):
+    """Основная мера повторных отправок берёт только планы, пути, трек и события: поля памяти её не меняют."""
+    for name in ('track', 'on'):
+        tr = runs[name][1]
+        bare = {**tr, 'plans': [{k: v for k, v in p.items() if k not in ('state', 'memory')} for p in tr['plans']]}
+        assert revisits(bare) == revisits(tr)
+        for m in MISSIONS:
+            assert verify(m, bare) == verify(m, tr)
+
+
+def test_noise_control_asks_the_same_request_under_another_cache_key():
+    tool = _tool()
+    seen = []
+
+    class Inner:
+        model, use_schema = 'm', False
+
+        def chat(self, messages, temperature=0.2, max_tokens=800, schema=None):
+            seen.append((messages, temperature, max_tokens))
+            return 'ok'
+
+    assert tool.Again(Inner()).chat(['q'], max_tokens=800) == 'ok'
+    assert seen == [(['q'], 0.2, 801)]                                 # тот же вопрос, лимит ответа на единицу больше
+    assert tool.same_goal({'type': 'return_base'}, {'type': 'return_base'}) and tool.same_goal(None, None)
+    assert not tool.same_goal(None, {'type': 'return_base'})
+    assert tool.same_goal({'type': 'explore', 'x': 1.0, 'y': 1.0}, {'type': 'explore', 'x': 1.03, 'y': 1.0})
+    assert not tool.same_goal({'type': 'explore', 'x': 1.0, 'y': 1.0}, {'type': 'investigate', 'x': 1.0, 'y': 1.0})

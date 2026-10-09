@@ -5,6 +5,9 @@
     ./px python tools/l4a_memory.py shadow A                    # тень: в состояниях руки mem спросить подсказку без памяти
     ./px python tools/l4a_memory.py shadow B                    # тень: в состояниях руки nomem, где память указывает на цель
     ./px python tools/l4a_memory.py shadow C                    # контроль шума: тот же вопрос без памяти второй раз
+    ./px python tools/l4a_memory.py shadow C --retry-failed     # досчёт: сохранённые обрывы связи спросить заново
+    ./px python tools/l4a_memory.py shadow Call                 # контроль шума на всех состояниях руки mem (сверх плана)
+    ./px python tools/l4a_memory.py shadow CB                   # контроль шума на состояниях тени B (сверх плана)
     ./px python tools/l4a_memory.py select                      # сценарии миссий N1–N3 по прогонам правила
     ./px python tools/l4a_memory.py run missions --missions N2  # миссии словами: правило, без памяти, с памятью
     ./px python tools/l4a_memory.py report                      # сводка runs/<--out>/summary.json и снимок чисел
@@ -22,7 +25,7 @@ import math
 import time
 from collections import Counter
 
-from l3_common import (ENV_FILE, MAIN, RUNS, CacheFirst, exchange_stats, fmt_share, llm_opts, mean_ci, paired_binary,
+from l3_common import (ENV_FILE, MAIN, RUNS, CacheFirst, client as plain_client, exchange_stats, fmt_share, llm_opts, mean_ci, paired_binary,
                        paired_diff, read_json, run_cells, share, share_diff, write_json)
 
 from did.llm import load_env, load_system_prompt, request_plan
@@ -42,6 +45,7 @@ PER_MISSION = 5
 EVERY = {'llm_min_interval_s': 0.0}        # на каждый повод отвечает модель, а не правило
 ARMS = ('rule', 'nomem', 'mem')
 NOISE_N = 40                               # контроль шума: столько первых состояний руки mem
+NOISE = ('C', 'Call', 'CB')                # тени, где тот же запрос без памяти задаётся второй раз
 
 
 def arm_dir(group, arm):
@@ -137,15 +141,16 @@ def feasible_ids(state):
 
 
 def shadow_cases(out, kind):
-    """Состояния для тени: [(ключ, запись решения)]. A и C — рука mem, B — рука nomem, где память указывает на цель."""
+    """Состояния для тени: [(ключ, запись решения)]. A и C — рука mem, B — рука nomem, где память указывает на цель.
+    Сверх плана: Call — все состояния руки mem (C — первые NOISE_N из них), CB — состояния тени B."""
     cases = []
-    arm = 'nomem' if kind == 'B' else 'mem'
+    arm = 'nomem' if kind in ('B', 'CB') else 'mem'
     for seed in sorted(int(p.name.split('-')[1].split('.')[0]) for p in (RUNS / out / arm_dir('main', arm)).glob('*.json.gz')):
         tr = load_trace(record(out, 'main', arm, seed))
         for i, p in enumerate(tr['plans']):
             if 'state' not in p or 'rule_match' not in p:          # решение без участия модели
                 continue
-            if kind == 'B':
+            if kind in ('B', 'CB'):
                 ok = feasible_ids(p['state'])
                 if not (near_ids(p['memory'], 'checked_empty') | near_ids(p['memory'], 'penalty_places')) & ok:
                     continue
@@ -160,7 +165,7 @@ def shadow_one(case, kind, client):
         ask, prompt = with_memory(state, p['memory']), load_system_prompt(PROMPT)
     else:
         ask, prompt = without_memory(state), None
-    res = request_plan(Again(client) if kind == 'C' else client, ask, system_prompt=prompt)
+    res = request_plan(Again(client) if kind in NOISE else client, ask, system_prompt=prompt)
     goal = first_goal(res.plan.model_dump(exclude_none=True)['subgoals'], ask) if res.plan else None
     return {'key': key, 't': p['t'], 'trigger': p['trigger'], 'ok': res.plan is not None, 'error': res.error,
             'goal': goal, 'reasoning': res.plan.reasoning if res.plan else None,
@@ -170,11 +175,15 @@ def shadow_one(case, kind, client):
 def cmd_shadow(args):
     kind = args.kind
     cases = shadow_cases(args.out, kind)
-    client = make_llm(args.model, args.cache_only)
-    if 'client' not in client:
-        from did.llm import make_client
-        client = {'client': make_client(**client)}
-    client = client['client']
+    if args.retry_failed and not args.cache_only:
+        # Досчёт после обрывов связи: готовые ответы — из кэша, сохранённые отказы и новое — по сети.
+        client = plain_client(args.model)
+    else:
+        client = make_llm(args.model, args.cache_only)
+        if 'client' not in client:
+            from did.llm import make_client
+            client = {'client': make_client(**client)}
+        client = client['client']
     by_key = dict(cases)
     print(f'Тень {kind}: состояний {len(cases)}', flush=True)
     done = with_calls(args.out, f'shadow {kind}', args.model, args.cache_only,
@@ -185,6 +194,31 @@ def cmd_shadow(args):
 
 
 # --- сводка ----------------------------------------------------------------------------------------
+
+def revisits_by_memory(trace):
+    """Вторая, проверочная мера повторных отправок — по спискам самой памяти (они ведутся и в руке nomem):
+    решения, первая подцель которых стоит в near у checked_empty на момент решения. Основная мера —
+    did.plan_memory.revisits: она памяти не касается и годится для любого агента. None — память не велась."""
+    n, seen = 0, False
+    for p in trace.get('plans') or []:
+        memory = p.get('memory') or (p.get('state') if 'checked_empty' in (p.get('state') or {}) else None)
+        if memory is None:
+            continue
+        seen = True
+        sg = (p.get('subgoals') or [None])[0]
+        n += bool(sg and sg.get('target') in near_ids(memory, 'checked_empty'))
+    return n if seen else None
+
+
+def fisher_p(k1, n1, k2, n2):
+    """Точный двусторонний критерий Фишера для двух долей k1 из n1 и k2 из n2."""
+    if not n1 or not n2:
+        return None
+    k, n = k1 + k2, n1 + n2
+    prob = lambda i: math.comb(n1, i) * math.comb(n2, k - i) / math.comb(n, k)          # noqa: E731
+    p0 = prob(k1)
+    return round(min(1.0, sum(prob(i) for i in range(max(0, k - n2), min(k, n1) + 1) if prob(i) <= p0 + 1e-12)), 4)
+
 
 def read_run(path):
     tr = load_trace(path)
@@ -204,6 +238,9 @@ def read_run(path):
             'same_as_rule': sum(p['rule_match'] for p in by_model),
             'empty_places': rv['empty_places'], 'to_empty': rv['to_empty'], 'to_empty_collected': rv['to_empty_collected'],
             'to_penalty': rv['to_penalty'], 'revisit_list': rv['list'],
+            'to_empty_by_memory': revisits_by_memory(tr),
+            'fallback': sum(p['source'] == 'fallback' for p in plans),
+            'no_answer': sum(1 for ex in tr.get('llm') or [] if ex.get('response') is None),
             'lost': seq['lost'], 'refuted': seq['candidate_refuted'],
             'prompt_tokens': round(sum(tokens) / len(tokens)) if tokens else None,
             'exchanges': tr.get('llm') or [], 'trace': tr}
@@ -234,6 +271,10 @@ def arm_summary(runs, arm):
          'collisions': sum(r['collisions'] for r in vals)}
     for m in ('decisions', 'to_empty', 'to_penalty', 'empty_places', 'lost', 'to_empty_collected'):
         e[m] = {'total': sum(r[m] for r in vals), 'per_run': round(sum(r[m] for r in vals) / n, 2)}
+    e['runs_with_empty_place'] = sum(r['empty_places'] > 0 for r in vals)
+    e['runs_with_to_empty'] = sum(r['to_empty'] > 0 for r in vals)
+    e['collected'] = sum(r['collected'] for r in vals)
+    e['penalties'] = sum(r['penalties'] for r in vals)
     if arm != 'rule':
         k = sum(r['by_model'] for r in vals)
         e['asked'] = sum(r['asked'] for r in vals)
@@ -241,6 +282,8 @@ def arm_summary(runs, arm):
         e['llm'] = exchange_stats([ex for r in vals for ex in r['exchanges']])
         tok = [r['prompt_tokens'] for r in vals if r['prompt_tokens']]
         e['prompt_tokens_per_run_mean'] = round(sum(tok) / len(tok)) if tok else None
+        e['to_empty_by_memory'] = sum(r['to_empty_by_memory'] or 0 for r in vals)
+        e['fallback'] = sum(r['fallback'] for r in vals)
     return e
 
 
@@ -286,6 +329,7 @@ def shadow_summary(out, data):
             'choose_near_penalty': paired_binary({r['key']: pick(r, 'mem', 'near_penalty') for r in info_p},
                                                  {r['key']: pick(r, 'nomem', 'near_penalty') for r in info_p}),
             'differing': [r for r in both if not same_goal(r['mem'], r['nomem'])],
+            'rows_all': both,
         }
     b = read_json(RUNS / out / 'shadow_B.json') or []
     if b:
@@ -313,13 +357,45 @@ def shadow_summary(out, data):
                     'choose_near_penalty': paired_binary({r['key']: pick(r, 'mem', 'near_penalty') for r in p_rows},
                                                          {r['key']: pick(r, 'nomem', 'near_penalty') for r in p_rows}),
                     'rows': rows}
-    c = read_json(RUNS / out / 'shadow_C.json') or []
-    if c and a:
-        first = {s['key']: s for s in a}
+    first = {s['key']: s for s in a}
+    for kind in ('C', 'Call'):
+        c = read_json(RUNS / out / f'shadow_{kind}.json') or []
+        if not (c and a):
+            continue
         pairs = [(first[s['key']], s) for s in c if s['key'] in first and s['ok'] and first[s['key']]['ok']]
-        res['C'] = {'states': len(pairs),
-                    'nomem_differs_from_itself': share(sum(not same_goal(x['goal'], y['goal']) for x, y in pairs),
-                                                       len(pairs))}
+        keys = {s['key'] for _, s in pairs}
+        # На тех же состояниях: «с памятью против без памяти» (тень A) рядом с «без памяти против себя».
+        same = [r for r in res['A']['rows_all'] if r['key'] in keys]
+        again = {s['key']: s['goal'] for _, s in pairs}
+        res[kind] = {'asked': len(c), 'no_answer': sum(not s['ok'] for s in c), 'states': len(pairs),
+                     'nomem_differs_from_itself': share(sum(not same_goal(x['goal'], y['goal']) for x, y in pairs),
+                                                        len(pairs)),
+                     'mem_differs_from_nomem_same_states': share(sum(not same_goal(r['mem'], r['nomem']) for r in same),
+                                                                 len(same)),
+                     'mem_differs_from_second_nomem': share(sum(not same_goal(r['mem'], again[r['key']]) for r in same),
+                                                            len(same)),
+                     'paired': paired_binary({r['key']: not same_goal(r['mem'], r['nomem']) for r in same},
+                                             {x['key']: not same_goal(x['goal'], y['goal']) for x, y in pairs})}
+    if 'A' in res:
+        del res['A']['rows_all']
+    cb = read_json(RUNS / out / 'shadow_CB.json') or []
+    if cb and 'B' in res:
+        again = {s['key']: s['goal'] for s in cb if s['ok']}
+        rows = [r for r in res['B']['rows'] if r['key'] in again]
+        pick = lambda goal, ids: bool(goal and goal.get('target') in ids)                    # noqa: E731
+        e_rows = [r for r in rows if r['near_empty']]
+        p_rows = [r for r in rows if r['near_penalty']]
+        res['CB'] = {'asked': len(cb), 'no_answer': sum(not s['ok'] for s in cb), 'states': len(rows),
+                     'nomem_differs_from_itself': share(sum(not same_goal(r['nomem'], again[r['key']]) for r in rows),
+                                                        len(rows)),
+                     'mem_differs_from_nomem_same_states': share(sum(not same_goal(r['mem'], r['nomem']) for r in rows),
+                                                                 len(rows)),
+                     'states_near_empty': len(e_rows),
+                     'second_nomem_chooses_checked_empty': share(
+                         sum(pick(again[r['key']], r['near_empty']) for r in e_rows), len(e_rows)),
+                     'states_near_penalty': len(p_rows),
+                     'second_nomem_chooses_near_penalty': share(
+                         sum(pick(again[r['key']], r['near_penalty']) for r in p_rows), len(p_rows))}
     return res
 
 
@@ -352,12 +428,26 @@ def missions_summary(out):
             if arm != 'rule':
                 e['llm'] = exchange_stats([ex for r in vals for ex in r['exchanges']])
                 e['rule_decisions'] = sum(r['decisions'] - r['by_model'] for r in vals)
+                # Прогоны, где сервер не ответил и решало запасное правило: {сценарий: сколько таких решений}.
+                e['fallback_by_scenario'] = {sc: r['fallback'] for sc, r in runs.items() if r['fallback']}
+                for sc, r in runs.items():
+                    e['by_scenario'][sc]['fallback'] = r['fallback']
             cell['arms'][arm] = e
         a = cell['arms']
         if 'mem' in a and 'nomem' in a:
             cell['mem_minus_nomem'] = share_diff(a['mem']['success']['k'], a['mem']['success']['n'],
                                                  a['nomem']['success']['k'], a['nomem']['success']['n'])
             cell['paired'] = paired_binary(verdicts['mem'], verdicts['nomem'])
+            cell['fisher_p'] = fisher_p(a['mem']['success']['k'], a['mem']['success']['n'],
+                                        a['nomem']['success']['k'], a['nomem']['success']['n'])
+            for m in ('score', 'collected'):
+                cell[f'{m}_mem_minus_nomem'] = paired_diff({k: r[m] for k, r in data['mem'].items()},
+                                                           {k: r[m] for k, r in data['nomem'].items()})
+        if 'mem' in a and 'rule' in a:
+            cell['mem_minus_rule'] = share_diff(a['mem']['success']['k'], a['mem']['success']['n'],
+                                                a['rule']['success']['k'], a['rule']['success']['n'])
+            cell['fisher_p_mem_rule'] = fisher_p(a['mem']['success']['k'], a['mem']['success']['n'],
+                                                 a['rule']['success']['k'], a['rule']['success']['n'])
         table[m_id] = cell
     return table
 
@@ -380,6 +470,19 @@ def summarize(out, seeds):
             s['prompt_tokens_ratio'] = round(x['llm']['tokens']['prompt'] / y['llm']['tokens']['prompt'], 3)
     s['shadow'] = shadow_summary(out, data)
     s['missions'] = missions_summary(out)
+    # Цена памяти по всем прогонам с моделью (основная пара и миссии): больше запросов — уже интервал.
+    every = {arm: [] for arm in ('nomem', 'mem')}
+    for group, own in [('main', seeds)] + list(mission_seeds(out).items()):
+        for arm in every:
+            for seed in own:
+                if record(out, group, arm, seed).is_file():
+                    every[arm] += load_trace(record(out, group, arm, seed)).get('llm') or []
+    if every['mem'] and every['nomem']:
+        x, y = exchange_stats(every['mem']), exchange_stats(every['nomem'])
+        s['llm_all_runs'] = {'mem': x, 'nomem': y,
+                             'first_ok_mem_minus_nomem': share_diff(x['first_ok'], x['requests'], y['first_ok'],
+                                                                    y['requests']),
+                             'prompt_tokens_ratio': round(x['tokens']['prompt'] / y['tokens']['prompt'], 3)}
     s['launches'] = read_json(RUNS / out / 'launches.json', [])
     s['network_calls'] = sum(x['network_calls'] for x in s['launches'] if not x['cache_only'])
     s['runs'] = [{'arm': arm, 'scenario': k, **{f: r[f] for f in r if f not in ('exchanges', 'trace')}}
@@ -413,7 +516,7 @@ def report(s):
         lines.append(f"{name}: счёт {_ci(d['score'])}; собрано {_ci(d['collected'])}; штрафы {_ci(d['penalties'])}; "
                      f"повторных в пустое {_ci(d['to_empty'])}; к штрафу {_ci(d['to_penalty'])}; решений "
                      f"{_ci(d['decisions'], 1)}; пропавших {_ci(d['lost'], 1)}")
-    for k in ('same_as_rule_mem_minus_nomem', 'first_ok_mem_minus_nomem', 'prompt_tokens_ratio'):
+    for k in ('same_as_rule_mem_minus_nomem', 'first_ok_mem_minus_nomem', 'prompt_tokens_ratio', 'llm_all_runs'):
         if k in s:
             lines.append(f'{k}: {s[k]}')
     for kind, e in s['shadow'].items():
@@ -422,7 +525,9 @@ def report(s):
         for arm, e in cell['arms'].items():
             lines.append(f"{m_id}/{arm}: выполнено {fmt_share(e['success'])}, без повода {e['no_occasion']} из {e['runs']}; "
                          f"исходы {e['outcomes']}; счёт {e['score']}, собрано {e['collected']}, вернулся {e['returned']}")
-        lines.append(f"{m_id}: mem − nomem {cell.get('mem_minus_nomem')}; парно {cell.get('paired')}")
+        lines.append(f"{m_id}: mem − nomem {cell.get('mem_minus_nomem')}, Фишер p={cell.get('fisher_p')}; парно "
+                     f"{cell.get('paired')}; счёт {_ci(cell.get('score_mem_minus_nomem'))}, образцы "
+                     f"{_ci(cell.get('collected_mem_minus_nomem'))}")
     lines.append(f"настоящих обращений к серверу: {s['network_calls']}")
     return '\n'.join(lines)
 
@@ -490,7 +595,7 @@ def parse_seeds(text):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('cmd', choices=['run', 'shadow', 'select', 'report', 'compare'])
-    ap.add_argument('what', nargs='?', default='main', help='run: main | missions; shadow: A | B | C')
+    ap.add_argument('what', nargs='?', default='main', help='run: main | missions; shadow: A | B | C | Call | CB')
     ap.add_argument('--arms', nargs='+', default=list(ARMS), choices=ARMS)
     ap.add_argument('--missions', nargs='+', default=list(MISSIONS), choices=list(MISSIONS))
     ap.add_argument('--model', default=MAIN)
@@ -500,6 +605,8 @@ def main():
     ap.add_argument('--with', dest='other', default=EXPERIMENT, help='compare: с какой папкой сверять')
     ap.add_argument('--jobs', type=int, choices=(1, 2), default=2, help='к серверу — не больше двух запросов сразу')
     ap.add_argument('--cache-only', action='store_true')
+    ap.add_argument('--retry-failed', action='store_true',
+                    help='shadow: сохранённые в кэше обрывы связи спросить заново (ответы из кэша не трогаются)')
     args = ap.parse_args()
     args.out = args.out or ('L4a_dev' if args.dev else EXPERIMENT)
     seeds = parse_seeds(args.seeds) if args.seeds else (DEV if args.dev else FINAL)
