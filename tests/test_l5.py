@@ -157,3 +157,16 @@ def test_crossfit_loss_is_not_inflated_by_noise():
     assert abs(np.mean(cross)) < 0.6
     better = {'a': np.full(l5_bank.REPS, 60.0), 'b': np.full(l5_bank.REPS, 75.0)}
     assert l5_bank.crossfit_loss(better, better['a']) == pytest.approx(15.0)
+
+
+def test_index_survives_summary_written_by_own_tool(tmp_path, monkeypatch):
+    """Сводка банка L5 пишется своей программой и вердиктов не содержит: список опытов на ней не падает."""
+    import json
+
+    from did import experiments
+    monkeypatch.setattr(experiments, 'RUNS', tmp_path)
+    (tmp_path / 'L5').mkdir()
+    (tmp_path / 'L5' / 'summary.json').write_text(json.dumps({'experiment': 'L5', 'generated': '2026-10-09T05:00:00'}))
+    item = next(i for i in experiments.build_index()['experiments'] if i['id'] == 'L5')
+    assert item['generated'] == '2026-10-09T05:00:00' and item['runs'] == 0 and item['claims'] == []
+

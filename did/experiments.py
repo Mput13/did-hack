@@ -308,9 +308,13 @@ def build_index():
         path = RUNS / exp_id / 'summary.json'
         if path.exists():
             s = json.loads(path.read_text(encoding='utf-8'))
-            item.update(status=s['status'], runs=len(s['runs']), errors=len(s['errors']), generated=s['generated'],
-                        claims=[{'text': c.get('text'), 'metric': c['metric'], 'status': c['status']}
-                                for c in s['claims']])
+            if 'status' in s:
+                item.update(status=s['status'], runs=len(s['runs']), errors=len(s['errors']),
+                            generated=s['generated'],
+                            claims=[{'text': c.get('text'), 'metric': c['metric'], 'status': c['status']}
+                                    for c in s['claims']])
+            else:       # сводку пишет своя программа опыта (например tools/l5_bank.py): вердиктов по гипотезам в ней нет
+                item.update(status='посчитан своей программой', generated=s.get('generated'))
         items.append(item)
     RUNS.mkdir(exist_ok=True)
     index = {'generated': time.strftime('%Y-%m-%dT%H:%M:%S'), 'experiments': items}
