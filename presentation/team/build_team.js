@@ -4,7 +4,9 @@
 //   /usr/local/bin/python3 presentation/team/figures.py     # рисунки из runs/ (один раз или после новых прогонов)
 //   cd presentation/team && node build_team.js              # DID_final.pptx, DID_final.pdf, slides/, preview.jpg, speech.md
 //   node build_team.js --all                                # то же плюс варианты и запасные слайды: DID_all.*
-//   node build_team.js --memory-b                           # память между прогонами двумя слайдами (вариант Б) вместо одного
+//   node build_team.js --memory-real                        # слайд «три памяти» с настоящими записями внизу (файл и запрос)
+//   node build_team.js --memory-a                           # вместо него один слайд с примером на картах
+//   node build_team.js --memory-b                           # два слайда: «три памяти» и пример на картах
 //
 // Состав итоговой колоды: основной рассказ, блок из пяти дополнительных треков условия (по слайду на трек), команда.
 // Числа — из research/findings/*.md, runs/*/summary.json и записей прогонов (presentation/team/data/facts.json);
@@ -696,7 +698,12 @@ function resultsSlide() {
 // ---------- 13. память между прогонами (уровень 4 условия: адаптация, не дополнительный трек) ----------
 // Пример — записи runs/L4b/adaptive_v2@base@L<k> и adaptive_v2_lab@base@same_lab2r<k>; числа серии — research/findings/L4b.md
 // (разделы 4 и 5) и runs/L4b/summary.json; память законов среды — did/memory.py, опыт E11 (runs/E11/summary.json).
-const MEMORY_B = process.argv.includes("--memory-b");      // в основной рассказ идут два слайда варианта Б
+// В основном рассказе — один слайд «три памяти» (решение владельца 9.10); остальное — ключами и в наборе --all.
+const MEMORY_A = process.argv.includes("--memory-a");      // один слайд с примером на картах
+const MEMORY_B = process.argv.includes("--memory-b");      // два слайда: «три памяти» и пример на картах
+const MEMORY_REAL = process.argv.includes("--memory-real"); // «три памяти» с настоящими записями внизу
+// Настоящие записи одной лаборатории: строка файла памяти и поле запроса к модели (tools/build_memory_page.py).
+const MEMX = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "memory_example.json"), "utf8"));
 const L4B_CI = `[${ru(L4B[1])}; ${ru(L4B[2])}]`;
 function level(s, right = X0 + CW) {
   const text = "Уровень 4 · адаптация", w = 0.34 + text.length * 0.066;
@@ -724,8 +731,8 @@ function memoryOne(variant) {
   T(s, [{ text: "Та же лаборатория, образцы в новых местах", options: { breakLine: true } }, { text: "Пунктир — зона из памяти, крестик — штраф", options: {} }],
     { x: 6.37, y: 4.08, w: 3.0, h: 0.4, fontSize: 8.5, color: C.text2, align: "center", objectName: "memory-legend" });
 }
-// Вариант Б, первый слайд: три памяти робота.
-function memoryKinds(variant) {
+// Три памяти робота. real — внизу вместо схемы «прогон → файлы → прогон» настоящие записи: как хранится и что получает модель.
+function memoryKinds(variant, real) {
   const s = content("Что робот помнит: три памяти", "Карта живёт один прогон; в файл между прогонами идёт только то, что робот узнал сам",
     "У робота три разные памяти. Первая — карта мира внутри прогона: где вероятны образцы, где дорогой грунт, где опасные зоны. Она живёт один прогон. Вторая — законы среды: числа вроде цены метра и длительности сбоя. Они годятся для любой карты, но выигрыша от них мы не показали. Третья — память о лаборатории: места, где робот получил штраф и где пол дорогой. Она годится только для той же арены — и она дала прибавку. Мест образцов и скрытой правды судьи в файле нет.", 30);
   level(s, variant ? 6.45 : undefined);
@@ -744,6 +751,20 @@ function memoryKinds(variant) {
       T(s, [{ text: label, options: { fontSize: 9, color: C.text2, breakLine: true } }, { text, options: { fontSize: 10, color: c } }],
         { x: x + 0.22, y: y + dy, w: w - 0.4, h, objectName: `memory-${i + 1}-row-${k + 1}`, paraSpaceAfter: 1 }));
   });
+  if (real) {
+    const w2 = (CW - 0.3) / 2;
+    [["Так хранится: файл памяти о лаборатории после прогона 1", MEMX.file, "file"],
+      ["Так получает модель: поле в запросе прогона 2", MEMX.request, "request"]].forEach(([label, code, name], i) => {
+      const x = X0 + i * (w2 + 0.3);
+      box(s, x, 4.26, w2, 0.66, C.background2, `real-${name}-box`, 0.16);
+      T(s, label, { x: x + 0.13, y: 4.3, w: w2 - 0.24, h: 0.18, fontSize: 8.5, color: C.text2, valign: "middle", objectName: `real-${name}-label` });
+      T(s, code, { x: x + 0.13, y: 4.5, w: w2 - 0.24, h: 0.4, fontSize: 7.5, fontFace: "Courier New", objectName: `real-${name}-code` });
+    });
+    arrow(s, X0 + w2 + 0.04, 4.59, X0 + w2 + 0.26, "real-arrow");
+    T(s, "Настоящие записи одной лаборатории. Файл пишет и читает код; правды судьи в нём нет",
+      { x: X0, y: 4.95, w: CW, h: 0.2, fontSize: 9.5, color: C.text2, valign: "middle", objectName: "real-note" });
+    return;
+  }
   const pill = (text, x, w, fill, color, name) => s.addText(text, { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.2, x, y: 4.34, w, h: 0.4, fill: { color: fill }, color, fontFace: FONT, fontSize: 10.5, align: "center", valign: "middle", margin: 0, isTextBox: true, objectName: name });
   pill("Прогон 1", X0, 1.25, THEME.colors.accent4, "FFFFFF", "flow-run-1");
   arrow(s, X0 + 1.33, 4.54, X0 + 1.67, "flow-arrow-1");
@@ -753,7 +774,7 @@ function memoryKinds(variant) {
   T(s, "Память — предположение: проехал запомненное место без штрафа — зона снята. Правды судьи в файлах нет",
     { x: X0, y: 4.82, w: CW, h: 0.24, fontSize: 9.5, color: C.text2, valign: "middle", objectName: "flow-note" });
 }
-// Вариант Б, второй слайд: пример и три условия опыта.
+// Пример на картах и три условия опыта (второй слайд варианта Б).
 function memoryExample(variant) {
   const [a, b] = MEM.results;
   const s = content("Память о лаборатории: второй прогон", "Одна лаборатория, образцы в новых местах: слева робот начинает с нуля, справа помнит зону",
@@ -782,7 +803,8 @@ function memoryExample(variant) {
   box(s, X0, 4.6, CW, 0.44, C.accent3, "takeaway-pill", 0.22);
   T(s, memBottom(), { x: X0 + 0.3, y: 4.6, w: CW - 0.6, h: 0.44, fontSize: 10.5, valign: "middle", objectName: "takeaway-text" });
 }
-if (MEMORY_B) { memoryKinds(); memoryExample(); } else memoryOne();
+if (MEMORY_A) memoryOne();
+else if (MEMORY_B) { memoryKinds(); memoryExample(); } else memoryKinds(undefined, MEMORY_REAL);
 resultsSlide();
 
 // =====================================================================================================
@@ -1033,8 +1055,9 @@ pres.addSection({ title: SECTION });
   });
   T(s, "Сравнение вариантов — разность счёта на одних сценариях, 95% интервал", { x: 4.6, y: 4.86, w: 4.67, h: 0.2, fontSize: 9.5, color: C.text2, objectName: "math-note" });
 }
-if (MEMORY_B) memoryOne("Вариант А · вместо слайдов 13–14");
-else { memoryKinds("Вариант Б · вместо слайда 13 (1 из 2)"); memoryExample("Вариант Б · вместо слайда 13 (2 из 2)"); }
+memoryKinds(MEMORY_REAL ? "Вариант · вместо слайда 13: схемой" : "Вариант · вместо слайда 13: записи", !MEMORY_REAL);
+memoryOne("Вариант · вместо слайда 13: пример");
+memoryExample("Дополнение к слайду 13: пример");
 archSimple("Вариант Б · вместо слайда 4");
 llmPenalty("Вариант Б · вместо слайда 11");
 // ---------- LLM, вариант Б: «ровно два образца» ----------
