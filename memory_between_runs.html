@@ -1,0 +1,442 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Память между прогонами: как хранится и в каком виде приходит к модели</title><style>
+:root{color-scheme:light;--page:#f5f5f2;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#8b8a84;--line:#e3e2dd;
+--floor:#e9e8e2;--code:#f0efeb;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--crit:#d03b3b;--warn:#fab219;--good:#0ca30c;--accent:#eb6834}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){color-scheme:dark;--page:#111110;--surface:#1a1a19;
+--ink:#ffffff;--ink2:#c3c2b7;--muted:#8e8d85;--line:#34342f;--floor:#2b2b27;--code:#232320;--s1:#3987e5;--s2:#d95926;--s3:#199e70;
+--crit:#e66767;--accent:#d95926}}
+:root[data-theme="dark"]{color-scheme:dark;--page:#111110;--surface:#1a1a19;--ink:#ffffff;--ink2:#c3c2b7;--muted:#8e8d85;
+--line:#34342f;--floor:#2b2b27;--code:#232320;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--crit:#e66767;--accent:#d95926}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--page);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 22px 80px}
+h1{font-size:34px;line-height:1.15;margin:8px 0 10px}
+h2{font-size:26px;line-height:1.2;margin:2px 0 6px}
+h3{font-size:18px;margin:26px 0 8px}
+p{margin:8px 0}
+ul{margin:6px 0;padding-left:22px}
+li{margin:5px 0}
+a{color:var(--s1)}
+code{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);border-radius:8px;padding:12px 14px;overflow-x:auto;margin:10px 0}
+pre code{background:none;padding:0;white-space:pre}
+.lead{font-size:18px;color:var(--ink2);max-width:780px}
+.note{font-size:14px;color:var(--ink2);border-left:3px solid var(--line);padding:2px 0 2px 12px;margin:12px 0}
+section{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 26px 24px;margin:22px 0}
+.num{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.tag{color:var(--ink2);font-size:14.5px;margin:0 0 12px}
+.answer{background:var(--code);border-radius:10px;padding:12px 16px;margin:10px 0 4px}
+.say{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:10px 14px;margin:18px 0 0}
+.cap{font-size:13.5px;color:var(--ink2);margin:4px 0 12px}
+.where{font-size:13.5px;color:var(--ink2);margin-top:14px}
+table{border-collapse:collapse;width:100%;font-size:14.5px;margin:8px 0}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--ink2);font-size:13px}
+td.c{white-space:nowrap}
+.sum td:first-child{white-space:nowrap}
+details.tbl{margin:2px 0 6px;font-size:13.5px}
+details.tbl summary{cursor:pointer;color:var(--ink2)}
+details.tbl td{font-variant-numeric:tabular-nums}
+.qa details{border-bottom:1px solid var(--line);padding:9px 0}
+.qa summary{cursor:pointer;font-weight:600}
+.qa p{color:var(--ink2);margin:6px 0 2px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13.5px;color:var(--ink2);margin:8px 0 4px}
+.key{display:inline-flex;align-items:center;gap:6px}
+.key i{display:inline-block;flex:none}
+i.dot{width:10px;height:10px;border-radius:50%}
+i.dot.s1{background:var(--s1)} i.dot.s2{background:var(--s2)} i.dot.s3{background:var(--s3)}
+i.dot.got{background:var(--ink)} i.dot.open{border:1.5px solid var(--ink);background:var(--surface)}
+i.sq{width:12px;height:12px;border-radius:3px}
+i.sq.soil{background:color-mix(in srgb,var(--ink) 16%,transparent)}
+i.sq.haz{border:1.5px solid var(--crit);background:color-mix(in srgb,var(--crit) 14%,transparent);border-radius:50%}
+i.sq.base{border:1.5px solid var(--ink);background:var(--surface)}
+i.sq.fault{background:color-mix(in srgb,var(--warn) 45%,transparent)}
+i.sq.waitb{background:color-mix(in srgb,var(--ink) 30%,transparent)}
+i.x{color:var(--crit);font-style:normal;font-weight:700;line-height:1}
+i.ln{width:20px;height:3px;border-radius:2px}
+i.ln.s1{background:var(--s1)} i.ln.s2{background:var(--s2)} i.ln.hl{background:var(--ink)} i.ln.ban{background:var(--crit)}
+svg{display:block;width:100%;height:auto}
+svg.chart{margin:6px 0 2px}
+.grid{stroke:var(--line);stroke-width:1}
+.zero{stroke:var(--muted);stroke-width:1}
+.tick{fill:var(--ink2);font-size:12px;text-anchor:middle;font-variant-numeric:tabular-nums}
+.tick.e{text-anchor:end}
+.rl{fill:var(--ink);font-size:13.5px;text-anchor:end}
+.rs{fill:var(--muted);font-size:11.5px;text-anchor:end}
+.val{fill:var(--ink);font-size:12.5px;font-variant-numeric:tabular-nums}
+.ci{stroke-width:2;stroke-linecap:round}
+.pt{stroke:var(--surface);stroke-width:2}
+.pt.bare{stroke:none}
+.s1{stroke:var(--s1)} .s2{stroke:var(--s2)} .s3{stroke:var(--s3)} .mut{stroke:var(--muted)}
+circle.s1{fill:var(--s1);stroke:var(--surface)} circle.s2{fill:var(--s2);stroke:var(--surface)}
+circle.s3{fill:var(--s3);stroke:var(--surface)} circle.mut{fill:var(--muted);stroke:var(--surface)}
+.conn{stroke:var(--line);stroke-width:3;stroke-linecap:round}
+.hit{fill:transparent}
+.ln{fill:none;stroke-width:1.6;stroke-linejoin:round}
+.band.fault{fill:color-mix(in srgb,var(--warn) 22%,transparent)}
+.band.wait{fill:color-mix(in srgb,var(--ink) 14%,transparent)}
+.bl{fill:var(--ink2);font-size:11.5px;text-anchor:middle}
+.cross{stroke:var(--muted);stroke-width:1}
+.tsname{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;margin:12px 0 0}
+.maps{display:grid;gap:14px;margin:10px 0 4px}
+.maps.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.maps.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:720px){.maps.two,.maps.three{grid-template-columns:1fr}}
+figure.map{margin:0;border:1px solid var(--line);border-radius:10px;padding:8px 8px 10px;background:var(--surface)}
+figure.map figcaption{font-size:13px;line-height:1.35;padding:6px 4px 0}
+figure.map figcaption span{display:block;color:var(--ink2)}
+.floor{fill:var(--floor)}
+.soil{fill:color-mix(in srgb,var(--ink) 15%,transparent)}
+.haz{fill:color-mix(in srgb,var(--crit) 14%,transparent);stroke:var(--crit);stroke-width:1.5}
+.zl{fill:var(--ink2);font-size:10.5px;text-anchor:middle;pointer-events:none}
+.ban{stroke:var(--crit);stroke-width:2}
+.tr{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.tr.hl{stroke:var(--ink);stroke-width:3.2}
+.sm{fill:var(--surface);stroke:var(--ink);stroke-width:1.6}
+.sm.got{fill:var(--ink);stroke:var(--surface);stroke-width:2}
+.pen circle{fill:var(--surface);opacity:.85}
+.pen path{stroke:var(--crit);stroke-width:2.2;stroke-linecap:round}
+.base{fill:var(--surface);stroke:var(--ink);stroke-width:1.6}
+.end{stroke-width:2}
+.dialog{display:grid;gap:10px;margin:10px 0}
+.turn .who{font-size:13px;font-weight:600;color:var(--ink2)}
+.turn pre{margin:4px 0 0}
+.turn pre code{white-space:pre-wrap;word-break:break-word}
+ol.journal{list-style:none;padding:0;margin:10px 0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+ol.journal li{display:grid;grid-template-columns:62px 112px 1fr;gap:10px;padding:7px 12px;margin:0;border-bottom:1px solid var(--line);font-size:14px}
+ol.journal li:last-child{border-bottom:none}
+ol.journal .t{color:var(--muted);font-variant-numeric:tabular-nums}
+ol.journal .k{color:var(--ink2);font-weight:600}
+ol.journal li.k-inquiry{background:color-mix(in srgb,var(--s1) 7%,transparent)}
+.tv{font-size:12.5px;white-space:nowrap;border-radius:4px;padding:1px 6px;margin-left:4px;border:1px solid var(--line);color:var(--ink2)}
+.tv.ok::before{content:"✓ "} .tv.bad::before{content:"✗ "}
+.toc a{text-decoration:none}
+#tip{position:fixed;z-index:10;max-width:340px;background:var(--ink);color:var(--surface);font-size:13px;line-height:1.4;
+padding:7px 10px;border-radius:7px;pointer-events:none}
+@media print{section{break-inside:avoid-page}.qa details{display:block}}
+
+main{max-width:1120px}
+.duo{display:grid;grid-template-columns:minmax(0,430px) minmax(0,1fr);gap:22px;align-items:start;margin-top:10px}
+.duo h3:first-child{margin-top:0}
+@media (max-width:860px){.duo,.raw,.retry{grid-template-columns:1fr !important}}
+table.facts th{width:132px;white-space:nowrap;color:var(--ink2);font-weight:600;font-size:13.5px}
+table.facts td{font-size:14.5px}
+.said{background:var(--code);border-radius:10px;padding:10px 14px}
+.said p{margin:2px 0 10px}
+.lbl{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink2);margin-top:4px}
+ol.steps{list-style:none;padding:0;margin:4px 0 10px}
+ol.steps li{display:flex;align-items:center;gap:8px;margin:4px 0}
+.stepb{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--s2);color:#fff;font-size:12px;font-weight:700;flex:none}
+ul.hyp{margin:4px 0 2px;padding-left:18px;font-size:14.5px}
+.test{color:var(--ink2)}
+.muted{color:var(--muted)}
+.raw,.retry{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:6px}
+.retry{margin-top:14px}
+.pane .who{font-size:13px;font-weight:700;color:var(--ink2);margin-bottom:4px}
+.pane pre{margin:0;max-height:430px;overflow:auto}
+.pane pre code{white-space:pre-wrap;word-break:break-word;font-size:12.5px}
+.pane.bad pre{border:1.5px solid var(--crit)}
+.prompt pre{max-height:520px;overflow:auto}
+.prompt pre code{white-space:pre-wrap}
+.robot{fill:var(--s1);stroke:var(--surface);stroke-width:2.5}
+.cand{fill:var(--surface);stroke:var(--ink);stroke-width:2;stroke-dasharray:3 2}
+.ep{fill:var(--surface);stroke:var(--muted);stroke-width:1.5}
+.idl{fill:var(--ink2);font-size:10.5px;text-anchor:middle}
+.plan{stroke:var(--s2);stroke-width:2.5;stroke-linecap:round}
+.stepc{fill:var(--s2);stroke:var(--surface);stroke-width:2}
+.stepn{fill:#fff;font-size:11px;font-weight:700;text-anchor:middle;pointer-events:none}
+.banarea{fill:color-mix(in srgb,var(--crit) 13%,transparent)}
+.toc2 a{display:block;padding:3px 0;text-decoration:none}
+i.sq.cand{border:1.5px dashed var(--ink);border-radius:50%;background:var(--surface)}
+i.sq.ep{border:1.5px solid var(--muted);background:var(--surface)}
+i.dot.robot{background:var(--s1)}
+
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin:14px 0}
+.flow div{flex:1 1 150px;background:var(--code);border-radius:10px;padding:10px 12px;font-size:14px}
+.flow div b{display:block;font-size:13px;color:var(--accent);margin-bottom:2px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:12px 0}@media(max-width:820px){.two{grid-template-columns:1fr}}
+.two h4{margin:0 0 4px;font-size:14px;color:var(--ink2);font-weight:600}
+pre code{white-space:pre-wrap;word-break:break-word;font-size:12.5px}
+.k{display:inline-block;font:12.5px ui-monospace,Menlo,monospace;background:var(--code);border-radius:6px;padding:2px 7px;margin:2px 3px 2px 0}
+.k.hit{background:var(--accent);color:#fff}
+.mem3 td:first-child{white-space:nowrap}
+td.c{text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap}
+.quote{background:var(--code);border-left:3px solid var(--s1);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:14.5px}
+</style></head>
+<body><main>
+<div class="num">Память робота · настоящие файлы и запросы</div>
+<h1>Память между прогонами: как она хранится и в каком виде приходит к модели</h1>
+<p class="lead">Один пример от начала до конца: лаборатория трудного уровня, сценарий 2. Робот проехал её один раз, записал файл, и во второй
+прогон пошёл уже с ним. Ниже — сам файл, поле из настоящего запроса к языковой модели и её ответ. В конце — когда агент вообще
+зовёт модель и кто решает без неё.</p>
+
+<section id="short"><div class="num">Коротко</div><h2>Что нужно понимать</h2>
+<div class="answer"><ul>
+<li><b>Между прогонами живут два файла JSON.</b> Их пишет и читает обычный код на Python. Языковая модель файлов не видит и ничего в них не пишет.</li>
+<li><b>Память о лаборатории</b> — места: где робот получил штраф за зону и где пол дорогой. Один файл на одну арену. Мест образцов и «правды судьи» в нём нет.</li>
+<li><b>Законы среды</b> — числа: сколько стоит метр, поворот и простой, сколько длится сбой. Один общий файл на все арены.</li>
+<li><b>К модели память о лаборатории приходит одним полем <code>lab_memory</code></b> внутри того же снимка состояния, что и всё остальное. Законы среды в запрос не попадают вовсе.</li>
+<li><b>Память работает и без модели.</b> Число «+4,3 очка» со слайда получено у агента на правиле: зону из памяти объезжает исполнитель, который строит маршрут.</li>
+</ul></div>
+<table class="mem3">
+<tr><th></th><th>Карта мира</th><th>Законы среды</th><th>Память о лаборатории</th></tr>
+<tr><td><b>Где живёт</b></td><td>в памяти программы, один прогон</td><td>файл <code>runs/_knowledge/kb_state.json</code></td><td>файл на каждую арену, например <code>…/lab/…/hard-2.json</code></td></tr>
+<tr><td><b>Что хранит</b></td><td>вероятные места образцов, цена грунта, опасные зоны</td><td>числа: цена метра, поворота, простоя; длительность сбоя; утечка</td><td>места: зона штрафа, клетки пола с измеренной ценой</td></tr>
+<tr><td><b>Годится для другой карты</b></td><td>—</td><td>да</td><td>нет, только та же арена</td></tr>
+<tr><td><b>Как доходит до модели</b></td><td>поля <code>candidates</code>, <code>soil_zones</code>, <code>hazards</code> снимка</td><td>никак: меняет исходные вероятности в расследованиях агента-исследователя</td><td>поле <code>lab_memory</code> снимка</td></tr>
+<tr><td><b>Что дала по измерениям</b></td><td>основа всех решений</td><td>выигрыш не показан (опыт E11)</td><td>+4,3 очка [2,4; 6,3] во втором прогоне, агент на правиле, быстрый симулятор</td></tr>
+</table></section>
+
+<section id="file"><div class="num">Шаг 1 · как хранится</div><h2>Первый прогон и файл, который после него остался</h2>
+<p class="tag">Первый прогон идёт без памяти. Робот собрал 7 образцов из 7, набрал 86,2 очка
+и на 14,5-й секунде получил штраф за невидимую опасную зону. После прогона агент выгружает то, что узнал сам,
+и память дописывает это в файл.</p>
+<pre><code>{
+  &quot;version&quot;: 1,
+  &quot;updated&quot;: &quot;2026-10-09T13:30:19&quot;,
+  &quot;runs&quot;: [
+    {
+      &quot;id&quot;: &quot;adhoc/adaptive_v2_lab/hard-2&quot;,
+      &quot;t_end&quot;: 145.2,
+      &quot;penalty_zones&quot;: 1,
+      &quot;mismatch&quot;: 0,
+      &quot;zones_refuted&quot;: 0,
+      &quot;soil_refuted&quot;: 0,
+      &quot;soil_cells_changed&quot;: 0
+    }
+  ],
+  &quot;grid&quot;: {&quot;res&quot;: 0.2, &quot;x0&quot;: -3.0, &quot;y0&quot;: -3.0, &quot;w&quot;: 30, &quot;h&quot;: 30},
+  &quot;hazards&quot;: [
+    {
+      &quot;id&quot;: &quot;Z1&quot;,
+      &quot;evidence&quot;: &quot;penalty&quot;,
+      &quot;hits&quot;: 1,
+      &quot;runs&quot;: [&quot;adhoc/adaptive_v2_lab/hard-2&quot;],
+      &quot;untested&quot;: [],
+      &quot;t_hit&quot;: 14.5,
+      &quot;appeared_after&quot;: null,
+      &quot;x&quot;: -1.0,
+      &quot;y&quot;: -0.5,
+      &quot;r&quot;: 0.45,
+      &quot;cloud&quot;: [[-0.972, -0.808, 0.25, 0.0051], [-0.948, -0.772, 0.25, 0.01], &quot;… ещё 49&quot;],
+      &quot;age&quot;: 0
+    }
+  ],
+  &quot;dropped&quot;: [],
+  &quot;soil&quot;: {
+    &quot;6,14&quot;: {&quot;k&quot;: 1.0, &quot;m&quot;: 0.12, &quot;n&quot;: 1, &quot;age&quot;: 0, &quot;first&quot;: 0, &quot;last&quot;: 0},
+    &quot;6,15&quot;: {&quot;k&quot;: 1.0, &quot;m&quot;: 0.14, &quot;n&quot;: 1, &quot;age&quot;: 0, &quot;first&quot;: 0, &quot;last&quot;: 0},
+    &quot;6,16&quot;: {&quot;k&quot;: 1.0, &quot;m&quot;: 0.21, &quot;n&quot;: 1, &quot;age&quot;: 0, &quot;first&quot;: 0, &quot;last&quot;: 0},
+    &quot;… ещё 79&quot;: &quot;…&quot;
+  },
+  &quot;soil_zones&quot;: [
+    {
+      &quot;x&quot;: -0.69,
+      &quot;y&quot;: -0.12,
+      &quot;radius&quot;: 0.23,
+      &quot;mult&quot;: 2.45,
+      &quot;evidence_m&quot;: 0.67,
+      &quot;confidence&quot;: 0.7,
+      &quot;runs&quot;: [&quot;adhoc/adaptive_v2_lab/hard-2&quot;]
+    }
+  ]
+}</code></pre>
+<p class="cap">Файл целиком — 6873 байт. Сокращены только два длинных списка: гипотезы о зоне и клетки пола. Файл получен повтором первого прогона при сборке страницы
+(быстрый симулятор воспроизводит прогон точно), поэтому дата в нём — дата сборки.</p>
+<table>
+<tr><th>Поле</th><th>Что это</th></tr>
+<tr><td><code>runs</code></td><td>Из каких прогонов собрана память. У каждого знания есть ссылка на прогон, из которого оно взято</td></tr>
+<tr><td><code>hazards</code></td><td>Опасные зоны, в которых робот получил штраф. Зону он не видит: знает только точку штрафа. Поэтому хранит не круг, а
+51 гипотез «центр и радиус», которые с этой точкой согласуются (<code>cloud</code>: x, y, радиус, вес). <code>x</code>, <code>y</code>, <code>r</code> — их среднее с запасом:
+(-1,0; -0,5), 0,45 м</td></tr>
+<tr><td><code>soil</code></td><td>Клетки пола 0,2 × 0,2 м, по которым робот ездил: <code>k</code> — во сколько раз расход выше обычного, <code>m</code> — сколько метров по клетке пройдено. Всего 82 клетки</td></tr>
+<tr><td><code>soil_zones</code></td><td>Те же клетки, собранные в пятна дорогого грунта: 1 пятно, дороже в 2,45 раза, измерено на 0,67 м пути</td></tr>
+<tr><td><code>age</code></td><td>Сколько прогонов знание не перепроверялось. С каждым таким прогоном уверенность умножается на 0,85</td></tr>
+</table>
+<h3>Кто пишет и читает файл (tools/l4b_run.py, did/labmemory.py)</h3>
+<pre><code>mem = LabMemory(path)              # файл этой лаборатории; нет файла — память пустая
+prior = mem.priors()               # что взять в прогон: зоны и грунт с уверенностью, а не как истину
+r = run_episode(level, seed, &#x27;adaptive_v2_lab&#x27;, lab=prior)
+mem.learn(r[&#x27;lab&#x27;], r[&#x27;id&#x27;])       # дописать то, что робот узнал сам в этом прогоне
+mem.save()                         # json.dumps(...) в файл</code></pre>
+<p>Перед вторым прогоном <code>priors()</code> превращает запись в предположение: зоне, где штраф был в одном прогоне, даётся уверенность
+<b>0,75</b>, пятну грунта — <b>0,70</b>. Внутри прогона зона из памяти не запрещает клетки, а удорожает их для маршрута.
+Проехал запомненное место без штрафа — гипотезы о зоне отбрасываются, и когда не осталось ни одной, зона снята.</p></section>
+
+<section id="model"><div class="num">Шаг 2 · в каком виде получает модель</div><h2>Второй прогон: настоящий запрос и ответ</h2>
+<p class="tag">Та же лаборатория, образцы в других местах, агент с языковой моделью (<code>adaptive_llm_lab</code>, модель qwen3.8-flash-next, сервер МАИ).
+Запрос состоит из двух сообщений: постоянная инструкция (5487 знаков) и снимок состояния в JSON. Вот поля снимка первого запроса; память — одно из них:</p>
+<p><span class="k">mission</span><span class="k">trigger</span><span class="k">time_s</span><span class="k">time_limit_s</span><span class="k">battery</span><span class="k">battery_start</span><span class="k">pose</span><span class="k">base</span><span class="k">samples</span><span class="k">return_cost</span><span class="k">candidates</span><span class="k">explore_points</span><span class="k">soil_zones</span><span class="k">hazards</span><span class="k">sensor</span><span class="k">recent_events</span><span class="k">alarms</span><span class="k">open_hypotheses</span><span class="k hit">lab_memory</span></p>
+<div class="two"><div><h4>Поле lab_memory в запросе, t = 0 с</h4>
+<pre><code>{
+  &quot;past_runs&quot;: 1,
+  &quot;note&quot;: &quot;сведения из прошлых прогонов в этой лаборатории; это предположения, а не истина&quot;,
+  &quot;changes_seen_before&quot;: false,
+  &quot;hazards&quot;: [
+    {
+      &quot;id&quot;: &quot;M1&quot;,
+      &quot;x&quot;: -1.0,
+      &quot;y&quot;: -0.5,
+      &quot;radius&quot;: 0.45,
+      &quot;confidence&quot;: 0.75,
+      &quot;penalty_in_runs&quot;: 1,
+      &quot;status&quot;: &quot;не проверялась&quot;
+    }
+  ],
+  &quot;soil_zones&quot;: [
+    {
+      &quot;x&quot;: -0.69,
+      &quot;y&quot;: -0.12,
+      &quot;radius&quot;: 0.23,
+      &quot;mult&quot;: 2.45,
+      &quot;confidence&quot;: 0.7
+    }
+  ]
+}</code></pre></div>
+<div><h4>Для сравнения: то, что робот узнал сам, в том же запросе</h4>
+<pre><code>{
+  &quot;hazards&quot;: [],
+  &quot;soil_zones&quot;: [],
+  &quot;candidates&quot;: [],
+  &quot;explore_points&quot;: [
+    {
+      &quot;id&quot;: &quot;E1&quot;,
+      &quot;x&quot;: -1.75,
+      &quot;y&quot;: 0.25,
+      &quot;unseen_share&quot;: 0.11,
+      &quot;cost_to&quot;: 2.2,
+      &quot;cost_back&quot;: 2.2,
+      &quot;feasible&quot;: true
+    },
+    {
+      &quot;id&quot;: &quot;E2&quot;,
+      &quot;x&quot;: -1.25,
+      &quot;y&quot;: 0.75,
+      &quot;unseen_share&quot;: 0.13,
+      &quot;cost_to&quot;: 3.9,
+      &quot;cost_back&quot;: 3.9,
+      &quot;feasible&quot;: true
+    },
+    &quot;…&quot;
+  ]
+}</code></pre>
+<p class="cap">На старте своих зон и грунтов ещё нет: списки пустые. Всё, что робот знает о зонах в эту секунду, пришло из файла.</p></div></div>
+<p>Первый запрос — 2467 токенов (единиц текста), из них поле <code>lab_memory</code> — 363 знаков.
+В инструкции модели про это поле ничего не сказано: что это и насколько этому верить, объясняет строка <code>note</code> внутри самого поля.
+Зоны из памяти названы <code>M1</code>, <code>M2</code>…, чтобы не путать их с зонами <code>Z1</code>, которые робот нашёл в этом прогоне.</p>
+<h3>Что модель ответила</h3>
+<div class="quote">Старт, заряд 60.0, образцов 0 из 7, кандидатов нет. Разведка: E1 — unseen_share 0.11, путь 2.2, возврат 2.2, score 0.034; E2 — 0.13, путь 3.9, score 0.027. E1 ближе и выгоднее. Запас огромный (60.0), время 600 с — можно исследовать далеко. Lab memory: возможная опасность M1 (−1.0;−0.5) и грунт ×2.45 у (−0.69;−0.12) — не подтверждены, учту при объезде.</div>
+<p>Выбранная подцель: <code>[{&quot;type&quot;: &quot;explore&quot;, &quot;target&quot;: &quot;E1&quot;}, {&quot;type&quot;: &quot;explore&quot;, &quot;target&quot;: &quot;E2&quot;}]</code>. Правило в этой же ситуации выбрало ту же точку.</p>
+<h3>Что было у этой зоны во втором прогоне</h3>
+<p>Настоящую зону знает только судья: центр (-0,90; -0,58), радиус 0,28 м. Память после первого прогона оценила её как
+(-1,0; -0,5), 0,45 м — с запасом, потому что знает лишь точку штрафа.</p>
+<table><tr><th></th><th>Без памяти</th><th>С памятью</th></tr>
+<tr><td>Штрафов в запомненной зоне</td><td class="c">1 (на 110,3-й секунде)</td><td class="c">0</td></tr>
+<tr><td>Всего штрафов за зоны</td><td class="c">2</td><td class="c">1</td></tr>
+<tr><td>Ближе всего к центру зоны из памяти</td><td class="c">—</td><td class="c">0,69 м</td></tr>
+<tr><td>Счёт</td><td class="c">80,3</td><td class="c">72,6</td></tr></table>
+<p>Поле <code>lab_memory</code> собирается заново перед каждым вопросом к модели. В этом прогоне статус зоны все 16 раз был «не проверялась»:
+робот к зоне не подъезжал. Другие значения статуса: «место уточнено проездами рядом», «подтверждена штрафом в этом прогоне», «снята: проехал без штрафа».
+Второй штраф в обоих прогонах — в зоне, которая появляется на 36,4-й секунде; в первом прогоне робот в неё не попал, и в памяти её нет.
+Счёт с памятью здесь ниже, хотя штрафов меньше: это один прогон, причина не разбиралась.</p>
+<h3>Что это дало</h3>
+<table><tr><th>Лаборатория</th><th>Счёт без памяти</th><th>Счёт с памятью</th><th>Решений модели со ссылкой на память</th></tr><tr><td class="c">2</td><td class="c">80,3</td><td class="c">72,6</td><td class="c">1 из 16</td></tr><tr><td class="c">4</td><td class="c">65,5</td><td class="c">70,4</td><td class="c">1 из 10</td></tr><tr><td class="c">5</td><td class="c">81,2</td><td class="c">80,5</td><td class="c">1 из 15</td></tr><tr><td class="c">7</td><td class="c">75,4</td><td class="c">60,7</td><td class="c">1 из 12</td></tr></table>
+<p class="note">Четыре лаборатории, восемь прогонов — это наблюдение, а не измерение. Модель читает память и ссылается на неё, но только в первом
+решении на старте; выигрыш у агента с моделью не показан. В этой лаборатории второй прогон кончился счётом 72,6
+(собрано 6 из 7, штрафов за зону 1). Измеренный выигрыш «+4,3 очка [2,4; 6,3]» — у агента на правиле,
+160 пар прогонов в 40 лабораториях.</p></section>
+
+<section id="laws"><div class="num">Вторая память</div><h2>Законы среды: числа, а не места</h2>
+<p class="tag">Агент-исследователь после каждого прогона записывает, что выяснил о самой среде. Файл один на все арены: сейчас в нём 60 прогонов.</p>
+<div class="two"><div><h4>Одна запись файла kb_state.json</h4>
+<pre><code>{
+  &quot;energy.per_m&quot;: {
+    &quot;w&quot;: 59.0,
+    &quot;wx&quot;: 150.259,
+    &quot;wxx&quot;: 382.693,
+    &quot;n&quot;: 59,
+    &quot;first&quot;: &quot;E11/scientist_mem/hard-1001&quot;,
+    &quot;last&quot;: &quot;E11/scientist_mem/hard-1060&quot;,
+    &quot;support&quot;: [
+      &quot;E11/scientist_mem/hard-1031&quot;,
+      &quot;E11/scientist_mem/hard-1032&quot;,
+      &quot;… ещё 28&quot;
+    ],
+    &quot;contradictions&quot;: []
+  }
+}</code></pre>
+<p class="cap"><code>w</code>, <code>wx</code>, <code>wxx</code> — суммы для среднего и разброса; <code>support</code> — прогоны-доказательства; <code>contradictions</code> — прогоны, которые правилу противоречат. Много противоречий — правило снимается.</p></div>
+<div><h4>Что из файла берёт следующий прогон: priors()</h4>
+<pre><code>{
+  &quot;energy&quot;: {
+    &quot;per_m&quot;: {&quot;value&quot;: 2.547, &quot;sigma&quot;: 0.02},
+    &quot;per_m_load&quot;: {&quot;value&quot;: 0.12, &quot;sigma&quot;: 0.026},
+    &quot;per_rad&quot;: {&quot;value&quot;: 0.123, &quot;sigma&quot;: 0.02},
+    &quot;per_s&quot;: {&quot;value&quot;: 0.007, &quot;sigma&quot;: 0.003}
+  },
+  &quot;fault_s&quot;: 23.794,
+  &quot;leak_rate&quot;: {&quot;value&quot;: 0.158, &quot;sigma&quot;: 0.03},
+  &quot;p_leak_after_penalty&quot;: 0.267,
+  &quot;sensor_priors&quot;: {
+    &quot;noise&quot;: 0.047,
+    &quot;stuck&quot;: 0.047,
+    &quot;bias&quot;: 0.379,
+    &quot;ok&quot;: 0.426
+  }
+}</code></pre>
+<p class="cap">Это исходные предположения, а не истина: значение и разброс между прогонами.</p></div></div>
+<p>Куда это идёт. Числа получает расследователь внутри агента (<code>did/inquiry.py</code>): когда расход расходится с прогнозом, он сравнивает объяснения
+«дорогой грунт», «утечка батареи», «сбой датчика», и исходные вероятности этих объяснений берутся из файла. В запрос к языковой модели эти числа не входят.
+В опыте E11 выигрыш от этой памяти не показан.</p></section>
+
+<section id="when"><div class="num">Кто решает</div><h2>Когда агент зовёт модель и как решает без неё</h2>
+<p class="tag">Модель не управляет роботом. Она отвечает на один вопрос — «куда ехать дальше» — и только когда для этого есть повод.</p>
+<div class="flow"><div><b>1. Исполнитель, 10 раз в секунду</b>всегда код: едет по пути, объезжает препятствия и зоны, собирает образец, следит за зарядом</div>
+<div><b>2. Повод</b>что-то случилось: собрал образец, кандидат не подтвердился, штраф, расход разошёлся с прогнозом</div>
+<div><b>3. Планировщик</b>правило или модель выбирает следующую цель. Модель — если с прошлого вопроса к ней прошло 4 с</div>
+<div><b>4. Проверка ответа</b>форма и смысл. Не прошёл — один запрос на исправление, затем правило</div>
+<div><b>5. Очередь подцелей</b>исполнитель едет к цели до следующего повода</div></div>
+<table>
+<tr><th>Решение</th><th>Кто принимает</th></tr>
+<tr><td>Скорость, поворот, путь в обход препятствий и опасных зон</td><td>всегда код (исполнитель)</td></tr>
+<tr><td>Пробовать ли сбор на месте</td><td>всегда код: уверенность карты вероятностей не ниже 0,85</td></tr>
+<tr><td>Возврат на базу</td><td>всегда код: все образцы собраны, заряда осталось на дорогу домой с запасом, или время на исходе</td></tr>
+<tr><td>Куда ехать дальше (какой кандидат, какая точка разведки)</td><td>планировщик: правило или модель</td></tr>
+</table>
+<h3>Поводы, по которым спрашивают планировщик</h3>
+<table><tr><th>Повод</th><th>Когда</th></tr><tr><td><code>start</code></td><td>начало прогона</td></tr><tr><td><code>sample_collected</code></td><td>образец собран</td></tr><tr><td><code>candidate_found</code></td><td>по дороге датчик показал новое место-кандидат</td></tr><tr><td><code>candidate_lost</code></td><td>кандидат на месте не подтвердился</td></tr><tr><td><code>false_collect</code></td><td>попытка сбора промахнулась (штраф)</td></tr><tr><td><code>subgoal_done</code></td><td>доехал до точки, очередь подцелей пуста</td></tr><tr><td><code>queue_empty</code></td><td>очередь подцелей пуста</td></tr><tr><td><code>hazard</code></td><td>штраф за опасную зону</td></tr><tr><td><code>collision</code></td><td>столкновение</td></tr><tr><td><code>model_mismatch</code></td><td>расход заряда разошёлся с прогнозом</td></tr><tr><td><code>sensor_degraded</code></td><td>датчик образцов начал сбоить</td></tr><tr><td><code>battery_threshold</code></td><td>заряд дошёл до порога миссии</td></tr></table>
+<h3>Правило, которое решает без модели (did/planner.py)</h3>
+<pre><code>if cands:    # есть места, где датчик видит признаки образца
+    best = max(cands, key=lambda c: c[&#x27;confidence&#x27;] / (c[&#x27;cost_to&#x27;] + 0.5))     # выгода на единицу заряда
+    return [{&#x27;type&#x27;: &#x27;investigate&#x27;, &#x27;target&#x27;: best[&#x27;id&#x27;]}]
+if points:   # кандидатов нет — разведка
+    best = max(points, key=lambda p: p[&#x27;unseen_share&#x27;] / (p[&#x27;cost_to&#x27;] + 1.0))
+    return [{&#x27;type&#x27;: &#x27;explore&#x27;, &#x27;target&#x27;: best[&#x27;id&#x27;]}]
+return [{&#x27;type&#x27;: &#x27;return_base&#x27;}]                                                # достижимых целей не осталось</code></pre>
+<h3>Тот же второй прогон: кто отвечал на каждый повод</h3>
+<p>За прогон планировщик спрашивали 31 раз: 16 раз ответила модель, 15 — правило, потому что повод пришёл раньше чем через 4 секунды после прошлого вопроса к модели
+(<code>llm_min_interval_s = 4.0</code>). Первые девять решений:</p>
+<table><tr><th>Время, с</th><th>Повод</th><th>Кто решал</th><th>Объяснение</th></tr><tr><td class="c">0,0</td><td>начало прогона</td><td><b>модель</b></td><td>Старт, заряд 60.0, образцов 0 из 7, кандидатов нет. Разведка: E1 — unseen_share 0.11, путь 2.2, возврат 2.2, score 0.034; E2 — 0.13, путь 3.9, score 0…</td></tr><tr><td class="c">2,1</td><td>по дороге датчик показал новое место-кандидат</td><td><b>правило</b></td><td>Кандидат C1 в (-2.0; 0.8): уверенность 37%, дорога 3.0 ед., возврат оттуда 3.5 ед. при заряде 59.1.</td></tr><tr><td class="c">8,3</td><td>образец собран</td><td><b>модель</b></td><td>Собрано 1 из 7, заряд 56.6, возврат 3.1 — запас огромный. Кандидатов нет (sensor reading 0.01), разведка. E1: unseen 0.15, путь 7.5, возврат 8.5 — луч…</td></tr><tr><td class="c">10,9</td><td>по дороге датчик показал новое место-кандидат</td><td><b>правило</b></td><td>Кандидат C1 в (-0.3; 1.8): уверенность 40%, дорога 4.8 ед., возврат оттуда 8.0 ед. при заряде 55.6.</td></tr><tr><td class="c">19,8</td><td>образец собран</td><td><b>модель</b></td><td>Собрано 2 из 7, заряд 51.7, время 19.8/600. C1: confidence 0.47, путь 4.4, возврат 9.3 — запас велик, подъезд уточнит датчик. Затем E1: не проверено 3…</td></tr><tr><td class="c">21,4</td><td>кандидат на месте не подтвердился</td><td><b>правило</b></td><td>Кандидат C1 в (0.8; 2.0): уверенность 60%, дорога 3.6 ед., возврат оттуда 10.4 ед. при заряде 51.1.</td></tr><tr><td class="c">21,5</td><td>кандидат на месте не подтвердился</td><td><b>правило</b></td><td>Кандидат C1 в (0.8; 2.0): уверенность 60%, дорога 3.6 ед., возврат оттуда 10.4 ед. при заряде 51.1.</td></tr><tr><td class="c">21,6</td><td>кандидат на месте не подтвердился</td><td><b>правило</b></td><td>Кандидат C1 в (0.8; 2.0): уверенность 64%, дорога 3.6 ед., возврат оттуда 10.4 ед. при заряде 51.1.</td></tr><tr><td class="c">21,7</td><td>кандидат на месте не подтвердился</td><td><b>правило</b></td><td>Кандидат C1 в (0.8; 2.0): уверенность 64%, дорога 3.6 ед., возврат оттуда 10.4 ед. при заряде 51.1.</td></tr></table>
+<table>
+<tr><th>Вариант агента</th><th>Когда спрашивают модель</th></tr>
+<tr><td><code>fixed</code></td><td>никогда: едет по заранее составленному маршруту, планировщика нет</td></tr>
+<tr><td><code>adaptive</code>, <code>scientist</code> и их версии <code>_v2</code> (в том числе агент показа <code>scientist_v2</code>)</td><td>никогда: на каждый повод отвечает правило</td></tr>
+<tr><td><code>adaptive_llm</code>, <code>scientist_llm</code>, <code>adaptive_llm_lab</code></td><td>на каждый повод, но не чаще раза в 4 секунды; между вопросами отвечает правило</td></tr>
+<tr><td>серии L3c, L3d, L4a (сравнение решений модели и правила)</td><td>на каждый повод: интервал выставлен в ноль, мир стоит, пока модель думает</td></tr>
+</table>
+<p class="note">Если сервер не ответил или ответ негоден и после исправления, решение принимает то же правило, и в записи прогона оно помечено как «запасное». Если модель
+назвала цель, которой уже нет или до которой не хватит заряда, план отклоняет исполнитель, и решает правило.</p></section>
+
+<section id="qa"><div class="num">К защите</div><h2>Вопросы, которые могут задать</h2>
+<details open><summary>Память формируется на разных картах или на одной?</summary><p>Памятей между прогонами две. Законы среды — числа, они копятся со всех карт и годятся для любой. Память о лаборатории — места, она относится к одной арене:
+если арену переставили, файл нужно стереть. В опыте с чужой памятью выигрыш не показан (+1,9 [−0,4; 4,0]).</p></details>
+<details open><summary>Не подсматривает ли робот правду через память?</summary><p>Нет. В файл идёт только то, что робот узнал сам: точка штрафа и расход на клетках, по которым он ездил. Мест образцов и настоящих границ зон там нет:
+зона хранится как набор гипотез вокруг точки штрафа.</p></details>
+<details open><summary>Что, если среда изменилась, а память осталась?</summary><p>Память — предположение с уверенностью меньше единицы. Проезд без штрафа снимает зону; расход, разошедшийся с прогнозом, стирает память о грунте рядом.
+Но вред измерен: чужая память на среднем уровне при научных правилах — −1,8 очка [−3,0; −0,6].</p></details>
+<details open><summary>Модель учится между прогонами?</summary><p>Нет. Модель не меняется и ничего не помнит: каждый вызов — отдельный запрос. Учится код: он пишет файл и в следующем прогоне кладёт его содержимое в запрос.</p></details>
+</section>
+<p class="cap">Собрано программой <code>tools/build_memory_page.py</code>. Второй прогон повторён по записанным ответам модели без сети: начала всех 16 запросов со снимком состояния и итоговый счёт совпали с записью
+<code>runs/L4b_llm/adaptive_llm_lab/hard-2.json.gz</code>.</p>
+</main></body></html>
