@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from l3_common import ENV_FILE, RUNS, llm_opts, read_json, share, slug, write_json     # noqa: E402
 
 from did import hindsight as hs                                                      # noqa: E402
-from did.llm import CacheMiss, load_env, make_client, request_plan                   # noqa: E402
+from did.llm import CacheMiss, load_env, load_system_prompt, make_client, request_plan                   # noqa: E402
 
 FINDINGS = Path(__file__).resolve().parent.parent / 'research' / 'findings'
 MODELS = ('qwen3.8-flash-next', 'qwen3.8-27b', 'qwen3.6-35b-a3b', 'Qwen3.5-122B-A10B', 'deepseek-v4.1-flash',
@@ -36,6 +36,7 @@ LEVELS = ('hard', 'medium')
 SEEDS = (16001, 16040)
 REPS = 8                 # продолжений на вариант: 0 — исходный шум, 1–7 — шум после решения пересеян
 TOTAL = 90
+VARIANTS = {'planner_system_goal': 'goal'}      # подсказка без формулы правила (L3c)
 NEAR = 1.0               # цена выбора выше или ниже, чем у правила, больше чем на столько очков — «лучше» / «хуже»
 TAG_NAMES = {'time_short': 'мало времени', 'sensor_bad': 'датчик неисправен', 'almost_done': 'не собран один образец',
              'low_battery': 'мало заряда (до 20)', 'weak_near_strong_far': 'слабый близко, сильный далеко',
@@ -116,7 +117,10 @@ def wanted(bank, answers):
 def cmd_values(args):
     bank = read_json(args.dir / 'bank.json')
     values = read_json(args.dir / 'values.json', {})
-    jobs = [j for name, j in wanted(bank, read_json(args.dir / 'answers.json', {})).items() if name not in values]
+    jobs = {}
+    for name in ('answers.json', *[f'answers-{v}.json' for v in VARIANTS.values()]):
+        jobs.update(wanted(bank, read_json(args.dir / name, {})))
+    jobs = [j for name, j in jobs.items() if name not in values]
     print(f'нужно прогонов: {len(jobs)} (готово {len(values)})', flush=True)
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=args.jobs) as pool:
@@ -134,9 +138,9 @@ def cmd_values(args):
 
 # --- ответы моделей ------------------------------------------------------------------------------------
 
-def ask_one(client, state):
-    """Один запрос плана без исправления — подсказка и схема нынешнего планировщика."""
-    res = request_plan(client, state, max_repairs=0)
+def ask_one(client, state, prompt=None):
+    """Один запрос плана без исправления — подсказка и схема нынешнего планировщика (prompt — другая подсказка)."""
+    res = request_plan(client, state, system_prompt=load_system_prompt(prompt) if prompt else None, max_repairs=0)
     ex = res.exchanges[-1] if res.exchanges else {}
     out = {'ok': res.plan is not None, 'error': res.error, 'answered': ex.get('response') is not None,
            'latency_ms': ex.get('latency_ms'), 'cached': ex.get('cached', False), 'response': ex.get('response'),
@@ -149,7 +153,7 @@ def ask_one(client, state):
 
 def cmd_ask(args):
     bank = read_json(args.dir / 'bank.json')
-    answers = read_json(args.dir / 'answers.json', {})
+    answers = read_json(args.dir / args.answers, {})
     if not args.cache_only:
         load_env(ENV_FILE)
     clients = {m: make_client(**llm_opts(m, args.cache_only)) for m in args.models}
@@ -167,7 +171,7 @@ def cmd_ask(args):
     def one(cell):
         row, model = cell
         try:
-            return row['id'], model, ask_one(clients[model], row['state'])
+            return row['id'], model, ask_one(clients[model], row['state'], args.prompt)
         except CacheMiss as e:
             return row['id'], model, {'ok': False, 'answered': False, 'error': f'нет в кэше: {e}', 'cached': True}
 
@@ -180,9 +184,9 @@ def cmd_ask(args):
             sent += 0 if out.get('cached') else 1
             answers.setdefault(sid, {})[model] = out
             if i % 10 == 0 or i == len(cells):
-                write_json(args.dir / 'answers.json', answers)
+                write_json(args.dir / args.answers, answers)
                 print(f'  {i}/{len(cells)} за {time.time() - t0:.0f} с, по сети {sent}', flush=True)
-    write_json(args.dir / 'answers.json', answers)
+    write_json(args.dir / args.answers, answers)
 
 
 # --- сводка --------------------------------------------------------------------------------------------
@@ -213,11 +217,11 @@ def crossfit_loss(table, choice):
     return float(np.mean(out))
 
 
-def load(directory, with_models=True):
+def load(directory, with_models=True, answers_file='answers.json'):
     """Банк с ценами и выборами. with_models=False — только правило (пока модели ещё отвечают)."""
     bank = read_json(directory / 'bank.json')
     values = read_json(directory / 'values.json', {})
-    answers = read_json(directory / 'answers.json', {}) if with_models else {}
+    answers = read_json(directory / answers_file, {}) if with_models else {}
     rows = []
     for row in bank['states']:
         state = row['state']
@@ -300,8 +304,8 @@ def _error_kind(ans):
     return error_kind('; '.join(str(e) for e in ans.get('errors') or []) or str(ans.get('error')))
 
 
-def summarize(directory, with_models=True):
-    bank, rows = load(directory, with_models)
+def summarize(directory, with_models=True, answers_file='answers.json'):
+    bank, rows = load(directory, with_models, answers_file)
     who_all = ['rule', *[m for m in MODELS if any(m in r['choice'] for r in rows)]]
     models = who_all[1:]
     s = {'experiment': 'L5', 'generated': time.strftime('%Y-%m-%dT%H:%M:%S'), 'agent': bank['agent'],
@@ -394,16 +398,18 @@ def print_report(s):
 
 
 def cmd_report(args):
-    s, _ = summarize(args.dir, not args.rule_only)
+    s, _ = summarize(args.dir, not args.rule_only, args.answers)
+    s['prompt'] = args.prompt or 'planner_system'
     if args.rule_only:
         return print_report(s)
-    write_json(args.dir / 'summary.json', s)
+    tail = f'-{VARIANTS[args.prompt]}' if args.prompt else ''
+    write_json(args.dir / f'summary{tail}.json', s)
     if args.out == 'L5':
-        write_json(FINDINGS / 'L5-results.json', s)
-        answers = read_json(args.dir / 'answers.json', {})
+        write_json(FINDINGS / f'L5-results{tail}.json', s)
+        answers = read_json(args.dir / args.answers, {})
         bank = read_json(args.dir / 'bank.json')
         keep = ('ok', 'answered', 'error', 'errors', 'latency_ms', 'response', 'reasoning', 'subgoals', 'tries', 'net_calls')
-        write_json(FINDINGS / 'L5-bank.json', {
+        write_json(FINDINGS / f'L5-bank{tail}.json', {
             'about': 'Банк состояний L5: сводка состояния, варианты, ответы моделей (как пришли). Цены — в L5-results.json.',
             'states': [{k: r[k] for k in ('id', 'level', 'seed', 'k', 't', 'tags', 'picked_for', 'options', 'rule', 'state')}
                        for r in bank['states']],
@@ -421,8 +427,11 @@ def main():
     ap.add_argument('--models', nargs='+', default=list(MODELS))
     ap.add_argument('--cache-only', action='store_true')
     ap.add_argument('--rule-only', action='store_true', help='report: только правило, без ответов моделей')
+    ap.add_argument('--prompt', default=None, choices=list(VARIANTS),
+                    help='дополнительный опыт: другая подсказка из did/prompts (ответы и сводка — в отдельных файлах)')
     args = ap.parse_args()
     args.dir = RUNS / args.out
+    args.answers = f'answers-{VARIANTS[args.prompt]}.json' if args.prompt else 'answers.json'
     args.jobs = max(1, min(2, args.jobs))            # расчёты — не больше двух потоков
     {'bank': cmd_bank, 'values': cmd_values, 'ask': cmd_ask, 'report': cmd_report}[args.what](args)
 
