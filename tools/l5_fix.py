@@ -68,7 +68,7 @@ def _other(state):
 
 
 BANK = {
-    'цель дальше от базы дороже, вес 0,25 (adaptive_v5)': _planner(home_weight=0.25),
+    'цель дальше от базы дороже, вес 0,25 (adaptive_v6)': _planner(home_weight=0.25),
     'цель дальше от базы дороже, вес 0,5': _planner(home_weight=0.5),
     'цель дальше от базы дороже, вес 1,0': _planner(home_weight=1.0),
     'уверенность в квадрате': _planner(conf_power=2.0),

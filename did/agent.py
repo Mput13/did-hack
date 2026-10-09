@@ -102,7 +102,7 @@ class AgentConfig:
     pickup: bool = False              # собирать попутно: образец уже в радиусе сбора, а робот едет к другой цели или домой
     exact_replay: bool = False        # проба: после сбора пересчитывать карту образцов с собранным образцом на ней,
                                       # чтобы не терять соседний (did/replay.py); в *_v4 не входит
-    # --- правка L5 (research/findings/L5.md): по умолчанию выключена; включена в adaptive_v5
+    # --- правка L5 (research/findings/L5.md): по умолчанию выключена; включена в adaptive_v6
     plan_home_weight: float = 0.0     # правило выбора цели: вес удлинения дороги домой в цене цели (0 — прежнее правило)
     plan_conf_power: float = 1.0      # правило выбора кандидата: степень уверенности в «уверенность / цена» (1 — прежнее)
     # --- абляция R12 (research/findings/R12.md): как исследователь выбирает опыт; gain — прежнее поведение
@@ -175,7 +175,7 @@ PRESETS = {
     'scientist_v4': AgentConfig(name='scientist_v4', science=True, fault_wait=True, **V4),
     # Версия 5 (research/findings/L5.md): версия 2 плюс правка правила выбора цели — цель, от которой дорога домой
     # длиннее, чем от робота сейчас, стоит дороже. Вес подобран на отладочных сценариях 1–80. Приёмку не прошла.
-    'adaptive_v5': AgentConfig(name='adaptive_v5', fault_wait=True, plan_home_weight=0.25),
+    'adaptive_v6': AgentConfig(name='adaptive_v6', fault_wait=True, plan_home_weight=0.25),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
                                avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
