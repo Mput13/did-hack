@@ -90,7 +90,7 @@ def _soil_truth(judge, arena):
 
 def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, scenario=None,
                 scenario_args=None, config=None, rules=None, agent_rules=None, llm=None, sim=None, save=True, quiet=True,
-                knowledge=None, study=None, truth=False, soil_probe=False, roles=None):
+                knowledge=None, study=None, truth=False, soil_probe=False, roles=None, planner=None):
     """Прогон целиком. Возвращает сводку: идентификаторы, метрики, путь к записи.
 
     study — задание исследования (словарь did.study.StudySpec) для агента 'study'.
@@ -103,6 +103,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     roles — модель в ролях автора, критика и рассказчика расследований отдельно от планировщика:
     опции did.llm.make_client или {'client': готовый клиент}. None — как раньше: роли ведёт модель
     планировщика, если он llm, иначе расследования идут без модели.
+    planner — готовый планировщик вместо собранного по настройкам агента (мерило L5, did/hindsight.py); если у него
+    есть bind_run(world, bot), он вызывается до первого такта. None — как раньше.
     """
     arena = load_arena()
     if rules == 'science':                 # набор правил с несколькими причинами расхода и сбоями
@@ -134,7 +136,9 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     arm = arm or cfg.name
     world = FastSim(arena, scenario, rules, seed=seed, **(sim or {}))
     rec = Recorder()
-    planner = make_planner(cfg, llm, seed)
+    custom = planner is not None
+    if not custom:
+        planner = make_planner(cfg, llm, seed)
     extra = {'knowledge': knowledge} if getattr(cfg, 'science', False) else {}
     if agent == 'study':                            # проверка задания и план; из сценария берётся только контур области
         from .study import prepare
@@ -149,6 +153,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     if agent in ORACLES:
         extra['truth'] = make_truth(world.judge, scenario, arena, **ORACLES[agent][2])
     bot = cls(arena, cfg, n_samples=len(scenario.samples), rules=bot_rules, planner=planner, recorder=rec, **extra)
+    if custom and hasattr(planner, 'bind_run'):
+        planner.bind_run(world, bot)
 
     probe = SoilProbe(scenario, rules) if soil_probe else None
     soil, detector = getattr(bot, 'soil', None), getattr(bot, 'change', None)
