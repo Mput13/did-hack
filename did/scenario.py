@@ -253,7 +253,8 @@ def _separate_events(timeline, t0, t1):
 
 def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, events=None,
              event_window=(20.0, 70.0), fault_kinds=None, hazard_on_soil=False, soil_mults=None,
-             n_soil_changes=1, n_new_hazards=1, soil_change_mode='random', fault_duration=(25.0, 40.0)):
+             n_soil_changes=1, n_new_hazards=1, soil_change_mode='random', fault_duration=(25.0, 40.0),
+             sample_seed=None):
     """Сценарий уровня easy/medium/hard. Параметры n_* и events переопределяют таблицу уровней.
 
     event_window — в какие секунды прогона случаются события hard: окно подобрано под длительность
@@ -270,7 +271,13 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
 
     fault_duration — в каких пределах (секунды) длится сбой датчика из расписания; остальная расстановка
     от этого не меняется.
+
+    sample_seed — «та же лаборатория, другие образцы» (L4b): грунты, опасные зоны и расписание событий
+    строятся как у сценария (level, seed) без этого параметра, а образцы раскладываются заново из отдельного
+    генератора случайных чисел (_resample). None — прежние сценарии.
     """
+    if sample_seed is not None and soil_change_mode == 'route':
+        raise ValueError('sample_seed не сочетается с soil_change_mode=route: зона «на пути» строится по образцам')
     if soil_change_mode not in ('random', 'route'):
         raise ValueError(f'soil_change_mode: {soil_change_mode!r}, ожидается random или route')
     spec = LEVELS[level]
@@ -398,5 +405,23 @@ def generate(level, seed, arena, n_samples=None, n_soils=None, n_hazards=None, e
         z.fault = str(rng_extra.choice(kinds))
         z.fault_s = round(float(rng_extra.uniform(20, 30)), 1)
 
+    if sample_seed is not None:
+        zones = hazards + [e['zone'] for e in timeline if e['type'] == 'new_hazard']
+        samples = _resample(arena, np.random.default_rng([seed, sum(level.encode()), 11, int(sample_seed)]),
+                            n_samples, base, zones)
     return Scenario(level=level, seed=int(seed), samples=samples, soils=soils, hazards=hazards,
                     events=timeline, base=base)
+
+
+def _resample(arena, rng, n_samples, base, hazards):
+    """Новая раскладка образцов в готовой лаборатории: те же требования, что у исходной (дальше 1 м от базы,
+    не ближе 0,9 м друг к другу), и не ближе 0,65 м к центру любой опасной зоны, включая будущие, — в прежних
+    сценариях это обеспечивает постановка зон после образцов (_hazard_zone)."""
+    samples = []
+    points = _free_points(arena, rng, 0.22)
+    for _ in range(n_samples):
+        p = _place(points, lambda q: math.dist(q, base) > 1.0
+                   and all(math.dist(q, s) > 0.9 for s in samples)
+                   and all(math.dist(q, (z.x, z.y)) > 0.65 for z in hazards))
+        samples.append([round(p[0], 2), round(p[1], 2)])
+    return samples
