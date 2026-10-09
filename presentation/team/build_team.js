@@ -712,26 +712,44 @@ function track(s, name) {
     { text: "Запуск: pixi run demo --slam-map", options: { color: C.text1 } }],
   { x: 4.25, y: 4.06, w: 5.02, h: 0.8, fontSize: 10, color: C.text2, objectName: "slam-note", paraSpaceAfter: 4 });
 }
-// ---------- 16. трек «мультиагентный» ----------
-// research/findings/M1.md: 80 сценариев быстрого симулятора против пары без связи; рисунок — запись Gazebo runs/M1gz/team/medium-3.
+// ---------- трек «мультиагентный»: два робота ----------
+// research/findings/M1.md: 80 сценариев быстрого симулятора против пары без связи; сообщения и реакция на них — did/team.py
+// (obs, claim, collected, hazard, sector; в ROS — топик /did/team, строка JSON); рисунок — запись Gazebo runs/M1gz/team/medium-3.
 {
   const g = F.team.result;
-  const s = content("Два робота с координацией", "У каждого своя батарея и датчик; роботы общаются только сообщениями и делят арену",
-    "Ещё одно дополнение — два робота: у каждого своя батарея и свой датчик. Общаются они только сообщениями: делятся картой вероятностей, заявляют цели, сообщают о сборе и опасных зонах и делят арену. Против такой же пары без связи прогон короче на двадцать шесть секунд, заряда уходит на четверть меньше, и на базу возвращаются оба во всех восьмидесяти прогонах. Слева — запись из Gazebo с двумя TurtleBot3.", 25);
+  const s = content("Два робота с координацией", "Общей памяти нет: всё, что робот знает о напарнике, пришло сообщением",
+    "Ещё одно дополнение — два робота: у каждого своя батарея и свой датчик. Общей памяти у них нет, всё идёт сообщениями через один канал ROS 2. Раз в секунду робот передаёт свои показания датчика — напарник вносит их в свою карту вероятностей, как собственные. Перед выездом робот заявляет цель — второй туда не едет, а если выбрали одну и ту же, уступает тот, кому дороже ехать. О сборе и об опасной зоне тоже сообщают, и арену они делят пополам. Против такой же пары без связи прогон короче на двадцать шесть секунд, заряда уходит на четверть меньше, и на базу возвращаются оба во всех восьмидесяти прогонах.", 35);
   track(s, "мультиагентный");
-  const ht = img(s, "two_robots.png", X0, 1.4, 3.0, "Пути двух роботов на одной арене: все пять образцов собраны");
-  T(s, `Запись из Gazebo: два TurtleBot3, ${g.samples_collected} из ${g.samples_total} образцов, оба вернулись, ${g.messages} сообщений`, { x: X0, y: 1.4 + ht + 0.06, w: 3.0, h: 0.4, fontSize: 9.5, color: C.text2, objectName: "team-cap" });
-  T(s, "Чем обмениваются", { x: 4.25, y: 1.38, w: 3.0, h: 0.24, fontSize: 10.5, color: C.text2, valign: "middle", objectName: "msg-head" });
-  ["карта вероятностей", "заявки на цели", "сбор и опасные зоны", "деление арены"].forEach((t, i) => {
-    const x = 4.25 + (i % 2) * 2.55, y = 1.68 + Math.floor(i / 2) * 0.46;
-    s.addText(t, { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.19, x, y, w: 2.47, h: 0.38, fill: { color: i % 3 === 0 ? C.accent1 : C.accent2 }, color: C.text1, fontFace: FONT, fontSize: 10.5, align: "center", valign: "middle", margin: 0, isTextBox: true, objectName: `msg-${i + 1}` });
+  const ht = img(s, "two_robots.png", X0, 1.4, 2.75, "Пути двух роботов на одной арене: все пять образцов собраны");
+  T(s, `Запись из Gazebo: ${g.samples_collected} из ${g.samples_total} образцов, оба вернулись, ${g.messages} сообщений`, { x: X0, y: 1.4 + ht + 0.05, w: 2.75, h: 0.36, fontSize: 9.5, color: C.text2, objectName: "team-cap" });
+  // канал: робот ⇄ топик ⇄ робот
+  const rx = 3.75, pill = (text, x, w, fill, color, name) => s.addText(text, { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.18, x, y: 1.42, w, h: 0.36, fill: { color: fill }, color, fontFace: FONT, fontSize: 10.5, align: "center", valign: "middle", margin: 0, isTextBox: true, objectName: name });
+  pill("Робот 1", rx, 1.05, THEME.colors.accent4, "FFFFFF", "robot-1");
+  pill("канал ROS 2 · /did/team · строка JSON", rx + 1.33, 2.86, C.background2, C.text1, "channel");
+  pill("Робот 2", rx + 4.47, 1.05, THEME.colors.accent5, "FFFFFF", "robot-2");
+  [[rx + 1.07, rx + 1.31], [rx + 4.21, rx + 4.45]].forEach(([x1, x2], i) =>
+    s.addShape(pres.shapes.LINE, { x: x1, y: 1.6, w: x2 - x1, h: 0, objectName: `channel-arrow-${i + 1}`, line: { color: C.text2, width: 1.25, beginArrowType: "triangle", endArrowType: "triangle" } }));
+  // что сообщает → что делает напарник
+  T(s, "Что робот сообщает", { x: rx, y: 2.0, w: 1.9, h: 0.24, fontSize: 9.5, color: C.text2, valign: "middle", objectName: "msg-head-1" });
+  T(s, "Что делает напарник", { x: rx + 2.2, y: 2.0, w: 3.3, h: 0.24, fontSize: 9.5, color: C.text2, valign: "middle", objectName: "msg-head-2" });
+  [["показания датчика", "вносит их в свою карту вероятностей"],
+    ["«эту цель беру я»", "туда не едет; спор решает цена пути"],
+    ["«образец собран»", "пересчитывает карту и строит новый план"],
+    ["«здесь опасная зона»", "объезжает её, не получив штрафа сам"],
+    ["«делим арену»", "ищет на своей половине; деление меняется"]].forEach(([msg, act], i) => {
+    const y = 2.3 + i * 0.4;
+    s.addText(msg, { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.16, x: rx, y, w: 1.92, h: 0.32, fill: { color: i % 2 ? C.accent2 : C.accent1 }, color: C.text1, fontFace: FONT, fontSize: 9, align: "center", valign: "middle", margin: 0, isTextBox: true, objectName: `msg-${i + 1}` });
+    arrow(s, rx + 1.97, y + 0.16, rx + 2.15, `msg-${i + 1}-arrow`);
+    T(s, act, { x: rx + 2.2, y, w: 3.32, h: 0.32, fontSize: 10, valign: "middle", objectName: `msg-${i + 1}-act` });
   });
-  [["−26 с", "прогон короче:", "103,7 → 77,8 с"], ["−26%", "заряда:", "100,4 → 74,1"], ["80 из 80", "оба вернулись;", "без связи — 75"]].forEach(([value, a, b], i) => {
-    const x = 4.25 + i * 1.7;
-    T(s, value, { x, y: 2.82, w: 1.62, h: 0.5, fontSize: 22, color: C.accent4, valign: "middle", objectName: `team-stat-${i + 1}-value` });
-    T(s, [{ text: a, options: { breakLine: true } }, { text: b, options: {} }], { x, y: 3.34, w: 1.62, h: 0.44, fontSize: 10, color: C.text2, objectName: `team-stat-${i + 1}-label`, paraSpaceAfter: 1 });
+  // что это дало
+  box(s, X0, 4.4, CW, 0.64, C.background2, "team-stats", 0.3);
+  [["−26 с", "прогон короче:", "103,7 → 77,8 с"], ["−26%", "заряда:", "100,4 → 74,1"], ["80 из 80", "оба вернулись;", "без связи — 75"]].forEach(([value, l1, l2], i) => {
+    const x = X0 + 0.2 + i * 2.1;
+    T(s, value, { x, y: 4.4, w: 1.0, h: 0.64, fontSize: 15, color: C.accent4, align: "right", valign: "middle", objectName: `team-stat-${i + 1}-value` });
+    T(s, [{ text: l1, options: { breakLine: true } }, { text: l2, options: {} }], { x: x + 1.1, y: 4.4, w: 1.0, h: 0.64, fontSize: 9, color: C.text2, valign: "middle", objectName: `team-stat-${i + 1}-label` });
   });
-  T(s, "Сравнение с парой роботов без связи: 80 сценариев, быстрый симулятор", { x: 4.25, y: 4.06, w: 5.02, h: 0.4, fontSize: 10, color: C.text2, objectName: "team-note" });
+  T(s, "против пары без связи: 80 сценариев, быстрый симулятор", { x: 7.3, y: 4.4, w: 1.8, h: 0.64, fontSize: 8.5, color: C.text2, valign: "middle", objectName: "team-note" });
 }
 // ---------- 18. трек «команда мечты с AI»: как использовали ИИ при разработке ----------
 {
