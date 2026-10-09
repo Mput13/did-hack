@@ -467,7 +467,8 @@ class LabPrior:
         return {'past_runs': self.runs,
                 'note': 'сведения из прошлых прогонов в этой лаборатории; это предположения, а не истина',
                 'changes_seen_before': self.volatile,
-                'hazards': [{'id': z['id'], 'x': round(z['x'], 2), 'y': round(z['y'], 2), 'radius': round(z['radius'], 2),
+                # свои зоны этого прогона в снимке зовутся Z1, Z2…; у зон из памяти другая буква
+                'hazards': [{'id': 'M' + z['id'][1:], 'x': round(z['x'], 2), 'y': round(z['y'], 2), 'radius': round(z['radius'], 2),
                              'confidence': round(self._exists(z) * self._fade, 2) if z['status'] in
                              ('untested', 'narrowed') else (1.0 if z['status'] == 'confirmed' else 0.0),
                              'penalty_in_runs': len(z['runs']), 'status': word[z['status']]} for z in self.zones],

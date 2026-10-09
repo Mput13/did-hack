@@ -297,7 +297,7 @@ def test_planner_state_carries_memory_summary_only_with_memory(arena):
     obs = Observation(t=5.0, x=BASE[0], y=BASE[1], th=0.0, v=0.0, w=0.0, battery=60.0, sensor=None, scan=None)
     bot = _bot(arena, hazards=[_zone(0.0, 0.0)])
     lm = bot._state(obs, 'start')['lab_memory']
-    assert lm['past_runs'] == 1 and lm['hazards'][0]['confidence'] == 0.75 and lm['hazards'][0]['id'] == 'Z1'
+    assert lm['past_runs'] == 1 and lm['hazards'][0]['confidence'] == 0.75 and lm['hazards'][0]['id'] == 'M1'
     fresh = Agent(arena, make_config('adaptive_v2_lab'), n_samples=5)
     assert 'lab_memory' not in fresh._state(obs, 'start')
     assert 'lab_memory' not in Agent(arena, make_config('adaptive_v2'), n_samples=5)._state(obs, 'start')
