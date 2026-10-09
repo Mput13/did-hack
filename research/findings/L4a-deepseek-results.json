@@ -1,0 +1,1302 @@
+{
+ "experiment": "L4a_deepseek",
+ "generated": "2026-10-09T13:02:05",
+ "level": "hard",
+ "seeds": [
+  14001,
+  14002,
+  14003,
+  14004,
+  14005,
+  14006
+ ],
+ "arms": {
+  "rule": {
+   "runs": 6,
+   "score": {
+    "n": 6,
+    "mean": 75.245,
+    "ci": [
+     69.428,
+     82.586
+    ]
+   },
+   "collected_share": 0.81,
+   "returned": 6,
+   "hazard_hits": 3,
+   "false_collects": 0,
+   "collisions": 0,
+   "decisions": {
+    "total": 124,
+    "per_run": 20.67
+   },
+   "to_empty": {
+    "total": 3,
+    "per_run": 0.5
+   },
+   "to_penalty": {
+    "total": 0,
+    "per_run": 0.0
+   },
+   "empty_places": {
+    "total": 4,
+    "per_run": 0.67
+   },
+   "lost": {
+    "total": 31,
+    "per_run": 5.17
+   },
+   "to_empty_collected": {
+    "total": 0,
+    "per_run": 0.0
+   },
+   "runs_with_empty_place": 2,
+   "runs_with_to_empty": 1,
+   "collected": 34,
+   "penalties": 3
+  },
+  "nomem": {
+   "runs": 6,
+   "score": {
+    "n": 6,
+    "mean": 74.255,
+    "ci": [
+     67.473,
+     82.399
+    ]
+   },
+   "collected_share": 0.81,
+   "returned": 6,
+   "hazard_hits": 4,
+   "false_collects": 0,
+   "collisions": 0,
+   "decisions": {
+    "total": 126,
+    "per_run": 21.0
+   },
+   "to_empty": {
+    "total": 4,
+    "per_run": 0.67
+   },
+   "to_penalty": {
+    "total": 0,
+    "per_run": 0.0
+   },
+   "empty_places": {
+    "total": 1,
+    "per_run": 0.17
+   },
+   "lost": {
+    "total": 34,
+    "per_run": 5.67
+   },
+   "to_empty_collected": {
+    "total": 1,
+    "per_run": 0.17
+   },
+   "runs_with_empty_place": 1,
+   "runs_with_to_empty": 1,
+   "collected": 34,
+   "penalties": 4,
+   "asked": 124,
+   "same_as_rule": {
+    "k": 114,
+    "n": 124,
+    "share": 0.919,
+    "ci": [
+     0.858,
+     0.956
+    ]
+   },
+   "llm": {
+    "requests": 124,
+    "exchanges": 132,
+    "first_ok": 116,
+    "repaired": 8,
+    "failed": 0,
+    "no_answer": 0,
+    "first_ok_share": 0.935,
+    "failed_share": 0.0,
+    "errors": {
+     "ответ обрезан": 8,
+     "ответ не JSON": 7,
+     "нарушена схема": 1
+    },
+    "tokens": {
+     "prompt": 2696,
+     "completion": 1413
+    },
+    "retried": 0,
+    "latency_s": {
+     "median": 20.5,
+     "mean": 22.6,
+     "max": 85.5,
+     "n": 127
+    }
+   },
+   "prompt_tokens_per_run_mean": 2658,
+   "to_empty_by_memory": 8,
+   "fallback": 0
+  },
+  "mem": {
+   "runs": 6,
+   "score": {
+    "n": 6,
+    "mean": 74.097,
+    "ci": [
+     69.127,
+     81.01
+    ]
+   },
+   "collected_share": 0.786,
+   "returned": 6,
+   "hazard_hits": 2,
+   "false_collects": 0,
+   "collisions": 0,
+   "decisions": {
+    "total": 110,
+    "per_run": 18.33
+   },
+   "to_empty": {
+    "total": 0,
+    "per_run": 0.0
+   },
+   "to_penalty": {
+    "total": 0,
+    "per_run": 0.0
+   },
+   "empty_places": {
+    "total": 1,
+    "per_run": 0.17
+   },
+   "lost": {
+    "total": 18,
+    "per_run": 3.0
+   },
+   "to_empty_collected": {
+    "total": 0,
+    "per_run": 0.0
+   },
+   "runs_with_empty_place": 1,
+   "runs_with_to_empty": 0,
+   "collected": 33,
+   "penalties": 2,
+   "asked": 108,
+   "same_as_rule": {
+    "k": 94,
+    "n": 107,
+    "share": 0.879,
+    "ci": [
+     0.803,
+     0.928
+    ]
+   },
+   "llm": {
+    "requests": 108,
+    "exchanges": 124,
+    "first_ok": 92,
+    "repaired": 15,
+    "failed": 1,
+    "no_answer": 0,
+    "first_ok_share": 0.852,
+    "failed_share": 0.009,
+    "errors": {
+     "ответ обрезан": 17,
+     "ответ не JSON": 17
+    },
+    "tokens": {
+     "prompt": 4154,
+     "completion": 1742
+    },
+    "retried": 1,
+    "latency_s": {
+     "median": 22.5,
+     "mean": 24.5,
+     "max": 62.2,
+     "n": 107
+    }
+   },
+   "prompt_tokens_per_run_mean": 4117,
+   "to_empty_by_memory": 0,
+   "fallback": 1
+  }
+ },
+ "diffs": {
+  "mem-nomem": {
+   "score": {
+    "n": 6,
+    "mean": -0.158,
+    "ci": [
+     -4.412,
+     3.285
+    ],
+    "a_higher": 3,
+    "b_higher": 2,
+    "ties": 1
+   },
+   "collected": {
+    "n": 6,
+    "mean": -0.167,
+    "ci": [
+     -1.0,
+     0.5
+    ],
+    "a_higher": 1,
+    "b_higher": 1,
+    "ties": 4
+   },
+   "penalties": {
+    "n": 6,
+    "mean": -0.333,
+    "ci": [
+     -1.167,
+     0.333
+    ],
+    "a_higher": 1,
+    "b_higher": 2,
+    "ties": 3
+   },
+   "decisions": {
+    "n": 6,
+    "mean": -2.667,
+    "ci": [
+     -11.167,
+     3.667
+    ],
+    "a_higher": 1,
+    "b_higher": 3,
+    "ties": 2
+   },
+   "to_empty": {
+    "n": 6,
+    "mean": -0.667,
+    "ci": [
+     -2.0,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 1,
+    "ties": 5
+   },
+   "to_penalty": {
+    "n": 6,
+    "mean": 0.0,
+    "ci": [
+     0.0,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 0,
+    "ties": 6
+   },
+   "empty_places": {
+    "n": 6,
+    "mean": 0.0,
+    "ci": [
+     -0.5,
+     0.5
+    ],
+    "a_higher": 1,
+    "b_higher": 1,
+    "ties": 4
+   },
+   "lost": {
+    "n": 6,
+    "mean": -2.667,
+    "ci": [
+     -6.833,
+     -0.167
+    ],
+    "a_higher": 0,
+    "b_higher": 3,
+    "ties": 3
+   }
+  },
+  "mem-rule": {
+   "score": {
+    "n": 6,
+    "mean": -1.148,
+    "ci": [
+     -5.273,
+     1.972
+    ],
+    "a_higher": 1,
+    "b_higher": 4,
+    "ties": 1
+   },
+   "collected": {
+    "n": 6,
+    "mean": -0.167,
+    "ci": [
+     -1.0,
+     0.5
+    ],
+    "a_higher": 1,
+    "b_higher": 1,
+    "ties": 4
+   },
+   "penalties": {
+    "n": 6,
+    "mean": -0.167,
+    "ci": [
+     -1.0,
+     0.5
+    ],
+    "a_higher": 1,
+    "b_higher": 1,
+    "ties": 4
+   },
+   "decisions": {
+    "n": 6,
+    "mean": -2.333,
+    "ci": [
+     -8.833,
+     1.833
+    ],
+    "a_higher": 2,
+    "b_higher": 3,
+    "ties": 1
+   },
+   "to_empty": {
+    "n": 6,
+    "mean": -0.5,
+    "ci": [
+     -1.5,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 1,
+    "ties": 5
+   },
+   "to_penalty": {
+    "n": 6,
+    "mean": 0.0,
+    "ci": [
+     0.0,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 0,
+    "ties": 6
+   },
+   "empty_places": {
+    "n": 6,
+    "mean": -0.5,
+    "ci": [
+     -1.667,
+     0.333
+    ],
+    "a_higher": 1,
+    "b_higher": 2,
+    "ties": 3
+   },
+   "lost": {
+    "n": 6,
+    "mean": -2.167,
+    "ci": [
+     -4.167,
+     -0.167
+    ],
+    "a_higher": 0,
+    "b_higher": 3,
+    "ties": 3
+   }
+  },
+  "nomem-rule": {
+   "score": {
+    "n": 6,
+    "mean": -0.99,
+    "ci": [
+     -2.787,
+     0.052
+    ],
+    "a_higher": 1,
+    "b_higher": 4,
+    "ties": 1
+   },
+   "collected": {
+    "n": 6,
+    "mean": 0.0,
+    "ci": [
+     0.0,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 0,
+    "ties": 6
+   },
+   "penalties": {
+    "n": 6,
+    "mean": 0.167,
+    "ci": [
+     0.0,
+     0.5
+    ],
+    "a_higher": 1,
+    "b_higher": 0,
+    "ties": 5
+   },
+   "decisions": {
+    "n": 6,
+    "mean": 0.333,
+    "ci": [
+     -1.833,
+     2.5
+    ],
+    "a_higher": 3,
+    "b_higher": 3,
+    "ties": 0
+   },
+   "to_empty": {
+    "n": 6,
+    "mean": 0.167,
+    "ci": [
+     -1.5,
+     2.0
+    ],
+    "a_higher": 1,
+    "b_higher": 1,
+    "ties": 4
+   },
+   "to_penalty": {
+    "n": 6,
+    "mean": 0.0,
+    "ci": [
+     0.0,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 0,
+    "ties": 6
+   },
+   "empty_places": {
+    "n": 6,
+    "mean": -0.5,
+    "ci": [
+     -1.667,
+     0.333
+    ],
+    "a_higher": 1,
+    "b_higher": 2,
+    "ties": 3
+   },
+   "lost": {
+    "n": 6,
+    "mean": 0.5,
+    "ci": [
+     -1.833,
+     3.5
+    ],
+    "a_higher": 2,
+    "b_higher": 2,
+    "ties": 2
+   }
+  }
+ },
+ "same_as_rule_mem_minus_nomem": {
+  "diff": -0.04,
+  "ci": [
+   -0.125,
+   0.038
+  ]
+ },
+ "first_ok_mem_minus_nomem": {
+  "diff": -0.083,
+  "ci": [
+   -0.168,
+   -0.004
+  ]
+ },
+ "prompt_tokens_ratio": 1.541,
+ "shadow": {},
+ "missions": {},
+ "llm_all_runs": {
+  "mem": {
+   "requests": 108,
+   "exchanges": 124,
+   "first_ok": 92,
+   "repaired": 15,
+   "failed": 1,
+   "no_answer": 0,
+   "first_ok_share": 0.852,
+   "failed_share": 0.009,
+   "errors": {
+    "ответ обрезан": 17,
+    "ответ не JSON": 17
+   },
+   "tokens": {
+    "prompt": 4154,
+    "completion": 1742
+   },
+   "retried": 1,
+   "latency_s": {
+    "median": 22.5,
+    "mean": 24.5,
+    "max": 62.2,
+    "n": 107
+   }
+  },
+  "nomem": {
+   "requests": 124,
+   "exchanges": 132,
+   "first_ok": 116,
+   "repaired": 8,
+   "failed": 0,
+   "no_answer": 0,
+   "first_ok_share": 0.935,
+   "failed_share": 0.0,
+   "errors": {
+    "ответ обрезан": 8,
+    "ответ не JSON": 7,
+    "нарушена схема": 1
+   },
+   "tokens": {
+    "prompt": 2696,
+    "completion": 1413
+   },
+   "retried": 0,
+   "latency_s": {
+    "median": 20.5,
+    "mean": 22.6,
+    "max": 85.5,
+    "n": 127
+   }
+  },
+  "first_ok_mem_minus_nomem": {
+   "diff": -0.083,
+   "ci": [
+    -0.168,
+    -0.004
+   ]
+  },
+  "prompt_tokens_ratio": 1.541
+ },
+ "empty_truth": {
+  "all": {
+   "places": 2,
+   "runs": 2,
+   "near_collect": 1,
+   "near_same_place": 1,
+   "runs_near_same_place": 1,
+   "collected_later": 1,
+   "runs_never_collected": 0,
+   "samples": 1,
+   "samples_collected": 1
+  },
+  "by_arm": {
+   "nomem": {
+    "places": 1,
+    "runs": 1,
+    "near_collect": 1,
+    "near_same_place": 1,
+    "runs_near_same_place": 1,
+    "collected_later": 1,
+    "runs_never_collected": 0,
+    "samples": 1,
+    "samples_collected": 1
+   },
+   "mem": {
+    "places": 1,
+    "runs": 1,
+    "near_collect": 0,
+    "near_same_place": 0,
+    "runs_near_same_place": 0,
+    "collected_later": 0,
+    "runs_never_collected": 0,
+    "samples": 0,
+    "samples_collected": 0
+   }
+  },
+  "by_group": {
+   "main_nomem": {
+    "places": 1,
+    "runs": 1,
+    "near_collect": 1,
+    "near_same_place": 1,
+    "runs_near_same_place": 1,
+    "collected_later": 1,
+    "runs_never_collected": 0,
+    "samples": 1,
+    "samples_collected": 1
+   },
+   "main_mem": {
+    "places": 1,
+    "runs": 1,
+    "near_collect": 0,
+    "near_same_place": 0,
+    "runs_near_same_place": 0,
+    "collected_later": 0,
+    "runs_never_collected": 0,
+    "samples": 0,
+    "samples_collected": 0
+   }
+  },
+  "by_why": {
+   "candidate_refuted": {
+    "places": 2,
+    "runs": 2,
+    "near_collect": 1,
+    "near_same_place": 1,
+    "runs_near_same_place": 1,
+    "collected_later": 1,
+    "runs_never_collected": 0,
+    "samples": 1,
+    "samples_collected": 1
+   }
+  },
+  "rows": [
+   {
+    "group": "main",
+    "arm": "nomem",
+    "scenario": "hard-14002",
+    "t": 69.8,
+    "x": 0.42,
+    "y": -1.5,
+    "why": "candidate_refuted",
+    "sample": 3,
+    "sample_m": 0.211,
+    "collected_t": 85.8
+   },
+   {
+    "group": "main",
+    "arm": "mem",
+    "scenario": "hard-14006",
+    "t": 83.4,
+    "x": -1.38,
+    "y": 1.77,
+    "why": "candidate_refuted",
+    "sample": 4,
+    "sample_m": 0.602,
+    "collected_t": 88.3
+   }
+  ]
+ },
+ "launches": [
+  {
+   "time": "2026-10-09T12:31:04",
+   "what": "run main",
+   "model": "DeepSeek-V4-Flash",
+   "cache_only": false,
+   "network_calls": 254,
+   "wall_s": 3596
+  }
+ ],
+ "network_calls": 254,
+ "runs": [
+  {
+   "arm": "rule",
+   "scenario": "hard-14001",
+   "score": 66.06,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 10.6,
+   "time_s": 82.9,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 15,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 4,
+   "refuted": 0,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14002",
+   "score": 81.23,
+   "collected": 7,
+   "total": 7,
+   "returned": true,
+   "battery": 12.3,
+   "time_s": 98.7,
+   "hazard_hits": 2,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 2,
+   "decisions": 34,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 9,
+   "refuted": 0,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14003",
+   "score": 90.78,
+   "collected": 7,
+   "total": 7,
+   "returned": true,
+   "battery": 7.8,
+   "time_s": 115.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 19,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 3,
+   "to_empty": 3,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [
+    {
+     "t": 89.9,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": -1.85,
+      "y": 1.15
+     },
+     "checked_t": 80.9,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 90.9,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": -1.05,
+      "y": 0.75
+     },
+     "checked_t": 89.9,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 93.9,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": -1.55,
+      "y": 0.85
+     },
+     "checked_t": 89.9,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    }
+   ],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 2,
+   "refuted": 3,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14004",
+   "score": 70.26,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 2.6,
+   "time_s": 84.3,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 16,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14005",
+   "score": 72.04,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 20.4,
+   "time_s": 73.1,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 14,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 1,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 1,
+   "refuted": 1,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14006",
+   "score": 71.1,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 11.0,
+   "time_s": 90.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 26,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 12,
+   "refuted": 0,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14001",
+   "score": 60.7,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 7.0,
+   "time_s": 84.6,
+   "hazard_hits": 2,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 2,
+   "decisions": 16,
+   "asked": 16,
+   "by_model": 16,
+   "same_as_rule": 15,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 4,
+   "refuted": 0,
+   "prompt_tokens": 2666
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14002",
+   "score": 80.93,
+   "collected": 7,
+   "total": 7,
+   "returned": true,
+   "battery": 9.3,
+   "time_s": 108.2,
+   "hazard_hits": 2,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 2,
+   "decisions": 38,
+   "asked": 37,
+   "by_model": 37,
+   "same_as_rule": 35,
+   "empty_places": 1,
+   "to_empty": 4,
+   "to_empty_collected": 1,
+   "to_penalty": 0,
+   "revisit_list": [
+    {
+     "t": 71.8,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 0.35,
+      "y": -1.55
+     },
+     "checked_t": 71.8,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "llm"
+    },
+    {
+     "t": 71.9,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 0.35,
+      "y": -1.55
+     },
+     "checked_t": 71.8,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "llm"
+    },
+    {
+     "t": 73.8,
+     "kind": "empty",
+     "goal": {
+      "type": "explore",
+      "x": 0.25,
+      "y": -1.75
+     },
+     "checked_t": 71.8,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "llm"
+    },
+    {
+     "t": 79.8,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 0.45,
+      "y": -1.45
+     },
+     "checked_t": 71.8,
+     "why": "candidate_refuted",
+     "collected": true,
+     "source": "llm"
+    }
+   ],
+   "to_empty_by_memory": 8,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 16,
+   "refuted": 1,
+   "prompt_tokens": 2809
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14003",
+   "score": 90.61,
+   "collected": 7,
+   "total": 7,
+   "returned": true,
+   "battery": 6.1,
+   "time_s": 116.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 18,
+   "asked": 17,
+   "by_model": 17,
+   "same_as_rule": 14,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 1,
+   "refuted": 0,
+   "prompt_tokens": 2622
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14004",
+   "score": 70.26,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 2.6,
+   "time_s": 84.3,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 15,
+   "asked": 15,
+   "by_model": 15,
+   "same_as_rule": 15,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": 2595
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14005",
+   "score": 71.55,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 15.5,
+   "time_s": 82.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 17,
+   "asked": 17,
+   "by_model": 17,
+   "same_as_rule": 14,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 2,
+   "refuted": 0,
+   "prompt_tokens": 2634
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14006",
+   "score": 71.48,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 14.8,
+   "time_s": 93.4,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 22,
+   "asked": 22,
+   "by_model": 22,
+   "same_as_rule": 21,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 8,
+   "refuted": 0,
+   "prompt_tokens": 2625
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14001",
+   "score": 66.06,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 10.6,
+   "time_s": 82.9,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 15,
+   "asked": 15,
+   "by_model": 14,
+   "same_as_rule": 14,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 1,
+   "no_answer": 0,
+   "lost": 4,
+   "refuted": 0,
+   "prompt_tokens": 4111
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14002",
+   "score": 70.85,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 8.5,
+   "time_s": 81.9,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 16,
+   "asked": 16,
+   "by_model": 16,
+   "same_as_rule": 14,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": 4161
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14003",
+   "score": 90.61,
+   "collected": 7,
+   "total": 7,
+   "returned": true,
+   "battery": 6.1,
+   "time_s": 116.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 18,
+   "asked": 17,
+   "by_model": 17,
+   "same_as_rule": 14,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 1,
+   "refuted": 0,
+   "prompt_tokens": 4139
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14004",
+   "score": 70.1,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 1.0,
+   "time_s": 87.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 15,
+   "asked": 15,
+   "by_model": 15,
+   "same_as_rule": 15,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": 4035
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14005",
+   "score": 71.69,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 16.9,
+   "time_s": 77.3,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 16,
+   "asked": 16,
+   "by_model": 16,
+   "same_as_rule": 13,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 1,
+   "refuted": 0,
+   "prompt_tokens": 4117
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14006",
+   "score": 75.27,
+   "collected": 6,
+   "total": 7,
+   "returned": true,
+   "battery": 2.7,
+   "time_s": 112.4,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 30,
+   "asked": 29,
+   "by_model": 29,
+   "same_as_rule": 24,
+   "empty_places": 1,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
+   "lost": 6,
+   "refuted": 1,
+   "prompt_tokens": 4141
+  }
+ ]
+}

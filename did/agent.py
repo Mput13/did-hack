@@ -26,6 +26,7 @@ from .localize import PoseTracker
 from .nav import (ESCAPE_ROOM, ESCAPE_STOP, ESCAPE_V, FRONT_STOP, CostGraph, Follower, corridor_room, escape_plan,
                   free_ahead, freest_turn, moved_since, straighten)
 from .pickup import Pickup
+from .plan_memory import PlanMemory
 from .planner import MISSION, HeuristicPlanner, resolve_subgoals
 from .replay import NeighborReplay, exact_replay
 from .route import survey_route
@@ -117,6 +118,9 @@ class AgentConfig:
     # --- абляция R12 (research/findings/R12.md): как исследователь выбирает опыт; gain — прежнее поведение
     inquiry_choice: str = 'gain'      # gain | bits | random | cheapest | fixed | worst | blind (did.science.CHOICES)
     inquiry_seed: int = 0             # зерно случайного выбора; прогон подставляет номер сценария (did/runner.py)
+    # --- L4a (research/findings/L4a.md, логика — did/plan_memory.py): по умолчанию выключено
+    planner_memory: str = ''          # память планировщика о своих решениях и их исходах: '' — нет; on — в снимке
+                                      # состояния; track — ведётся и пишется в запись, но планировщик её не видит
 
     def to_dict(self):
         return asdict(self)
@@ -142,6 +146,8 @@ PRESETS = {
     # Тот же агент, но точку разведки выбирает по ожидаемой пользе измерений (did/explore.py).
     'adaptive_ig': AgentConfig(name='adaptive_ig', explore='infogain'),
     'adaptive_llm': AgentConfig(name='adaptive_llm', planner='llm'),
+    # L4a: модель видит свои прошлые решения, их исходы, проверенные пустые места и места штрафов.
+    'adaptive_llm_mem': AgentConfig(name='adaptive_llm_mem', planner='llm', planner_memory='on'),
     # Полный агент, который сам проверяет допущения о датчике образцов и расходе на метр (R14).
     'adaptive_cal': AgentConfig(name='adaptive_cal', calibrate=True),
     # Верхняя граница для R14: агенту сообщили настоящую форму закона датчика.
@@ -357,6 +363,7 @@ class Agent:
         if config.neighbor_replay and self.cal is None:
             self.belief.replay = NeighborReplay(self.rules.sensor_sigma, config.candidate_mass, config.neighbor_replay)
         self.pickup = Pickup(self) if config.pickup else None           # правка P3: попутный сбор (did/pickup.py)
+        self.mem = PlanMemory(self) if config.planner_memory else None  # L4a: память планировщика (did/plan_memory.py)
         self._battery_threshold_triggered = False
         self._penalties = {'hazard_hit': 0, 'false_collect': 0, 'collision': 0}
         # R16: пока модель думает, робот действует по правилу, а ответ сверяет с тем, что уже делает.
@@ -419,6 +426,8 @@ class Agent:
     # ======================================================================================
 
     def _perceive(self, obs):
+        if self.mem:
+            self.mem.observe(obs)
         if self.guard:
             self.guard.observe(obs)        # замеры цены простоя и езды по батарее
         if obs.scan is not None:
@@ -446,6 +455,8 @@ class Agent:
         kind = ev.get('type')
         if kind in self._penalties:
             self._penalties[kind] += 1
+        if self.mem and kind in ('hazard_hit', 'collision'):
+            self.mem.note(kind, obs.x, obs.y)
         if kind == 'hazard_hit':
             self._skip_soil_until = obs.t + 0.6
             self._anchor = (obs.x, obs.y, obs.battery, obs.t)   # разовая потеря заряда — не свойство грунта
@@ -471,6 +482,8 @@ class Agent:
             # Ответ сервиса сбора потерялся, а образец засчитан: повторять сбор нельзя, сверяемся по событию.
             self.collected = ev['collected']
             self._sample_taken(obs)
+            if self.mem:
+                self.mem.note('sample_collected', obs.x, obs.y)
             self.journal.add(obs.t, 'action', f'Судья сообщил о сборе образца: всего {self.collected} из {self.n_samples}')
         elif kind == 'collision':
             self.journal.add(obs.t, 'alarm', f'Штраф: столкновение в ({obs.x:.2f}; {obs.y:.2f})', tag='collision')
@@ -578,6 +591,8 @@ class Agent:
             if math.hypot(h['x'] - x, h['y'] - y) <= 0.8:
                 self.journal.close(t, h['key'], 'outdated', 'расход на участке перестал совпадать с оценкой')
         self._soil_h = [h for h in self._soil_h if math.hypot(h['x'] - x, h['y'] - y) > 0.8]
+        if self.mem:
+            self.mem.note('model_mismatch', x, y)
         if self.lab:
             self.lab.on_mismatch(x, y, t, self.soil.prior_at(x, y))
         if self.cfg.fresh_soil:
@@ -601,6 +616,8 @@ class Agent:
         sigma = self.rules.sensor_sigma
         if self.cfg.sensor_health:
             change = self.health.update(z)
+            if self.mem and change in ('degraded', 'recovered'):
+                self.mem.note(f'sensor_{change}')
             if change == 'degraded' and self.inv:
                 self.inv.on_noise(obs)         # не вывод, а повод для расследования
             elif change == 'degraded':
@@ -775,6 +792,8 @@ class Agent:
             self._request_plan('battery_threshold')
 
     def _go_home(self, t, reason):
+        if self.mem:
+            self.mem.went_home(reason)
         self._returning = True
         self.queue = [{'type': 'return_base'}]
         self._trigger = None
@@ -845,7 +864,7 @@ class Agent:
         alarms = [e['text'] for e in self.journal.entries[-12:] if e['kind'] == 'alarm' and obs.t - e['t'] <= 30.0]
         penalties = {'penalties': {'total': sum(self._penalties.values()), **self._penalties}} \
             if self.cfg.state_penalties or self.cfg.mission_guard else {}
-        return {
+        state = {
             'mission': self.cfg.mission,
             'trigger': trigger,
             **penalties,
@@ -869,6 +888,12 @@ class Agent:
             'open_hypotheses': [{'id': h['id'], 'statement': h['statement']} for h in self.journal.open_list()][-6:],
             **({'lab_memory': self.lab.summary()} if self.lab and self.lab.runs else {}),
         }
+        if self.mem:
+            # L4a: в режиме on память идёт в снимок; в режиме track — только в запись прогона (см. _apply_plan).
+            self._mem_snap = (state, self.mem.snapshot(state))
+            if self.cfg.planner_memory == 'on':
+                state.update(self._mem_snap[1])
+        return state
 
     def _rank_by_gain(self, raw, obs, dist, pred):
         """Точки разведки по ожидаемой пользе измерений на единицу заряда: считается и дорога до точки."""
@@ -930,6 +955,8 @@ class Agent:
             subgoals = resolve_subgoals(fallback['subgoals'], state)
             note = ' План отклонён исполнителем: ни одна подцель не исполнима. Решение по правилу: ' + fallback['reasoning']
             source = 'fallback'
+        if self.mem:
+            self.mem.decided(trigger, source, subgoals, state)
         self.queue = subgoals
         self._trigger = None
         self._path_goal = None
@@ -956,6 +983,9 @@ class Agent:
                     self.rec.plans[-1]['orchestration'] = plan['orchestration']
             for ex in plan.get('exchanges') or []:
                 self.rec.add_llm(t, ex)
+            if self.mem and self._mem_snap[0] is state:
+                # Снимок и память на момент решения: «теневое» сравнение спрашивает другую подсказку в том же состоянии.
+                self.rec.plans[-1].update(state=state, memory=self._mem_snap[1])
 
     # ======================================================================================
     # исполнение подцелей
@@ -1182,6 +1212,8 @@ class Agent:
                 self.frugal.offset.collected(obs.t)
             self.journal.add(obs.t, 'action', f'Сбор в ({obs.x:.2f}; {obs.y:.2f}) при уверенности {confidence:.0%}: '
                              f'образец взят, всего {self.collected} из {self.n_samples}')
+            if self.mem:
+                self.mem.note('sample_collected', obs.x, obs.y)
             self.journal.close(obs.t, sg.get('key'), 'confirmed', f'образец собран в ({obs.x:.2f}; {obs.y:.2f})')
             self._end_subgoal(obs, io, 'sample_collected')
             self._wait_until = obs.t + 1.0      # дать датчику показать следующий ближайший образец
@@ -1191,6 +1223,8 @@ class Agent:
             else:
                 self.belief.clear_disc(obs.x, obs.y, 0.30, factor=0.05)
             self._misses.append((obs.t, obs.x, obs.y))
+            if self.mem:
+                self.mem.note('false_collect', obs.x, obs.y)
             if sum(1 for mt, _, _ in self._misses if obs.t - mt < 25.0) >= 2:
                 # Два промаха подряд: карте образцов сейчас верить нельзя. Пауза в сборе и частичный сброс карты.
                 self._no_collect_until = obs.t + 15.0
@@ -1240,6 +1274,8 @@ class Agent:
                              f'заряд {obs.battery:.1f}')
 
     def _end_subgoal(self, obs, io, trigger):
+        if self.mem:
+            self.mem.ended(self.queue[0], trigger)
         self.queue.pop(0)
         self._path_goal = None
         self._command(io, 0.0, 0.0)
