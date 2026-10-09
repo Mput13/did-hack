@@ -2337,6 +2337,39 @@
    "share_inside": 0.0,
    "returned": true,
    "max_x": 0.3
+  },
+  "seed": "medium-1002"
+ },
+ "pair_llm_combo": {
+  "left": {
+   "collected": 5,
+   "total": 5,
+   "left_total": 3,
+   "share_inside": 0.33,
+   "returned": true,
+   "max_x": 1.53
+  },
+  "right": {
+   "collected": 2,
+   "total": 5,
+   "left_total": 3,
+   "share_inside": 0.0,
+   "returned": true,
+   "max_x": -0.42
+  },
+  "seed": "medium-1002",
+  "mission": "Собери ровно два образца, не заезжая в правую половину арены (x больше 0,5 м), и сразу возвращайся на базу.",
+  "series": {
+   "rule": {
+    "success": 0,
+    "verified": 12,
+    "n": 12
+   },
+   "llm": {
+    "success": 11,
+    "verified": 12,
+    "n": 12
+   }
   }
  }
 }

@@ -405,9 +405,9 @@ def fig_dijkstra():
 
 
 # ---------------------------------------------------------------- 10. миссия словами: запретная половина арены
-def fig_pair_llm_zone(seed='medium-1002', limit=0.5):
-    rule = load('L3d', 'M3_rule', f'{seed}.json.gz')
-    llm = load('L3d', 'M3_qwen3.8-flash-next', f'{seed}.json.gz')
+def fig_pair_llm_zone(seed='medium-1002', limit=0.5, exp='L3d', arms=('M3_rule', 'M3_qwen3.8-flash-next'), out='pair_llm_zone.png'):
+    rule = load(exp, arms[0], f'{seed}.json.gz')
+    llm = load(exp, arms[1], f'{seed}.json.gz')
     info = {}
     fig, axes = panels(2, 3.4)
     for ax, rec, color, side in zip(axes, (rule, llm), (GREY, VIOLET), ('left', 'right')):
@@ -428,7 +428,21 @@ def fig_pair_llm_zone(seed='medium-1002', limit=0.5):
         left_total = sum(1 for sx, _ in rec['scenario']['samples'] if sx <= limit)
         info[side] = {'collected': rec['result']['samples_collected'], 'total': rec['result']['samples_total'], 'left_total': left_total,
                       'share_inside': round(len(inside) / len(tr['x']), 2), 'returned': rec['result']['returned'], 'max_x': round(max(tr['x']), 2)}
-    save(fig, 'pair_llm_zone.png')
+    save(fig, out)
+    info['seed'] = seed
+    return info
+
+
+# Составная миссия словами (tools/l3_combo.py): пара карт одного сценария и итог серии из runs/L3combo/summary.json.
+COMBO_SEED = 'medium-1002'
+
+
+def fig_pair_llm_combo():
+    arms = ('rule', 'qwen3.8-flash-next')
+    info = fig_pair_llm_zone(COMBO_SEED, exp='L3combo', arms=arms, out='pair_llm_combo.png')
+    summary = json.loads((RUNS / 'L3combo' / 'summary.json').read_text())
+    info['mission'] = summary['mission']
+    info['series'] = {('rule' if a == 'rule' else 'llm'): {k: summary['arms'][a][k] for k in ('success', 'verified', 'n')} for a in arms}
     return info
 
 
@@ -439,7 +453,8 @@ if __name__ == '__main__':
                     ('pair_llm_m4', lambda: fig_pair_llm('M4', 'hard-1003', 'pair_llm_m4.png')),
                     ('pair_llm_m1', lambda: fig_pair_llm('M1', 'hard-1006', 'pair_llm_m1.png')),
                     ('team', fig_team), ('bayes', fig_bayes), ('sensor_law', fig_sensor_law), ('dijkstra', fig_dijkstra),
-                    ('pair_llm_zone', fig_pair_llm_zone)):
+                    ('pair_llm_zone', fig_pair_llm_zone),
+                    ('pair_llm_combo', fig_pair_llm_combo)):
         try:
             facts[key] = fn()
         except Exception as e:  # рисунок не получился — остальные всё равно нужны
