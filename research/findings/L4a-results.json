@@ -1,6 +1,6 @@
 {
  "experiment": "L4a",
- "generated": "2026-10-09T12:31:49",
+ "generated": "2026-10-09T12:58:29",
  "level": "hard",
  "seeds": [
   14001,
@@ -122,8 +122,8 @@
     "first_ok_share": 0.99,
     "failed_share": 0.0,
     "errors": {
-     "ответ обрезан": 2,
-     "ответ не JSON": 2
+     "ответ не JSON": 2,
+     "ответ обрезан": 2
     },
     "tokens": {
      "prompt": 2522,
@@ -618,6 +618,34 @@
     "only_b": 4,
     "sign_p": 0.125
    },
+   "choose_checked_empty_by_scenario": {
+    "n": 1,
+    "mean": -0.5,
+    "ci": [
+     -0.5,
+     -0.5
+    ],
+    "scenarios": 1,
+    "states": 2,
+    "a_higher": 0,
+    "b_higher": 1,
+    "ties": 0,
+    "sign_p": 1.0
+   },
+   "choose_near_penalty_by_scenario": {
+    "n": 4,
+    "mean": -0.232,
+    "ci": [
+     -0.464,
+     0.0
+    ],
+    "scenarios": 4,
+    "states": 11,
+    "a_higher": 0,
+    "b_higher": 2,
+    "ties": 2,
+    "sign_p": 0.5
+   },
    "differing": [
     {
      "key": "hard-14001#13",
@@ -1080,6 +1108,34 @@
     "only_a": 2,
     "only_b": 6,
     "sign_p": 0.2891
+   },
+   "choose_checked_empty_by_scenario": {
+    "n": 2,
+    "mean": -0.944,
+    "ci": [
+     -1.0,
+     -0.889
+    ],
+    "scenarios": 2,
+    "states": 11,
+    "a_higher": 0,
+    "b_higher": 2,
+    "ties": 0,
+    "sign_p": 0.5
+   },
+   "choose_near_penalty_by_scenario": {
+    "n": 3,
+    "mean": -0.597,
+    "ci": [
+     -1.0,
+     -0.125
+    ],
+    "scenarios": 3,
+    "states": 12,
+    "a_higher": 0,
+    "b_higher": 3,
+    "ties": 0,
+    "sign_p": 0.25
    },
    "rows": [
     {
@@ -1585,6 +1641,20 @@
     "only_a": 2,
     "only_b": 0,
     "sign_p": 0.5
+   },
+   "paired_by_scenario": {
+    "n": 3,
+    "mean": 0.036,
+    "ci": [
+     0.0,
+     0.062
+    ],
+    "scenarios": 3,
+    "states": 40,
+    "a_higher": 2,
+    "b_higher": 0,
+    "ties": 1,
+    "sign_p": 0.5
    }
   },
   "Call": {
@@ -1646,6 +1716,20 @@
     "only_a": 11,
     "only_b": 0,
     "sign_p": 0.001
+   },
+   "paired_by_scenario": {
+    "n": 10,
+    "mean": 0.055,
+    "ci": [
+     0.026,
+     0.088
+    ],
+    "scenarios": 10,
+    "states": 185,
+    "a_higher": 7,
+    "b_higher": 0,
+    "ties": 3,
+    "sign_p": 0.0156
    }
   },
   "CB": {
@@ -1985,13 +2069,6 @@
      "fallback_by_scenario": {}
     }
    },
-   "mem_minus_nomem": {
-    "diff": 1.0,
-    "ci": [
-     0.345,
-     1.0
-    ]
-   },
    "paired": {
     "n": 4,
     "a": {
@@ -2021,7 +2098,6 @@
     "only_b": 0,
     "sign_p": 0.125
    },
-   "fisher_p": 0.0079,
    "score_mem_minus_nomem": {
     "n": 5,
     "mean": -8.878,
@@ -2044,14 +2120,35 @@
     "b_higher": 4,
     "ties": 1
    },
-   "mem_minus_rule": {
+   "paired_rule": {
+    "n": 5,
+    "a": {
+     "k": 5,
+     "n": 5,
+     "share": 1.0,
+     "ci": [
+      0.566,
+      1.0
+     ]
+    },
+    "b": {
+     "k": 1,
+     "n": 5,
+     "share": 0.2,
+     "ci": [
+      0.036,
+      0.624
+     ]
+    },
     "diff": 0.8,
     "ci": [
-     0.193,
-     0.964
-    ]
-   },
-   "fisher_p_mem_rule": 0.0476
+     0.4,
+     1.0
+    ],
+    "only_a": 4,
+    "only_b": 0,
+    "sign_p": 0.125
+   }
   },
   "N2": {
    "text": "Собирай образцы, но если два подъезда к кандидатам подряд не дали образца (робот был на месте, а образца нет) — немедленно возвращайся на базу.",
@@ -2396,13 +2493,6 @@
      }
     }
    },
-   "mem_minus_nomem": {
-    "diff": 0.5,
-    "ci": [
-     -0.273,
-     0.905
-    ]
-   },
    "paired": {
     "n": 2,
     "a": {
@@ -2432,7 +2522,6 @@
     "only_b": 0,
     "sign_p": 1.0
    },
-   "fisher_p": 1.0,
    "score_mem_minus_nomem": {
     "n": 5,
     "mean": -14.594,
@@ -2455,14 +2544,35 @@
     "b_higher": 4,
     "ties": 1
    },
-   "mem_minus_rule": {
+   "paired_rule": {
+    "n": 2,
+    "a": {
+     "k": 1,
+     "n": 2,
+     "share": 0.5,
+     "ci": [
+      0.095,
+      0.905
+     ]
+    },
+    "b": {
+     "k": 0,
+     "n": 2,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.658
+     ]
+    },
     "diff": 0.5,
     "ci": [
-     -0.094,
-     0.905
-    ]
-   },
-   "fisher_p_mem_rule": 0.2857
+     0.0,
+     1.0
+    ],
+    "only_a": 1,
+    "only_b": 0,
+    "sign_p": 1.0
+   }
   },
   "N3": {
    "text": "Собирай образцы, но после любого штрафа больше не выбирай цель ближе 1 м от места этого штрафа.",
@@ -2642,8 +2752,8 @@
       "first_ok_share": 0.963,
       "failed_share": 0.019,
       "errors": {
-       "ответ обрезан": 2,
        "ответ не JSON": 2,
+       "ответ обрезан": 2,
        "нет ответа модели": 2
       },
       "tokens": {
@@ -2776,13 +2886,6 @@
      }
     }
    },
-   "mem_minus_nomem": {
-    "diff": 0.4,
-    "ci": [
-     -0.118,
-     0.769
-    ]
-   },
    "paired": {
     "n": 5,
     "a": {
@@ -2812,7 +2915,6 @@
     "only_b": 0,
     "sign_p": 0.5
    },
-   "fisher_p": 0.4444,
    "score_mem_minus_nomem": {
     "n": 5,
     "mean": -3.08,
@@ -2835,14 +2937,35 @@
     "b_higher": 2,
     "ties": 2
    },
-   "mem_minus_rule": {
+   "paired_rule": {
+    "n": 5,
+    "a": {
+     "k": 5,
+     "n": 5,
+     "share": 1.0,
+     "ci": [
+      0.566,
+      1.0
+     ]
+    },
+    "b": {
+     "k": 3,
+     "n": 5,
+     "share": 0.6,
+     "ci": [
+      0.231,
+      0.882
+     ]
+    },
     "diff": 0.4,
     "ci": [
-     -0.118,
-     0.769
-    ]
-   },
-   "fisher_p_mem_rule": 0.4444
+     0.0,
+     0.8
+    ],
+    "only_a": 2,
+    "only_b": 0,
+    "sign_p": 0.5
+   }
   }
  },
  "missions_redo": {
@@ -3139,13 +3262,6 @@
     }
    },
    "replaced": [],
-   "mem_minus_nomem": {
-    "diff": 1.0,
-    "ci": [
-     0.345,
-     1.0
-    ]
-   },
    "paired": {
     "n": 4,
     "a": {
@@ -3175,7 +3291,6 @@
     "only_b": 0,
     "sign_p": 0.125
    },
-   "fisher_p": 0.0079,
    "score_mem_minus_nomem": {
     "n": 5,
     "mean": -8.878,
@@ -3198,14 +3313,35 @@
     "b_higher": 4,
     "ties": 1
    },
-   "mem_minus_rule": {
+   "paired_rule": {
+    "n": 5,
+    "a": {
+     "k": 5,
+     "n": 5,
+     "share": 1.0,
+     "ci": [
+      0.566,
+      1.0
+     ]
+    },
+    "b": {
+     "k": 1,
+     "n": 5,
+     "share": 0.2,
+     "ci": [
+      0.036,
+      0.624
+     ]
+    },
     "diff": 0.8,
     "ci": [
-     0.193,
-     0.964
-    ]
-   },
-   "fisher_p_mem_rule": 0.0476
+     0.4,
+     1.0
+    ],
+    "only_a": 4,
+    "only_b": 0,
+    "sign_p": 0.125
+   }
   },
   "N2": {
    "text": "Собирай образцы, но если два подъезда к кандидатам подряд не дали образца (робот был на месте, а образца нет) — немедленно возвращайся на базу.",
@@ -3547,13 +3683,6 @@
     "nomem hard-14011",
     "mem hard-14011"
    ],
-   "mem_minus_nomem": {
-    "diff": 1.0,
-    "ci": [
-     -0.03,
-     1.0
-    ]
-   },
    "paired": {
     "n": 1,
     "a": {
@@ -3583,7 +3712,6 @@
     "only_b": 0,
     "sign_p": 1.0
    },
-   "fisher_p": 0.3333,
    "score_mem_minus_nomem": {
     "n": 5,
     "mean": -15.798,
@@ -3606,14 +3734,35 @@
     "b_higher": 4,
     "ties": 1
    },
-   "mem_minus_rule": {
+   "paired_rule": {
+    "n": 1,
+    "a": {
+     "k": 1,
+     "n": 1,
+     "share": 1.0,
+     "ci": [
+      0.207,
+      1.0
+     ]
+    },
+    "b": {
+     "k": 0,
+     "n": 1,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.793
+     ]
+    },
     "diff": 1.0,
     "ci": [
-     0.096,
+     1.0,
      1.0
-    ]
-   },
-   "fisher_p_mem_rule": 0.1667
+    ],
+    "only_a": 1,
+    "only_b": 0,
+    "sign_p": 1.0
+   }
   },
   "N3": {
    "text": "Собирай образцы, но после любого штрафа больше не выбирай цель ближе 1 м от места этого штрафа.",
@@ -3793,8 +3942,8 @@
       "first_ok_share": 0.972,
       "failed_share": 0.0,
       "errors": {
-       "ответ обрезан": 3,
-       "ответ не JSON": 3
+       "ответ не JSON": 3,
+       "ответ обрезан": 3
       },
       "tokens": {
        "prompt": 2518,
@@ -3925,13 +4074,6 @@
     "nomem hard-14015",
     "mem hard-14015"
    ],
-   "mem_minus_nomem": {
-    "diff": 0.4,
-    "ci": [
-     -0.118,
-     0.769
-    ]
-   },
    "paired": {
     "n": 5,
     "a": {
@@ -3961,7 +4103,6 @@
     "only_b": 0,
     "sign_p": 0.5
    },
-   "fisher_p": 0.4444,
    "score_mem_minus_nomem": {
     "n": 5,
     "mean": -3.08,
@@ -3984,14 +4125,35 @@
     "b_higher": 2,
     "ties": 2
    },
-   "mem_minus_rule": {
+   "paired_rule": {
+    "n": 5,
+    "a": {
+     "k": 5,
+     "n": 5,
+     "share": 1.0,
+     "ci": [
+      0.566,
+      1.0
+     ]
+    },
+    "b": {
+     "k": 3,
+     "n": 5,
+     "share": 0.6,
+     "ci": [
+      0.231,
+      0.882
+     ]
+    },
     "diff": 0.4,
     "ci": [
-     -0.118,
-     0.769
-    ]
-   },
-   "fisher_p_mem_rule": 0.4444
+     0.0,
+     0.8
+    ],
+    "only_a": 2,
+    "only_b": 0,
+    "sign_p": 0.5
+   }
   }
  },
  "llm_all_runs": {
@@ -4057,6 +4219,531 @@
    ]
   },
   "prompt_tokens_ratio": 1.588
+ },
+ "empty_truth": {
+  "all": {
+   "places": 31,
+   "runs": 21,
+   "near_collect": 10,
+   "near_same_place": 26,
+   "runs_near_same_place": 20,
+   "collected_later": 15,
+   "runs_never_collected": 9,
+   "samples": 20,
+   "samples_collected": 11
+  },
+  "by_arm": {
+   "nomem": {
+    "places": 16,
+    "runs": 10,
+    "near_collect": 6,
+    "near_same_place": 14,
+    "runs_near_same_place": 10,
+    "collected_later": 13,
+    "runs_never_collected": 1,
+    "samples": 10,
+    "samples_collected": 9
+   },
+   "mem": {
+    "places": 15,
+    "runs": 11,
+    "near_collect": 4,
+    "near_same_place": 12,
+    "runs_near_same_place": 10,
+    "collected_later": 2,
+    "runs_never_collected": 8,
+    "samples": 10,
+    "samples_collected": 2
+   }
+  },
+  "by_group": {
+   "main_nomem": {
+    "places": 2,
+    "runs": 2,
+    "near_collect": 1,
+    "near_same_place": 2,
+    "runs_near_same_place": 2,
+    "collected_later": 2,
+    "runs_never_collected": 0,
+    "samples": 2,
+    "samples_collected": 2
+   },
+   "main_mem": {
+    "places": 1,
+    "runs": 1,
+    "near_collect": 0,
+    "near_same_place": 1,
+    "runs_near_same_place": 1,
+    "collected_later": 1,
+    "runs_never_collected": 0,
+    "samples": 1,
+    "samples_collected": 1
+   },
+   "N1_nomem": {
+    "places": 6,
+    "runs": 4,
+    "near_collect": 4,
+    "near_same_place": 6,
+    "runs_near_same_place": 4,
+    "collected_later": 5,
+    "runs_never_collected": 1,
+    "samples": 4,
+    "samples_collected": 3
+   },
+   "N1_mem": {
+    "places": 6,
+    "runs": 5,
+    "near_collect": 2,
+    "near_same_place": 5,
+    "runs_near_same_place": 5,
+    "collected_later": 1,
+    "runs_never_collected": 4,
+    "samples": 5,
+    "samples_collected": 1
+   },
+   "N2_nomem": {
+    "places": 7,
+    "runs": 3,
+    "near_collect": 1,
+    "near_same_place": 5,
+    "runs_near_same_place": 3,
+    "collected_later": 5,
+    "runs_never_collected": 0,
+    "samples": 3,
+    "samples_collected": 3
+   },
+   "N2_mem": {
+    "places": 5,
+    "runs": 2,
+    "near_collect": 1,
+    "near_same_place": 4,
+    "runs_near_same_place": 2,
+    "collected_later": 0,
+    "runs_never_collected": 2,
+    "samples": 2,
+    "samples_collected": 0
+   },
+   "N3_nomem": {
+    "places": 1,
+    "runs": 1,
+    "near_collect": 0,
+    "near_same_place": 1,
+    "runs_near_same_place": 1,
+    "collected_later": 1,
+    "runs_never_collected": 0,
+    "samples": 1,
+    "samples_collected": 1
+   },
+   "N3_mem": {
+    "places": 3,
+    "runs": 3,
+    "near_collect": 1,
+    "near_same_place": 2,
+    "runs_near_same_place": 2,
+    "collected_later": 0,
+    "runs_never_collected": 2,
+    "samples": 2,
+    "samples_collected": 0
+   }
+  },
+  "by_why": {
+   "candidate_refuted": {
+    "places": 25,
+    "runs": 18,
+    "near_collect": 10,
+    "near_same_place": 20,
+    "runs_near_same_place": 17,
+    "collected_later": 12,
+    "runs_never_collected": 7,
+    "samples": 17,
+    "samples_collected": 10
+   },
+   "false_collect": {
+    "places": 6,
+    "runs": 6,
+    "near_collect": 0,
+    "near_same_place": 6,
+    "runs_near_same_place": 6,
+    "collected_later": 3,
+    "runs_never_collected": 3,
+    "samples": 6,
+    "samples_collected": 3
+   }
+  },
+  "rows": [
+   {
+    "group": "main",
+    "arm": "nomem",
+    "scenario": "hard-14002",
+    "t": 69.8,
+    "x": 0.42,
+    "y": -1.5,
+    "why": "candidate_refuted",
+    "sample": 3,
+    "sample_m": 0.211,
+    "collected_t": 85.8
+   },
+   {
+    "group": "main",
+    "arm": "nomem",
+    "scenario": "hard-14009",
+    "t": 58.1,
+    "x": 2.2,
+    "y": -0.63,
+    "why": "candidate_refuted",
+    "sample": 1,
+    "sample_m": 0.422,
+    "collected_t": 67.9
+   },
+   {
+    "group": "main",
+    "arm": "mem",
+    "scenario": "hard-14009",
+    "t": 58.1,
+    "x": 2.2,
+    "y": -0.63,
+    "why": "candidate_refuted",
+    "sample": 1,
+    "sample_m": 0.422,
+    "collected_t": 79.0
+   },
+   {
+    "group": "N1",
+    "arm": "nomem",
+    "scenario": "hard-14011",
+    "t": 63.1,
+    "x": 1.67,
+    "y": 0.26,
+    "why": "false_collect",
+    "sample": 1,
+    "sample_m": 0.309,
+    "collected_t": 94.0
+   },
+   {
+    "group": "N1",
+    "arm": "nomem",
+    "scenario": "hard-14011",
+    "t": 75.8,
+    "x": 2.1,
+    "y": 0.2,
+    "why": "candidate_refuted",
+    "sample": 1,
+    "sample_m": 0.35,
+    "collected_t": 94.0
+   },
+   {
+    "group": "N1",
+    "arm": "nomem",
+    "scenario": "hard-14011",
+    "t": 92.8,
+    "x": 1.7,
+    "y": -0.06,
+    "why": "candidate_refuted",
+    "sample": 1,
+    "sample_m": 0.13,
+    "collected_t": 94.0
+   },
+   {
+    "group": "N1",
+    "arm": "nomem",
+    "scenario": "hard-14012",
+    "t": 62.4,
+    "x": -0.71,
+    "y": 2.23,
+    "why": "candidate_refuted",
+    "sample": 6,
+    "sample_m": 0.1,
+    "collected_t": 66.8
+   },
+   {
+    "group": "N1",
+    "arm": "nomem",
+    "scenario": "hard-14018",
+    "t": 49.9,
+    "x": 2.16,
+    "y": 0.7,
+    "why": "candidate_refuted",
+    "sample": 2,
+    "sample_m": 0.078,
+    "collected_t": 68.4
+   },
+   {
+    "group": "N1",
+    "arm": "nomem",
+    "scenario": "hard-14020",
+    "t": 63.7,
+    "x": 2.11,
+    "y": -0.47,
+    "why": "candidate_refuted",
+    "sample": 6,
+    "sample_m": 0.222,
+    "collected_t": null
+   },
+   {
+    "group": "N1",
+    "arm": "mem",
+    "scenario": "hard-14011",
+    "t": 63.0,
+    "x": 1.67,
+    "y": 0.27,
+    "why": "false_collect",
+    "sample": 1,
+    "sample_m": 0.318,
+    "collected_t": null
+   },
+   {
+    "group": "N1",
+    "arm": "mem",
+    "scenario": "hard-14012",
+    "t": 85.2,
+    "x": -0.39,
+    "y": 2.08,
+    "why": "candidate_refuted",
+    "sample": 6,
+    "sample_m": 0.319,
+    "collected_t": null
+   },
+   {
+    "group": "N1",
+    "arm": "mem",
+    "scenario": "hard-14013",
+    "t": 62.6,
+    "x": -0.13,
+    "y": -2.13,
+    "why": "candidate_refuted",
+    "sample": 5,
+    "sample_m": 0.287,
+    "collected_t": 78.6
+   },
+   {
+    "group": "N1",
+    "arm": "mem",
+    "scenario": "hard-14013",
+    "t": 69.2,
+    "x": -0.35,
+    "y": -1.28,
+    "why": "candidate_refuted",
+    "sample": 5,
+    "sample_m": 0.711,
+    "collected_t": 78.6
+   },
+   {
+    "group": "N1",
+    "arm": "mem",
+    "scenario": "hard-14018",
+    "t": 49.9,
+    "x": 2.16,
+    "y": 0.7,
+    "why": "candidate_refuted",
+    "sample": 2,
+    "sample_m": 0.078,
+    "collected_t": null
+   },
+   {
+    "group": "N1",
+    "arm": "mem",
+    "scenario": "hard-14020",
+    "t": 63.7,
+    "x": 2.18,
+    "y": -0.35,
+    "why": "candidate_refuted",
+    "sample": 6,
+    "sample_m": 0.304,
+    "collected_t": null
+   },
+   {
+    "group": "N2",
+    "arm": "nomem",
+    "scenario": "hard-14011",
+    "t": 63.1,
+    "x": 1.67,
+    "y": 0.26,
+    "why": "false_collect",
+    "sample": 1,
+    "sample_m": 0.309,
+    "collected_t": 98.1
+   },
+   {
+    "group": "N2",
+    "arm": "nomem",
+    "scenario": "hard-14011",
+    "t": 65.3,
+    "x": 1.41,
+    "y": 0.52,
+    "why": "candidate_refuted",
+    "sample": 1,
+    "sample_m": 0.67,
+    "collected_t": 98.1
+   },
+   {
+    "group": "N2",
+    "arm": "nomem",
+    "scenario": "hard-14011",
+    "t": 75.8,
+    "x": 2.08,
+    "y": 0.37,
+    "why": "candidate_refuted",
+    "sample": 1,
+    "sample_m": 0.46,
+    "collected_t": 98.1
+   },
+   {
+    "group": "N2",
+    "arm": "nomem",
+    "scenario": "hard-14020",
+    "t": 63.7,
+    "x": 2.11,
+    "y": -0.47,
+    "why": "candidate_refuted",
+    "sample": 6,
+    "sample_m": 0.222,
+    "collected_t": 90.4
+   },
+   {
+    "group": "N2",
+    "arm": "nomem",
+    "scenario": "hard-14031",
+    "t": 71.2,
+    "x": 0.18,
+    "y": 2.23,
+    "why": "candidate_refuted",
+    "sample": 0,
+    "sample_m": 0.368,
+    "collected_t": 98.4
+   },
+   {
+    "group": "N2",
+    "arm": "nomem",
+    "scenario": "hard-14031",
+    "t": 75.2,
+    "x": 0.05,
+    "y": 1.93,
+    "why": "candidate_refuted",
+    "sample": 0,
+    "sample_m": 0.392,
+    "collected_t": 98.4
+   },
+   {
+    "group": "N2",
+    "arm": "nomem",
+    "scenario": "hard-14031",
+    "t": 87.7,
+    "x": 1.03,
+    "y": 1.57,
+    "why": "candidate_refuted",
+    "sample": 0,
+    "sample_m": 0.713,
+    "collected_t": 98.4
+   },
+   {
+    "group": "N2",
+    "arm": "mem",
+    "scenario": "hard-14011",
+    "t": 63.0,
+    "x": 1.67,
+    "y": 0.27,
+    "why": "false_collect",
+    "sample": 1,
+    "sample_m": 0.318,
+    "collected_t": null
+   },
+   {
+    "group": "N2",
+    "arm": "mem",
+    "scenario": "hard-14011",
+    "t": 75.8,
+    "x": 2.11,
+    "y": 0.43,
+    "why": "candidate_refuted",
+    "sample": 1,
+    "sample_m": 0.527,
+    "collected_t": null
+   },
+   {
+    "group": "N2",
+    "arm": "mem",
+    "scenario": "hard-14011",
+    "t": 80.3,
+    "x": 1.61,
+    "y": -0.04,
+    "why": "candidate_refuted",
+    "sample": 1,
+    "sample_m": 0.212,
+    "collected_t": null
+   },
+   {
+    "group": "N2",
+    "arm": "mem",
+    "scenario": "hard-14031",
+    "t": 71.2,
+    "x": 0.18,
+    "y": 2.23,
+    "why": "candidate_refuted",
+    "sample": 0,
+    "sample_m": 0.368,
+    "collected_t": null
+   },
+   {
+    "group": "N2",
+    "arm": "mem",
+    "scenario": "hard-14031",
+    "t": 75.2,
+    "x": 0.05,
+    "y": 1.93,
+    "why": "candidate_refuted",
+    "sample": 0,
+    "sample_m": 0.392,
+    "collected_t": null
+   },
+   {
+    "group": "N3",
+    "arm": "nomem",
+    "scenario": "hard-14011",
+    "t": 63.1,
+    "x": 1.67,
+    "y": 0.26,
+    "why": "false_collect",
+    "sample": 1,
+    "sample_m": 0.309,
+    "collected_t": 75.0
+   },
+   {
+    "group": "N3",
+    "arm": "mem",
+    "scenario": "hard-14011",
+    "t": 68.8,
+    "x": 1.5,
+    "y": 0.12,
+    "why": "false_collect",
+    "sample": 1,
+    "sample_m": 0.345,
+    "collected_t": null
+   },
+   {
+    "group": "N3",
+    "arm": "mem",
+    "scenario": "hard-14013",
+    "t": 62.4,
+    "x": -0.65,
+    "y": -1.34,
+    "why": "candidate_refuted",
+    "sample": 5,
+    "sample_m": 0.704,
+    "collected_t": 70.7
+   },
+   {
+    "group": "N3",
+    "arm": "mem",
+    "scenario": "hard-14016",
+    "t": 64.2,
+    "x": 0.98,
+    "y": 0.73,
+    "why": "candidate_refuted",
+    "sample": 0,
+    "sample_m": 0.224,
+    "collected_t": null
+   }
+  ]
  },
  "launches": [
   {

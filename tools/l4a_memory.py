@@ -24,14 +24,15 @@
 import argparse
 import math
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 
 from l3_common import (ENV_FILE, MAIN, RUNS, CacheFirst, client as plain_client, exchange_stats, fmt_share, llm_opts, mean_ci, paired_binary,
                        paired_diff, read_json, run_cells, share, share_diff, write_json)
 
 from did.llm import load_env, load_system_prompt, request_plan
 from did.llm_cache import ReplyCache
-from did.plan_memory import MISSIONS, PROMPT, approaches, revisits, verify, without_memory
+from did.plan_memory import (MERGE_M, MISSIONS, ON_SITE_M, PROMPT, SAME_PLACE_M, approaches, nearest_sample, revisits,
+                             verify, without_memory)
 from did.planner import resolve_subgoals
 from did.recorder import load_trace
 from did.runner import run_episode
@@ -216,14 +217,75 @@ def revisits_by_memory(trace):
     return n if seen else None
 
 
-def fisher_p(k1, n1, k2, n2):
-    """Точный двусторонний критерий Фишера для двух долей k1 из n1 и k2 из n2."""
-    if not n1 or not n2:
+def by_scenario(a, b):
+    """Парные исходы да/нет {«сценарий#номер решения»: bool} с неопределённостью по сценариям: состояния одного
+    прогона связаны между собой, независимы только прогоны. Разность долей a − b считается внутри каждого
+    сценария; среднее по сценариям, 95% интервал — бутстреп по сценариям, знаковый критерий — тоже по сценариям."""
+    cells = defaultdict(list)
+    for k in a:
+        if k in b and a[k] is not None and b[k] is not None:
+            cells[k.split('#')[0]].append(float(bool(a[k])) - float(bool(b[k])))
+    if not cells:
         return None
-    k, n = k1 + k2, n1 + n2
-    prob = lambda i: math.comb(n1, i) * math.comb(n2, k - i) / math.comb(n, k)          # noqa: E731
-    p0 = prob(k1)
-    return round(min(1.0, sum(prob(i) for i in range(max(0, k - n2), min(k, n1) + 1) if prob(i) <= p0 + 1e-12)), 4)
+    d = {sc: sum(v) / len(v) for sc, v in cells.items()}
+    out = mean_ci(list(d.values()))
+    up, down = sum(x > 1e-9 for x in d.values()), sum(x < -1e-9 for x in d.values())
+    n = up + down
+    p = min(1.0, 2 * sum(math.comb(n, i) for i in range(min(up, down) + 1)) / 2 ** n) if n else 1.0
+    out.update(scenarios=len(d), states=sum(len(v) for v in cells.values()), a_higher=up, b_higher=down,
+               ties=len(d) - n, sign_p=round(p, 4))
+    return out
+
+
+def memory_empty(trace):
+    """Места, которые память назвала пустыми за прогон (список checked_empty ведётся и в руке nomem):
+    [(t, x, y, почему)]. Повторные записи одного места (ближе MERGE_M) — одна, со временем первой."""
+    out = []
+    for p in trace.get('plans') or []:
+        memory = p.get('memory') or (p.get('state') if 'checked_empty' in (p.get('state') or {}) else None)
+        for e in (memory or {}).get('checked_empty', []):
+            if not any(math.hypot(e['x'] - x, e['y'] - y) <= MERGE_M for _, x, y, _ in out):
+                out.append((e['t'], e['x'], e['y'], e['why']))
+    return out
+
+
+def empty_truth(out, groups):
+    """Проверка самой памяти по истине сценария (разбор после ревью, в плане опыта его не было): был ли рядом с
+    местом, которое память назвала пустым, несобранный образец и собрал ли его робот потом.
+
+    near_collect — образец ближе ON_SITE_M (радиус сбора), near_same_place — ближе SAME_PLACE_M (в этом радиусе
+    подсказка велит цель не выбирать), collected_later — сколько из near_same_place робот потом всё же собрал.
+    samples и samples_collected — то же по разным образцам: у одного образца может быть несколько таких мест."""
+    rows = []
+    for group, seeds in groups.items():
+        for arm in ('nomem', 'mem'):
+            for seed in seeds:
+                path = record(out, group, arm, seed)
+                if not path.is_file():
+                    continue
+                tr = load_trace(path)
+                for t, x, y, why in memory_empty(tr):
+                    d, later, sample = nearest_sample(tr, t, x, y)
+                    rows.append({'group': group, 'arm': arm, 'scenario': f'{LEVEL}-{seed}', 't': t, 'x': x, 'y': y,
+                                 'why': why, 'sample': sample, 'sample_m': None if d is None else round(d, 3),
+                                 'collected_t': later})
+
+    def count(part):
+        near = [r for r in part if r['sample_m'] is not None and r['sample_m'] <= SAME_PLACE_M]
+        run = lambda r: (r['group'], r['arm'], r['scenario'])                                # noqa: E731
+        return {'places': len(part), 'runs': len({run(r) for r in part}),
+                'near_collect': sum(r['sample_m'] <= ON_SITE_M for r in near), 'near_same_place': len(near),
+                'runs_near_same_place': len({run(r) for r in near}),
+                'collected_later': sum(r['collected_t'] is not None for r in near),
+                'runs_never_collected': len({run(r) for r in near if r['collected_t'] is None}),
+                'samples': len({(*run(r), r['sample']) for r in near}),
+                'samples_collected': len({(*run(r), r['sample']) for r in near if r['collected_t'] is not None})}
+
+    return {'all': count(rows), 'by_arm': {arm: count([r for r in rows if r['arm'] == arm]) for arm in ('nomem', 'mem')},
+            'by_group': {f'{g}_{arm}': count([r for r in rows if r['group'] == g and r['arm'] == arm])
+                         for g in groups for arm in ('nomem', 'mem')},
+            'by_why': {w: count([r for r in rows if r['why'] == w]) for w in sorted({r['why'] for r in rows})},
+            'rows': rows}
 
 
 def read_run(path):
@@ -334,6 +396,10 @@ def shadow_summary(out, data):
             'states_near_penalty': len(info_p),
             'choose_near_penalty': paired_binary({r['key']: pick(r, 'mem', 'near_penalty') for r in info_p},
                                                  {r['key']: pick(r, 'nomem', 'near_penalty') for r in info_p}),
+            'choose_checked_empty_by_scenario': by_scenario({r['key']: pick(r, 'mem', 'near_empty') for r in info},
+                                                            {r['key']: pick(r, 'nomem', 'near_empty') for r in info}),
+            'choose_near_penalty_by_scenario': by_scenario({r['key']: pick(r, 'mem', 'near_penalty') for r in info_p},
+                                                           {r['key']: pick(r, 'nomem', 'near_penalty') for r in info_p}),
             'differing': [r for r in both if not same_goal(r['mem'], r['nomem'])],
             'rows_all': both,
         }
@@ -362,6 +428,12 @@ def shadow_summary(out, data):
                     'states_near_penalty': len(p_rows),
                     'choose_near_penalty': paired_binary({r['key']: pick(r, 'mem', 'near_penalty') for r in p_rows},
                                                          {r['key']: pick(r, 'nomem', 'near_penalty') for r in p_rows}),
+                    'choose_checked_empty_by_scenario': by_scenario(
+                        {r['key']: pick(r, 'mem', 'near_empty') for r in e_rows},
+                        {r['key']: pick(r, 'nomem', 'near_empty') for r in e_rows}),
+                    'choose_near_penalty_by_scenario': by_scenario(
+                        {r['key']: pick(r, 'mem', 'near_penalty') for r in p_rows},
+                        {r['key']: pick(r, 'nomem', 'near_penalty') for r in p_rows}),
                     'rows': rows}
     first = {s['key']: s for s in a}
     for kind in ('C', 'Call'):
@@ -381,7 +453,10 @@ def shadow_summary(out, data):
                      'mem_differs_from_second_nomem': share(sum(not same_goal(r['mem'], again[r['key']]) for r in same),
                                                             len(same)),
                      'paired': paired_binary({r['key']: not same_goal(r['mem'], r['nomem']) for r in same},
-                                             {x['key']: not same_goal(x['goal'], y['goal']) for x, y in pairs})}
+                                             {x['key']: not same_goal(x['goal'], y['goal']) for x, y in pairs}),
+                     'paired_by_scenario': by_scenario(
+                         {r['key']: not same_goal(r['mem'], r['nomem']) for r in same},
+                         {x['key']: not same_goal(x['goal'], y['goal']) for x, y in pairs})}
     if 'A' in res:
         del res['A']['rows_all']
     cb = read_json(RUNS / out / 'shadow_CB.json') or []
@@ -451,19 +526,14 @@ def missions_summary(out, overlay=None):
             cell['arms'][arm] = e
         a = cell['arms']
         if 'mem' in a and 'nomem' in a:
-            cell['mem_minus_nomem'] = share_diff(a['mem']['success']['k'], a['mem']['success']['n'],
-                                                 a['nomem']['success']['k'], a['nomem']['success']['n'])
+            # Прогоны двух вариантов идут на одних сценариях, поэтому сравнение парное: по сценариям, где повод
+            # возник у обоих. Критерии для независимых выборок (Фишер, Ньюкомб) здесь неприменимы и убраны.
             cell['paired'] = paired_binary(verdicts['mem'], verdicts['nomem'])
-            cell['fisher_p'] = fisher_p(a['mem']['success']['k'], a['mem']['success']['n'],
-                                        a['nomem']['success']['k'], a['nomem']['success']['n'])
             for m in ('score', 'collected'):
                 cell[f'{m}_mem_minus_nomem'] = paired_diff({k: r[m] for k, r in data['mem'].items()},
                                                            {k: r[m] for k, r in data['nomem'].items()})
         if 'mem' in a and 'rule' in a:
-            cell['mem_minus_rule'] = share_diff(a['mem']['success']['k'], a['mem']['success']['n'],
-                                                a['rule']['success']['k'], a['rule']['success']['n'])
-            cell['fisher_p_mem_rule'] = fisher_p(a['mem']['success']['k'], a['mem']['success']['n'],
-                                                 a['rule']['success']['k'], a['rule']['success']['n'])
+            cell['paired_rule'] = paired_binary(verdicts['mem'], verdicts['rule'])
         table[m_id] = cell
     return table
 
@@ -503,11 +573,20 @@ def summarize(out, seeds):
                              'first_ok_mem_minus_nomem': share_diff(x['first_ok'], x['requests'], y['first_ok'],
                                                                     y['requests']),
                              'prompt_tokens_ratio': round(x['tokens']['prompt'] / y['tokens']['prompt'], 3)}
+    s['empty_truth'] = empty_truth(out, {'main': seeds, **mission_seeds(out)})
     s['launches'] = read_json(RUNS / out / 'launches.json', [])
     s['network_calls'] = sum(x['network_calls'] for x in s['launches'] if not x['cache_only'])
     s['runs'] = [{'arm': arm, 'scenario': k, **{f: r[f] for f in r if f not in ('exchanges', 'trace')}}
                  for arm, runs in data.items() for k, r in runs.items()]
     return s
+
+
+def _pairs(d):
+    """Парное сравнение да/нет одной строкой: сколько общих пар и в скольких верен только один вариант."""
+    if not d:
+        return '—'
+    return (f"{d['n']} общих пар: {d['a']['k']} против {d['b']['k']}; только первый {d['only_a']}, только второй "
+            f"{d['only_b']}, знаковый критерий p={d['sign_p']}")
 
 
 def _ci(d, digits=2):
@@ -545,15 +624,22 @@ def report(s):
         for arm, e in cell['arms'].items():
             lines.append(f"{m_id}/{arm}: выполнено {fmt_share(e['success'])}, без повода {e['no_occasion']} из {e['runs']}; "
                          f"исходы {e['outcomes']}; счёт {e['score']}, собрано {e['collected']}, вернулся {e['returned']}")
-        lines.append(f"{m_id}: mem − nomem {cell.get('mem_minus_nomem')}, Фишер p={cell.get('fisher_p')}; парно "
-                     f"{cell.get('paired')}; счёт {_ci(cell.get('score_mem_minus_nomem'))}, образцы "
+        lines.append(f"{m_id}: mem против nomem парно {_pairs(cell.get('paired'))}; mem против rule парно "
+                     f"{_pairs(cell.get('paired_rule'))}; счёт {_ci(cell.get('score_mem_minus_nomem'))}, образцы "
                      f"{_ci(cell.get('collected_mem_minus_nomem'))}")
     for m_id, cell in (s.get('missions_redo') or {}).items():
         if cell['replaced']:
             lines.append(f"{m_id} после досчёта ({', '.join(cell['replaced'])}): " + '; '.join(
                 f"{arm} {fmt_share(e['success'])}, без повода {e['no_occasion']}, счёт {e['score']}, собрано {e['collected']}"
-                for arm, e in cell['arms'].items()) + f"; mem − nomem {cell.get('mem_minus_nomem')}, Фишер "
-                f"p={cell.get('fisher_p')}; счёт {_ci(cell.get('score_mem_minus_nomem'))}")
+                for arm, e in cell['arms'].items()) + f"; mem против nomem парно {_pairs(cell.get('paired'))}; счёт "
+                f"{_ci(cell.get('score_mem_minus_nomem'))}")
+    t = s.get('empty_truth')
+    if t:
+        for name, e in [('все', t['all'])] + list(t['by_arm'].items()):
+            lines.append(f"память назвала пустым ({name}): мест {e['places']} в {e['runs']} прогонах; несобранный образец "
+                         f"ближе {ON_SITE_M:g} м — {e['near_collect']}, ближе {SAME_PLACE_M:g} м — {e['near_same_place']} "
+                         f"(в {e['runs_near_same_place']} прогонах); это {e['samples']} разных образцов, потом собрано "
+                         f"{e['samples_collected']}")
     lines.append(f"настоящих обращений к серверу: {s['network_calls']}")
     return '\n'.join(lines)
 

@@ -281,12 +281,34 @@ def _tool():
     return l4a_memory
 
 
-def test_fisher_exact_for_small_shares():
-    f = _tool().fisher_p
-    assert f(5, 5, 0, 4) == round(1 / 126, 4)                  # 5 из 5 против 0 из 4: одна таблица из 126
-    assert f(1, 2, 0, 2) == 1.0 and f(3, 5, 3, 5) == 1.0
-    assert f(5, 5, 3, 5) == round(2 * 10 / 45, 4)              # 8 успехов на 10: крайние таблицы с двух сторон
-    assert f(0, 0, 1, 2) is None
+def test_uncertainty_is_counted_by_scenarios_not_states():
+    """Состояния одного прогона связаны: 9 расхождений в одном сценарии — это одна независимая ситуация."""
+    f = _tool().by_scenario
+    a = {**{f'hard-1#{i}': True for i in range(9)}, 'hard-2#0': True, 'hard-2#1': False, 'hard-3#0': False}
+    b = {k: False for k in a}
+    r = f(a, b)
+    assert (r['scenarios'], r['states'], r['a_higher'], r['b_higher'], r['ties']) == (3, 12, 2, 0, 1)
+    assert r['mean'] == 0.5 and r['sign_p'] == 0.5              # (1 + 0.5 + 0) / 3; две пары в одну сторону
+    assert f({'hard-1#0': True}, {'hard-9#0': True}) is None and f({'hard-1#0': None}, {'hard-1#0': True}) is None
+
+
+def test_memory_empty_place_is_checked_against_scenario_truth():
+    """«Кандидат не подтвердился на месте» — не «образца нет»: считаем, лежал ли рядом несобранный образец."""
+    from did.plan_memory import nearest_sample
+    tool = _tool()
+    trace = {'scenario': {'samples': [[1.0, 1.0], [1.2, 1.0], [-2.0, 0.0]]},
+             'events': [{'type': 'sample_collected', 't': 10.0, 'sample': 0}, {'type': 'hazard_hit', 't': 20.0},
+                        {'type': 'sample_collected', 't': 60.0, 'sample': 1}]}
+    assert nearest_sample(trace, 30.0, 1.0, 1.0) == (pytest.approx(0.2), 60.0, 1)   # образец 0 уже собран, 1 — позже
+    assert nearest_sample(trace, 5.0, 1.0, 1.0) == (0.0, 10.0, 0)
+    assert nearest_sample(trace, 70.0, 1.0, 1.0) == (pytest.approx(3.162, abs=1e-3), None, 2)
+    assert nearest_sample({**trace, 'scenario': {'samples': [[1.0, 1.0]]}}, 30.0, 0.0, 0.0) == (None, None, None)
+    # Одно место, записанное в память несколько раз (ближе 0,3 м), — одна строка со временем первой записи.
+    place = lambda t, x: {'t': t, 'x': x, 'y': 1.0, 'why': 'candidate_refuted', 'near': []}     # noqa: E731
+    plans = [{'memory': {'checked_empty': [place(30.0, 1.0)]}}, {'memory': {'checked_empty': [place(31.0, 1.1)]}},
+             {'state': {'checked_empty': [place(31.0, 1.1), place(40.0, 2.0)]}}, {'state': {'candidates': []}}]
+    assert tool.memory_empty({'plans': plans}) == [(30.0, 1.0, 1.0, 'candidate_refuted'),
+                                                   (40.0, 2.0, 1.0, 'candidate_refuted')]
 
 
 def test_revisits_by_memory_do_not_depend_on_who_saw_the_memory():
