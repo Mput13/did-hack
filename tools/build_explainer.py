@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 from did.arena import load_arena                     # noqa: E402
 from did.config import BASE, LEVELS, Rules           # noqa: E402
 from did.nav import CostGraph, path_length           # noqa: E402
-from did.recorder import load_trace                  # noqa: E402
+from did.recorder import decode_grid, load_trace     # noqa: E402
 from did.route import survey_route                   # noqa: E402
 from did.runner import RUNS, run_episode             # noqa: E402
 
@@ -33,6 +33,8 @@ KEEP_METRICS = ('score', 'samples_share', 'returned', 'battery_used', 'penalties
                 'inq_insufficient', 'inq_energy', 'faults_found', 'study_error_pct', 'study_covered',
                 'study_halfwidth_pct', 'study_energy')
 SCIENCE_STORY = 1020      # прогон исследователя, в котором есть утечка, залипший датчик и дорогой грунт
+# Пример из отчёта P3: после сбора образца № 5 пересчёт карты стирает знание о соседнем образце № 2.
+NEIGHBOR = {'exp': 'E26', 'arm': 'adaptive_v2', 'run': 'hard-11005', 'lost': 2, 'taken': 5, 'until': 20.0}
 
 
 def thin(tr):
@@ -135,9 +137,14 @@ def llm_example():
     while not world.done:
         bot.tick(world.observe(), world)
         world.advance()
+    # Снимок для рисунка «что помнит модель»: вызов, в котором у агента уже больше всего найденного
+    # (зоны, грунты, кандидаты, гипотезы), — чтобы на рисунке были заполнены все поля памяти.
+    filled = lambda st: sum(bool(st[k]) for k in ('hazards', 'soil_zones', 'candidates', 'open_hypotheses', 'alarms'))
+    memory = max((st for st, _ in seen), key=lambda st: (filled(st), st['time_s']), default=None)
     for state, out in seen:
         if out['source'] == 'llm' and state['candidates'] and len(state['explore_points']) >= 2 and out['exchanges']:
-            return {'state': state, 'response': out['exchanges'][-1].get('response'), 'calls': len(seen)}
+            return {'state': state, 'response': out['exchanges'][-1].get('response'), 'calls': len(seen),
+                    'memory_state': memory}
     return {'error': 'подходящий обмен не найден'}
 
 
@@ -184,6 +191,41 @@ def inquiry_accuracy(exp='E10', arm='scientist', level='hard'):
             'wrong': sum(r['wrong'] for r in rows.values())} if runs else None
 
 
+def neighbor_story():
+    """Настоящая запись (опыт E26): уверенность в месте соседнего образца до и после сбора — для рисунка о потере P3.
+
+    Уверенность считается так же, как у кандидатов агента (SampleBelief.candidates): 1 − exp(−сумма вероятностей
+    в круге 0,25 м), лучший круг в 0,3 м от настоящего места образца. Снимки карты в записи идут раз в 2 секунды.
+    """
+    path = RUNS / NEIGHBOR['exp'] / NEIGHBOR['arm'] / f"{NEIGHBOR['run']}.json.gz"
+    if not path.exists():
+        return None
+    tr = load_trace(path)
+    b, samples = tr['belief'], tr['scenario']['samples']
+    ys, xs = np.mgrid[0:b['h'], 0:b['w']]
+    cx, cy = b['x0'] + (xs + 0.5) * b['res'], b['y0'] + (ys + 0.5) * b['res']
+
+    def confidence(grid, sx, sy):
+        near = np.argwhere(np.hypot(cx - sx, cy - sy) <= 0.3)
+        best = max(grid[np.hypot(cx - cx[j, i], cy - cy[j, i]) <= 0.25].sum() for j, i in near)
+        return round(1.0 - math.exp(-float(best)), 2)
+
+    snaps = [s for s in b['snaps'] if s['t'] <= NEIGHBOR['until']]
+    series = []
+    for s in snaps:
+        grid = (decode_grid(s['data'], b['h'], b['w']) / 255.0) ** 2
+        series.append({'t': s['t'], 'lost': confidence(grid, *samples[NEIGHBOR['lost']]),
+                       'taken': confidence(grid, *samples[NEIGHBOR['taken']])})
+    took = next(e['t'] for e in tr['events'] if e['type'] == 'sample_collected' and e.get('sample') == NEIGHBOR['taken'])
+    before = max((s for s in snaps if s['t'] < took), key=lambda s: s['t'])
+    after = min((s for s in snaps if s['t'] >= took), key=lambda s: s['t'])
+    tk = tr['track']
+    n = sum(1 for v in tk['t'] if v <= after['t'])
+    return {**NEIGHBOR, 'seed': tr['scenario'].get('seed'), 'grid': {k: b[k] for k in ('res', 'x0', 'y0', 'w', 'h')},
+            'before': before, 'after': after, 'took': took, 'series': series, 'samples': samples,
+            'track': {'t': tk['t'][:n], 'x': tk['x'][:n], 'y': tk['y'][:n]}, 'base': list(BASE)}
+
+
 def research():
     """План исследований (research/agenda.yaml) и выводы из сданных отчётов (research/findings/*.md)."""
     import re
@@ -202,21 +244,31 @@ def research():
             st['conclusion'] = m.group(1).strip() if m else None
             lim = re.search(r'^## Ограничения\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M)
             st['limits'] = lim.group(1).strip() if lim else None
+        if not st.get('conclusion') and st.get('result'):      # отчёта нет или в нём нет раздела — итог из плана
+            st['conclusion'] = str(st['result']).strip()
         st['computed'] = bool(st.get('experiment')) and (RUNS / str(st['experiment']) / 'summary.json').exists()
     return {'studies': studies, 'built': time.strftime('%d.%m.%Y %H:%M')}
 
 
 def research_runs():
-    """Сколько прогонов и аварий в опытах исследовательского контура (E15 и дальше)."""
-    runs = errors = 0
-    for p in sorted((ROOT / 'experiments').glob('E*.yaml')):
+    """Сколько прогонов и аварий в опытах исследовательского контура: всё, кроме E1–E14 (E15 и дальше, G2, L3a–L3e).
+
+    series — сколько серий описано в experiments/ (без пробных *_pilot), computed — у скольких есть сводка в runs/.
+    """
+    runs = errors = computed = 0
+    specs = [p for p in sorted((ROOT / 'experiments').glob('*.yaml')) if 'pilot' not in p.stem]
+    for p in specs:
         path = RUNS / p.stem / 'summary.json'
-        num = re.match(r'E(\d+)', p.stem)            # E19, E19r, E19s, E19_pilot — всё это опыт 19
-        if num and int(num.group(1)) > 14 and path.exists():
-            s = json.loads(path.read_text(encoding='utf-8'))
-            runs += len(s['runs'])
-            errors += len(s['errors'])
-    return {'runs': runs, 'errors': errors}
+        if not path.exists():
+            continue
+        computed += 1
+        num = re.fullmatch(r'E(\d+)', p.stem)        # E1–E14 встроены целиком и считаются на странице
+        if num and int(num.group(1)) <= 14:
+            continue
+        s = json.loads(path.read_text(encoding='utf-8'))
+        runs += len(s['runs'])
+        errors += len(s['errors'])
+    return {'runs': runs, 'errors': errors, 'series': len(specs), 'computed': computed}
 
 
 def shots():
@@ -290,6 +342,7 @@ def main():
                         if p.stem[1:].isdigit() and int(p.stem[1:]) <= 14},
         'research_runs': research_runs(),
         'science': science_story(),
+        'neighbor': neighbor_story(),
         'inq_accuracy': inquiry_accuracy(),
         'traps': trap_table(),
         'code': code_size(),
