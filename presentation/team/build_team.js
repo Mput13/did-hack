@@ -129,6 +129,7 @@ function badge(s, x, y, n, fill, name, d = 0.28) {
 }
 function pngSize(file) {
   const b = fs.readFileSync(file);
+  if (b.toString("ascii", 0, 3) === "GIF") return { w: b.readUInt16LE(6), h: b.readUInt16LE(8) };
   return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
 }
 function img(s, file, x, y, w, alt, name) {
@@ -828,8 +829,9 @@ function track(s, name) {
   const s = content("SLAM вместо готовой карты", "Готовая карта роботу не даётся: он строит её через SLAM Toolbox, едет по ней и выполняет миссию",
     "Дополнительно робот умеет работать без готовой карты: он строит её сам через SLAM Toolbox и по ней же выполняет миссию. Карта совпадает с готовой на девяносто шесть — девяносто девять процентов клеток, все девять столбов на месте, а начало координат совпадает с мировым с точностью около пяти сантиметров. Пять прогонов в Gazebo, столкновений нет.", 25);
   track(s, "SLAM");
-  const hs = img(s, path.join(ROOT, "presentation", "assets", "final", "slam_map.png"), X0, 1.4, 3.0, "Карта арены, построенная роботом через SLAM Toolbox, и места девяти столбов мира", "slam-map");
-  T(s, "Карта, которую построил робот; кружки — места девяти столбов мира", { x: X0, y: 1.4 + hs + 0.06, w: 3.0, h: 0.4, fontSize: 9.5, color: C.text2, objectName: "slam-cap" });
+  // Анимация — запись объезда в Gazebo (slam_record.py → slam_gif.py). Первый кадр — готовая карта: его показывает PDF.
+  const hs = img(s, "slam_build.gif", X0, 1.34, 3.0, "Анимация: робот объезжает арену, карта SLAM Toolbox растёт; видны лучи лидара, след и путь к краю увиденного", "slam-map");
+  T(s, "Запись объезда в Gazebo. Серое — ещё не видел, лучи — лидар, синяя линия — след, оранжевая — путь к краю увиденного", { x: X0, y: 1.34 + hs + 0.04, w: 3.0, h: 0.4, fontSize: 9, color: C.text2, objectName: "slam-cap" });
   const stats = [["95,8–98,7%", "клеток карты совпало с готовой"], ["9 из 9", "столбов найдено; ошибка места в среднем 1,5–5,7 см"], ["1,5–5,2 см", "сдвиг начала координат относительно мирового; поворот до 1,3°"]];
   stats.forEach(([value, label], i) => {
     const y = 1.42 + i * 0.86;
