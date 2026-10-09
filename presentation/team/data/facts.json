@@ -2371,5 +2371,545 @@
     "n": 12
    }
   }
+ },
+ "pair_memory": {
+  "lab": 15018,
+  "layout": 4,
+  "rule_candidates": 19,
+  "diff": 4.84,
+  "results": [
+   {
+    "level": "hard",
+    "t": 158.2,
+    "battery": 12.235,
+    "samples_collected": 7,
+    "samples_total": 7,
+    "collisions": 0,
+    "false_collects": 0,
+    "hazard_hits": 1,
+    "distance": 15.769,
+    "finished": true,
+    "reason": "finish",
+    "returned": true,
+    "score": 86.22,
+    "samples_share": 1.0,
+    "battery_left": 12.23,
+    "battery_used": 47.77,
+    "energy_per_sample": 6.82,
+    "time": 158.2,
+    "penalties": 1,
+    "detect": {
+     "soil_change": 16.9,
+     "new_hazard": 102.5,
+     "sensor_fault": 2.2
+    },
+    "hypotheses": {
+     "total": 15,
+     "confirmed": 10,
+     "refuted": 0,
+     "outdated": 0,
+     "open": 5
+    },
+    "plans": {
+     "heuristic": 22,
+     "rule": 1
+    },
+    "llm_calls": 0,
+    "llm_failed": 0,
+    "idle_s": 6.4,
+    "hypotheses_truth": {
+     "total": 15,
+     "correct": 13,
+     "wrong": 2,
+     "unverifiable": 0,
+     "verified_share": 1.0,
+     "correct_share": 0.8667,
+     "confirmed_correct": 0.9,
+     "refuted_correct": null,
+     "soil_error": 0.3425,
+     "by_kind": {
+      "sample": {
+       "total": 9,
+       "correct": 7,
+       "wrong": 2,
+       "unverifiable": 0,
+       "verified": 9,
+       "confirmed": 7,
+       "confirmed_correct": 6,
+       "refuted": 0,
+       "refuted_correct": 0,
+       "confusion": {
+        "confirmed": {
+         "correct": 6,
+         "wrong": 1,
+         "unverifiable": 0
+        },
+        "refuted": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "outdated": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "open": {
+         "correct": 1,
+         "wrong": 1,
+         "unverifiable": 0
+        }
+       },
+       "rel_error_mean": null
+      },
+      "soil": {
+       "total": 3,
+       "correct": 3,
+       "wrong": 0,
+       "unverifiable": 0,
+       "verified": 3,
+       "confirmed": 1,
+       "confirmed_correct": 1,
+       "refuted": 0,
+       "refuted_correct": 0,
+       "confusion": {
+        "confirmed": {
+         "correct": 1,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "refuted": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "outdated": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "open": {
+         "correct": 2,
+         "wrong": 0,
+         "unverifiable": 0
+        }
+       },
+       "rel_error_mean": 0.3425
+      },
+      "hazard": {
+       "total": 1,
+       "correct": 1,
+       "wrong": 0,
+       "unverifiable": 0,
+       "verified": 1,
+       "confirmed": 0,
+       "confirmed_correct": 0,
+       "refuted": 0,
+       "refuted_correct": 0,
+       "confusion": {
+        "confirmed": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "refuted": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "outdated": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "open": {
+         "correct": 1,
+         "wrong": 0,
+         "unverifiable": 0
+        }
+       },
+       "rel_error_mean": null
+      },
+      "sensor": {
+       "total": 2,
+       "correct": 2,
+       "wrong": 0,
+       "unverifiable": 0,
+       "verified": 2,
+       "confirmed": 2,
+       "confirmed_correct": 2,
+       "refuted": 0,
+       "refuted_correct": 0,
+       "confusion": {
+        "confirmed": {
+         "correct": 2,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "refuted": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "outdated": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "open": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        }
+       },
+       "rel_error_mean": null
+      },
+      "law": {
+       "total": 0,
+       "correct": 0,
+       "wrong": 0,
+       "unverifiable": 0,
+       "verified": 0,
+       "confirmed": 0,
+       "confirmed_correct": 0,
+       "refuted": 0,
+       "refuted_correct": 0,
+       "confusion": {
+        "confirmed": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "refuted": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "outdated": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "open": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        }
+       },
+       "rel_error_mean": null
+      }
+     },
+     "confusion": {
+      "confirmed": {
+       "correct": 9,
+       "wrong": 1,
+       "unverifiable": 0
+      },
+      "refuted": {
+       "correct": 0,
+       "wrong": 0,
+       "unverifiable": 0
+      },
+      "outdated": {
+       "correct": 0,
+       "wrong": 0,
+       "unverifiable": 0
+      },
+      "open": {
+       "correct": 4,
+       "wrong": 1,
+       "unverifiable": 0
+      }
+     }
+    },
+    "hyp_correct_share": 0.8667,
+    "hyp_confirmed_correct": 0.9,
+    "hyp_refuted_correct": null,
+    "hyp_soil_error": 0.3425,
+    "hyp_verified_share": 1.0
+   },
+   {
+    "level": "hard",
+    "t": 142.0,
+    "battery": 10.621,
+    "samples_collected": 7,
+    "samples_total": 7,
+    "collisions": 0,
+    "false_collects": 0,
+    "hazard_hits": 0,
+    "distance": 17.077,
+    "finished": true,
+    "reason": "finish",
+    "returned": true,
+    "score": 91.06,
+    "samples_share": 1.0,
+    "battery_left": 10.62,
+    "battery_used": 49.38,
+    "energy_per_sample": 7.05,
+    "time": 142.0,
+    "penalties": 0,
+    "detect": {
+     "soil_change": null,
+     "new_hazard": null,
+     "sensor_fault": 2.4
+    },
+    "hypotheses": {
+     "total": 16,
+     "confirmed": 11,
+     "refuted": 3,
+     "outdated": 0,
+     "open": 2
+    },
+    "plans": {
+     "heuristic": 23,
+     "rule": 1
+    },
+    "llm_calls": 0,
+    "llm_failed": 0,
+    "idle_s": 6.2,
+    "hypotheses_truth": {
+     "total": 16,
+     "correct": 11,
+     "wrong": 5,
+     "unverifiable": 0,
+     "verified_share": 1.0,
+     "correct_share": 0.6875,
+     "confirmed_correct": 0.9091,
+     "refuted_correct": 0.3333,
+     "soil_error": 0.3593,
+     "by_kind": {
+      "sample": {
+       "total": 11,
+       "correct": 7,
+       "wrong": 4,
+       "unverifiable": 0,
+       "verified": 11,
+       "confirmed": 7,
+       "confirmed_correct": 6,
+       "refuted": 3,
+       "refuted_correct": 1,
+       "confusion": {
+        "confirmed": {
+         "correct": 6,
+         "wrong": 1,
+         "unverifiable": 0
+        },
+        "refuted": {
+         "correct": 1,
+         "wrong": 2,
+         "unverifiable": 0
+        },
+        "outdated": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "open": {
+         "correct": 0,
+         "wrong": 1,
+         "unverifiable": 0
+        }
+       },
+       "rel_error_mean": null
+      },
+      "soil": {
+       "total": 3,
+       "correct": 2,
+       "wrong": 1,
+       "unverifiable": 0,
+       "verified": 3,
+       "confirmed": 2,
+       "confirmed_correct": 2,
+       "refuted": 0,
+       "refuted_correct": 0,
+       "confusion": {
+        "confirmed": {
+         "correct": 2,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "refuted": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "outdated": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "open": {
+         "correct": 0,
+         "wrong": 1,
+         "unverifiable": 0
+        }
+       },
+       "rel_error_mean": 0.3593
+      },
+      "hazard": {
+       "total": 0,
+       "correct": 0,
+       "wrong": 0,
+       "unverifiable": 0,
+       "verified": 0,
+       "confirmed": 0,
+       "confirmed_correct": 0,
+       "refuted": 0,
+       "refuted_correct": 0,
+       "confusion": {
+        "confirmed": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "refuted": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "outdated": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "open": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        }
+       },
+       "rel_error_mean": null
+      },
+      "sensor": {
+       "total": 2,
+       "correct": 2,
+       "wrong": 0,
+       "unverifiable": 0,
+       "verified": 2,
+       "confirmed": 2,
+       "confirmed_correct": 2,
+       "refuted": 0,
+       "refuted_correct": 0,
+       "confusion": {
+        "confirmed": {
+         "correct": 2,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "refuted": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "outdated": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "open": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        }
+       },
+       "rel_error_mean": null
+      },
+      "law": {
+       "total": 0,
+       "correct": 0,
+       "wrong": 0,
+       "unverifiable": 0,
+       "verified": 0,
+       "confirmed": 0,
+       "confirmed_correct": 0,
+       "refuted": 0,
+       "refuted_correct": 0,
+       "confusion": {
+        "confirmed": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "refuted": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "outdated": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        },
+        "open": {
+         "correct": 0,
+         "wrong": 0,
+         "unverifiable": 0
+        }
+       },
+       "rel_error_mean": null
+      }
+     },
+     "confusion": {
+      "confirmed": {
+       "correct": 10,
+       "wrong": 1,
+       "unverifiable": 0
+      },
+      "refuted": {
+       "correct": 1,
+       "wrong": 2,
+       "unverifiable": 0
+      },
+      "outdated": {
+       "correct": 0,
+       "wrong": 0,
+       "unverifiable": 0
+      },
+      "open": {
+       "correct": 0,
+       "wrong": 2,
+       "unverifiable": 0
+      }
+     }
+    },
+    "hyp_correct_share": 0.6875,
+    "hyp_confirmed_correct": 0.9091,
+    "hyp_refuted_correct": 0.3333,
+    "hyp_soil_error": 0.3593,
+    "hyp_verified_share": 1.0
+   }
+  ],
+  "memory_zones": [
+   {
+    "t": 9.0,
+    "x": -1.23,
+    "y": 0.47,
+    "r": 0.42
+   }
+  ],
+  "hit": [
+   {
+    "t": 151.4,
+    "x": -1.004,
+    "y": 0.596
+   }
+  ],
+  "series": {
+   "pairs": 160,
+   "labs": 40,
+   "mean_diff": 4.32,
+   "first_entries": [
+    95,
+    63
+   ],
+   "returned": [
+    156,
+    158
+   ],
+   "samples_share": [
+    0.89,
+    0.933
+   ]
+  }
  }
 }

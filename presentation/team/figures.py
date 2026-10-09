@@ -446,6 +446,51 @@ def fig_pair_llm_combo():
     return info
 
 
+# ---------------------------------------------------------------- 11. память о лаборатории: второй прогон без памяти и с ней
+# Серия L4b (tools/l4b_run.py, runs/L4b): adaptive_v2@base@L<k> — прогон без памяти на раскладке образцов k;
+# adaptive_v2_lab@base@same_lab1 — первый прогон цепочки (раскладка 1, память пуста); …same_lab2 и …same_lab2r<k> —
+# второй прогон в той же лаборатории с памятью после первого (раскладки 2 и 4–6). Пример выбирается по правилу, а не
+# на глаз: трудный уровень, базовые правила; без памяти есть штраф за зону, с памятью штрафов нет; оба вернулись на
+# базу; точка штрафа лежит в зоне, которую робот сам нашёл в первом прогоне (она и идёт в память); из таких пар берётся
+# та, где разность счёта ближе всего к средней по серии (типичный пример, не лучший).
+def fig_pair_memory():
+    summary = json.loads((RUNS / 'L4b' / 'summary.json').read_text())
+    sel = [r for r in summary['runs'] if r['condition'] == 'base' and r['level'] == 'hard']
+    plain = {(r['seed'], r['layout']): r for r in sel if r['arm'] == 'adaptive_v2' and r['chain'] is None}
+    second = {(r['seed'], r['layout']): r for r in sel if r['arm'] == 'adaptive_v2_lab' and r['chain'] == 'same_lab' and r['step'] == 2}
+    diffs = {k: second[k]['metrics']['score'] - plain[k]['metrics']['score'] for k in second}
+    mean = sum(diffs.values()) / len(diffs)
+    first = {k[0]: load('L4b', 'adaptive_v2_lab@base@same_lab1', f'hard-{k[0]}.json.gz') for k in second}
+
+    def remembered(k):
+        """Зоны из первого прогона, в которые без памяти робот въехал во втором."""
+        hits = [e for e in load(*Path(plain[k]['file']).parts)['events'] if e['type'] == 'hazard_hit']
+        return [z for z in first[k[0]]['hazards'] if any(math.dist((e['x'], e['y']), (z['x'], z['y'])) <= z['r'] for e in hits)]
+
+    ok = [k for k in second if plain[k]['metrics']['hazard_hits'] >= 1 and second[k]['metrics']['hazard_hits'] == 0
+          and plain[k]['metrics']['returned'] and second[k]['metrics']['returned'] and remembered(k)]
+    key = min(ok, key=lambda k: (abs(diffs[k] - mean), k))
+    a, b = load(*Path(plain[key]['file']).parts), load(*Path(second[key]['file']).parts)
+    zones = first[key[0]]['hazards']
+
+    def deco(ax, rec, side):
+        if side == 'right':                                  # что робот помнит: его оценка зоны из первого прогона
+            for z in zones:
+                ax.add_patch(Circle((z['x'], z['y']), z['r'], facecolor='none', edgecolor=BLUE, lw=1.6, ls=(0, (4, 3)), zorder=4))
+        for e in rec['events']:
+            if e['type'] == 'hazard_hit':
+                cross(ax, e['x'], e['y'])
+    results = pair('pair_memory.png', a, b, GREY, BLUE, deco=deco)
+    count = lambda runs, m: sum(runs[k]['metrics'][m] for k in second)  # noqa: E731
+    return {'lab': key[0], 'layout': key[1], 'rule_candidates': len(ok), 'diff': round(diffs[key], 2), 'results': results,
+            'memory_zones': [{k: z[k] for k in ('t', 'x', 'y', 'r')} for z in zones],
+            'hit': [{'t': e['t'], 'x': e['x'], 'y': e['y']} for e in a['events'] if e['type'] == 'hazard_hit'],
+            'series': {'pairs': len(diffs), 'labs': len(first), 'mean_diff': round(mean, 2),
+                       'first_entries': [count(plain, 'hazard_first'), count(second, 'hazard_first')],
+                       'returned': [count(plain, 'returned'), count(second, 'returned')],
+                       'samples_share': [round(count(plain, 'samples_share') / len(diffs), 3), round(count(second, 'samples_share') / len(diffs), 3)]}}
+
+
 if __name__ == '__main__':
     facts = {}
     for key, fn in (('scenario', fig_scenario), ('truth_vs_robot', fig_truth_vs_robot), ('belief', fig_belief),
@@ -454,7 +499,7 @@ if __name__ == '__main__':
                     ('pair_llm_m1', lambda: fig_pair_llm('M1', 'hard-1006', 'pair_llm_m1.png')),
                     ('team', fig_team), ('bayes', fig_bayes), ('sensor_law', fig_sensor_law), ('dijkstra', fig_dijkstra),
                     ('pair_llm_zone', fig_pair_llm_zone),
-                    ('pair_llm_combo', fig_pair_llm_combo)):
+                    ('pair_llm_combo', fig_pair_llm_combo), ('pair_memory', fig_pair_memory)):
         try:
             facts[key] = fn()
         except Exception as e:  # рисунок не получился — остальные всё равно нужны

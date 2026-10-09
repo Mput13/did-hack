@@ -4,6 +4,7 @@
 //   /usr/local/bin/python3 presentation/team/figures.py     # рисунки из runs/ (один раз или после новых прогонов)
 //   cd presentation/team && node build_team.js              # DID_final.pptx, DID_final.pdf, slides/, preview.jpg, speech.md
 //   node build_team.js --all                                # то же плюс варианты и запасные слайды: DID_all.*
+//   node build_team.js --memory-b                           # память между прогонами двумя слайдами (вариант Б) вместо одного
 //
 // Состав итоговой колоды: основной рассказ, блок из пяти дополнительных треков условия (по слайду на трек), команда.
 // Числа — из research/findings/*.md, runs/*/summary.json и записей прогонов (presentation/team/data/facts.json);
@@ -56,6 +57,10 @@ const FAULT = F.pair_fault;               // записи runs/_showcase/*/hard-
 // research/agenda.yaml (L4b, result): второй прогон в той же лаборатории с новыми образцами, робот с памятью − без памяти,
 // 160 пар прогонов в 40 лабораториях 15001–15040; расстановка и расписание событий повторяются.
 const L4B = [4.3, 2.4, 6.3];
+// research/findings/L4b.md, раздел 4 (те же 40 лабораторий, базовые правила, трудный уровень, второй прогон): тот же
+// сценарий повторно +7,45 [3,20; 11,98] (одна раскладка, 40 пар); память от другой расстановки +1,87 [−0,38; 4,04].
+const L4B_REPEAT = [7.5, 3.2, 12.0], L4B_MOVED = [1.9, -0.4, 4.0];
+const MEM = F.pair_memory;                // пара записей runs/L4b, выбрана правилом в figures.py (fig_pair_memory)
 // Проверок в main на 9.10 утром собирается 1072; работ с ревью — 22 (к прежним двадцати добавились B1 и L4b), 21 возвращена.
 const N = { checks: "1000+", runs: "30 000+", returned: "21 из 22" };
 
@@ -376,7 +381,7 @@ function archSimple(variant) {
   const cards = [
     [C.accent1, "Робот и симуляция", [["ROS 2 Jazzy", "датчики и команды"], ["Gazebo Harmonic", "физика и мир"], ["TurtleBot3 Burger", "модель робота"], ["SLAM Toolbox", "своя карта арены"]]],
     [C.accent3, "Код и расчёты", [["Python, NumPy, SciPy", "логика агента"], ["Быстрый симулятор", "свой: серии опытов"], ["pytest", "1000+ проверок"], ["pixi + RoboStack", "сборка окружения"]]],
-    [C.accent2, "Языковые модели", [["Сервер МАИ", "QWEN, DeepSeek"], ["Ответ в JSON", "проверка по схеме"], ["Кэш ответов", "повторяемые опыты"], ["Jev 1.13", "один опыт, OpenRouter"]]],
+    [C.accent2, "Языковые модели", [["Сервер МАИ", "QWEN, DeepSeek"], ["Ответ в JSON", "проверка по схеме"], ["Кэш ответов", "повторяемые опыты"], ["Запасное правило", "если модель не ответила"]]],
     [C.accent1, "ИИ в разработке", [["Claude Code", "Opus: код и опыты", "claude.png"], ["Codex", "GPT Sol: ревью", "openai.png"], ["Antigravity", "Gemini: литература", "gemini.png"], ["Git и GitHub", "план и история"]]],
   ];
   const w = 2.0, gap = (CW - 4 * w) / 3;
@@ -688,6 +693,96 @@ function resultsSlide() {
   });
   return s;
 }
+// ---------- 13. память между прогонами (уровень 4 условия: адаптация, не дополнительный трек) ----------
+// Пример — записи runs/L4b/adaptive_v2@base@L<k> и adaptive_v2_lab@base@same_lab2r<k>; числа серии — research/findings/L4b.md
+// (разделы 4 и 5) и runs/L4b/summary.json; память законов среды — did/memory.py, опыт E11 (runs/E11/summary.json).
+const MEMORY_B = process.argv.includes("--memory-b");      // в основной рассказ идут два слайда варианта Б
+const L4B_CI = `[${ru(L4B[1])}; ${ru(L4B[2])}]`;
+function level(s, right = X0 + CW) {
+  const text = "Уровень 4 · адаптация", w = 0.34 + text.length * 0.066;
+  s.addText(text, { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.13, x: right - w, y: 0.17, w, h: 0.26, fill: { color: C.accent3 }, color: C.text1, fontFace: FONT, fontSize: 9, align: "center", valign: "middle", margin: 0, isTextBox: true, objectName: "level-tag" });
+}
+const memRun = (r) => `${r.samples_collected} из ${r.samples_total} · счёт ${ru(r.score)} · ${r.hazard_hits ? (r.hazard_hits === 1 ? "штраф за зону" : `штрафов за зону: ${r.hazard_hits}`) : "без штрафов"}`;
+const memBottom = () => [{ text: `Первых въездов в опасную зону — ${MEM.series.first_entries[1]} вместо ${MEM.series.first_entries[0]} на ${MEM.series.pairs} прогонов.  `, options: {} },
+  { text: "Память от другой расстановки выигрыша не дала; в Gazebo не проверено", options: { color: C.text2 } }];
+const MEM_ALT = "Две карты одной лаборатории: без памяти робот въезжает в опасную зону и получает штраф, с памятью объезжает зону, обведённую пунктиром";
+// Вариант А: один слайд — пример и главное число.
+function memoryOne(variant) {
+  const [a, b] = MEM.results;
+  const s = pairSlide({
+    title: "Память между прогонами: знакомую зону объезжает",
+    variant,
+    lead: "После прогона робот записывает, где получил штраф и где пол дорогой; мест образцов в памяти нет",
+    notes: "Обычно каждый прогон робот начинает с чистого листа. Мы научили его помнить лабораторию: после прогона он записывает в файл, где получил штраф за невидимую зону и где пол оказался дорогим. Мест образцов в памяти нет. Пример — второй прогон в той же лаборатории, образцы лежат уже в других местах. Слева робот без памяти въезжает в зону и получает штраф. Справа он эту зону помнит — она обведена пунктиром — и объезжает. В среднем это плюс четыре и три очка, а первых въездов в зону на треть меньше. Это быстрый симулятор и та же расстановка арены: память от другой расстановки выигрыша не дала, в Gazebo не проверяли.", seconds: 35,
+    figure: "pair_memory.png", alt: MEM_ALT,
+    left: ["Второй прогон без памяти", memRun(a)],
+    right: ["Второй прогон с памятью", memRun(b)],
+    value: sgn(L4B[0]), lines: ["очка в среднем", `95% интервал ${L4B_CI}`, `${MEM.series.labs} лабораторий × 4 раскладки,`, "быстрый симулятор"],
+    bottom: memBottom(),
+  });
+  level(s, variant ? 6.45 : undefined);
+  T(s, [{ text: "Та же лаборатория, образцы в новых местах", options: { breakLine: true } }, { text: "Пунктир — зона из памяти, крестик — штраф", options: {} }],
+    { x: 6.37, y: 4.08, w: 3.0, h: 0.4, fontSize: 8.5, color: C.text2, align: "center", objectName: "memory-legend" });
+}
+// Вариант Б, первый слайд: три памяти робота.
+function memoryKinds(variant) {
+  const s = content("Что робот помнит: три памяти", "Карта живёт один прогон; в файл между прогонами идёт только то, что робот узнал сам",
+    "У робота три разные памяти. Первая — карта мира внутри прогона: где вероятны образцы, где дорогой грунт, где опасные зоны. Она живёт один прогон. Вторая — законы среды: числа вроде цены метра и длительности сбоя. Они годятся для любой карты, но выигрыша от них мы не показали. Третья — память о лаборатории: места, где робот получил штраф и где пол дорогой. Она годится только для той же арены — и она дала прибавку. Мест образцов и скрытой правды судьи в файле нет.", 30);
+  level(s, variant ? 6.45 : undefined);
+  if (variant) tag(s, variant);
+  const cards = [
+    [C.accent1, "Карта мира", "внутри одного прогона", "вероятные места образцов, цена грунта, опасные зоны", "один прогон, потом пусто", "основа всех решений робота", C.text1],
+    [C.accent3, "Законы среды", "между прогонами · любая карта", "числа: цена метра, поворота и простоя, длительность сбоя, утечка заряда", "файл, копится от прогона к прогону", "выигрыш не показан (опыт E11)", C.text2],
+    [C.accent2, "Память о лаборатории", "между прогонами · та же арена", "места: где пришёл штраф за зону и где пол дорогой; мест образцов нет", "файл; арену переставили — стереть", `${sgn(L4B[0])} очка ${L4B_CI} во втором прогоне`, C.accent4]];
+  const w = 2.72, gap = (CW - 3 * w) / 2;
+  cards.forEach(([fill, head, where, keeps, lives, gave, color], i) => {
+    const x = X0 + i * (w + gap), y = 1.42;
+    box(s, x, y, w, 2.72, fill, `memory-${i + 1}-card`, 0.26);
+    T(s, [{ text: head, options: { fontSize: 13, breakLine: true } }, { text: where, options: { fontSize: 10.5, color: C.text2 } }],
+      { x: x + 0.22, y: y + 0.14, w: w - 0.4, h: 0.56, objectName: `memory-${i + 1}-head`, paraSpaceAfter: 2 });
+    [["Что хранит", keeps, C.text1, 0.8, 0.72], ["Сколько живёт", lives, C.text1, 1.58, 0.5], ["Что дала по измерениям", gave, color, 2.14, 0.5]].forEach(([label, text, c, dy, h], k) =>
+      T(s, [{ text: label, options: { fontSize: 9, color: C.text2, breakLine: true } }, { text, options: { fontSize: 10, color: c } }],
+        { x: x + 0.22, y: y + dy, w: w - 0.4, h, objectName: `memory-${i + 1}-row-${k + 1}`, paraSpaceAfter: 1 }));
+  });
+  const pill = (text, x, w, fill, color, name) => s.addText(text, { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.2, x, y: 4.34, w, h: 0.4, fill: { color: fill }, color, fontFace: FONT, fontSize: 10.5, align: "center", valign: "middle", margin: 0, isTextBox: true, objectName: name });
+  pill("Прогон 1", X0, 1.25, THEME.colors.accent4, "FFFFFF", "flow-run-1");
+  arrow(s, X0 + 1.33, 4.54, X0 + 1.67, "flow-arrow-1");
+  pill("файлы памяти: законы среды · места в лаборатории", X0 + 1.75, 4.2, C.background2, C.text1, "flow-file");
+  arrow(s, X0 + 6.03, 4.54, X0 + 6.37, "flow-arrow-2");
+  pill("Прогон 2", X0 + 6.45, 1.25, THEME.colors.accent4, "FFFFFF", "flow-run-2");
+  T(s, "Память — предположение: проехал запомненное место без штрафа — зона снята. Правды судьи в файлах нет",
+    { x: X0, y: 4.82, w: CW, h: 0.24, fontSize: 9.5, color: C.text2, valign: "middle", objectName: "flow-note" });
+}
+// Вариант Б, второй слайд: пример и три условия опыта.
+function memoryExample(variant) {
+  const [a, b] = MEM.results;
+  const s = content("Память о лаборатории: второй прогон", "Одна лаборатория, образцы в новых местах: слева робот начинает с нуля, справа помнит зону",
+    "Вот как это выглядит. Второй прогон в той же лаборатории, образцы лежат в других местах. Слева робот без памяти въезжает в зону и получает штраф. Справа он эту зону помнит — она обведена пунктиром — и объезжает. В среднем это плюс четыре и три очка. Если повторить тот же сценарий — больше, плюс семь с половиной. А если лабораторию переставили и память осталась старая, выигрыш не показан. Это быстрый симулятор, в Gazebo не проверяли.", 30);
+  level(s, variant ? 6.45 : undefined);
+  if (variant) tag(s, variant);
+  const w = 4.7, h = img(s, "pair_memory.png", X0, 1.4, w, MEM_ALT);
+  const cy = 1.4 + h + 0.06;
+  caption(s, X0 + 0.05, cy, w / 2 - 0.02, "Второй прогон без памяти", memRun(a), "cap-left");
+  caption(s, X0 + w / 2 + 0.08, cy, w / 2 - 0.1, "Второй прогон с памятью", memRun(b), "cap-right");
+  T(s, "Пунктир — зона из памяти, крестик — штраф", { x: X0 + 0.05, y: cy + 0.5, w, h: 0.2, fontSize: 9, color: C.text2, valign: "middle", objectName: "memory-legend" });
+  T(s, "Счёт второго прогона: с памятью − без памяти", { x: 5.7, y: 1.4, w: 3.57, h: 0.24, fontSize: 10.5, valign: "middle", objectName: "mem-rows-head" });
+  const rows = [["Та же лаборатория", L4B, "образцы новые"], ["Тот же сценарий", L4B_REPEAT, "образцы те же"], ["Лабораторию переставили", L4B_MOVED, ""]];
+  const scale = { x: 7.95, w: 1.2, lo: -2, hi: 13 }, y0 = 1.74, rh = 0.56;
+  axis(s, y0, y0 + rows.length * rh, scale, [0, 5, 10], "mem-axis");
+  rows.forEach(([label, v, note], i) => {
+    const y = y0 + i * rh, shown = Boolean(note);
+    T(s, [{ text: label, options: { fontSize: 10.5, breakLine: true } },
+      { text: `${sgn(v[0])} [${ru(v[1]).replace("-", "−")}; ${ru(v[2])}]`, options: { fontSize: i ? 9.5 : 11, color: i ? C.text2 : C.accent4 } },
+      { text: ` · ${note || "не показано"}`, options: { fontSize: 9.5, color: C.text2 } }],
+    { x: 5.7, y, w: 2.2, h: rh, valign: "middle", objectName: `mem-${i + 1}-label`, paraSpaceAfter: 1 });
+    interval(s, y + rh / 2, v, scale, shown, `mem-${i + 1}`);
+  });
+  T(s, `Очки, 95% интервал. Быстрый симулятор, трудный уровень, ${MEM.series.labs} лабораторий; первая строка — 4 раскладки образцов (${MEM.series.pairs} пар), вторая — одна`,
+    { x: 5.7, y: y0 + rows.length * rh + 0.26, w: 3.57, h: 0.5, fontSize: 9, color: C.text2, objectName: "mem-note" });
+  box(s, X0, 4.6, CW, 0.44, C.accent3, "takeaway-pill", 0.22);
+  T(s, memBottom(), { x: X0 + 0.3, y: 4.6, w: CW - 0.6, h: 0.44, fontSize: 10.5, valign: "middle", objectName: "takeaway-text" });
+}
+if (MEMORY_B) { memoryKinds(); memoryExample(); } else memoryOne();
 resultsSlide();
 
 // =====================================================================================================
@@ -938,6 +1033,8 @@ pres.addSection({ title: SECTION });
   });
   T(s, "Сравнение вариантов — разность счёта на одних сценариях, 95% интервал", { x: 4.6, y: 4.86, w: 4.67, h: 0.2, fontSize: 9.5, color: C.text2, objectName: "math-note" });
 }
+if (MEMORY_B) memoryOne("Вариант А · вместо слайдов 13–14");
+else { memoryKinds("Вариант Б · вместо слайда 13 (1 из 2)"); memoryExample("Вариант Б · вместо слайда 13 (2 из 2)"); }
 archSimple("Вариант Б · вместо слайда 4");
 llmPenalty("Вариант Б · вместо слайда 11");
 // ---------- LLM, вариант Б: «ровно два образца» ----------
