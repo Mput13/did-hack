@@ -179,10 +179,10 @@ const SUPPORT = "При поддержке АНО «Аналитический �
 function slideTitle(withMap) {
   const s = pres.addSlide(ALL ? { masterName: "TITLE", sectionTitle: SECTION } : { masterName: "TITLE" });
   oval(s, 5.75, 3.72, 1.1, C.accent2, "circle-lavender");
-  oval(s, 8.72, 0.5, 0.8, C.accent3, "circle-mint");
+  oval(s, 8.8, 4.05, 0.75, C.accent3, "circle-mint");          // правый верхний угол — под логотипы, фон там ровный
   oval(s, 6.2, 1.1, 3.3, C.accent1, "circle-blue");
   if (withMap) img(s, "title_map.png", 6.72, 1.67, 2.26, "Карта арены с путём робота: семь образцов собраны, робот вернулся на базу", "title-map");
-  img(s, path.join(__dirname, "data", "logo_mai_topit_light.png"), 0.9, 0.42, 1.7, "Логотипы МАИ и программы ТОП ИТ", "logos");
+  img(s, path.join(__dirname, "data", "logo_mai_topit_light.png"), 7.47, 0.32, 1.8, "Логотипы МАИ и программы ТОП ИТ", "logos");
   T(s, "Интеллектуальное состязание DID-HACK · ТОП ИТ МАИ", { x: 0.9, y: 1.22, w: 5.0, h: 0.24, fontSize: 10.5, color: HEX.pale, valign: "middle", objectName: "event" });
   T(s, "Автономный ИИ-исследователь на роботе-платформе", { x: 0.9, y: 1.5, w: 5.0, h: 1.5, fontSize: 28, color: C.background1, valign: "middle", objectName: "title" });
   T(s, PROGRAM, { x: 0.9, y: 3.08, w: 4.7, h: 0.42, fontSize: 10.5, color: HEX.pale, objectName: "program" });
