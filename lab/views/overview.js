@@ -7,6 +7,11 @@ import {
 import { diffWords } from '../charts.js';
 
 const MISSION = 'Робот ищет спрятанные образцы на арене, которую не видит, и должен вернуться на базу раньше, чем сядет батарея.';
+const MAIN_ID = 'E1';     // опыт главной гипотезы; остальные «главные» опыты — приёмка следующих версий агента
+
+// Номера по порядку (E2 раньше E10); серии, которые ещё не запускали, — в конце списка.
+const byId = new Intl.Collator('ru', { numeric: true });
+const inOrder = (a, b) => (a.status === 'not_run') - (b.status === 'not_run') || byId.compare(a.id, b.id);
 
 function headline(claim) {
   const cells = claim.cells || [];
@@ -105,8 +110,8 @@ export async function render(root, ctx) {
     root.replaceChildren(errorBox('Не удалось получить список опытов', e.message, ctx.reload));
     return;
   }
-  const items = index.experiments || [];
-  const mainItem = items.find((x) => x.kind === 'main') || items[0];
+  const items = (index.experiments || []).slice().sort(inOrder);
+  const mainItem = items.find((x) => x.id === MAIN_ID) || items.find((x) => x.kind === 'main') || items[0];
   let detail = null;
   if (mainItem && mainItem.status !== 'not_run') {
     try { detail = await getExperiment(mainItem.id); } catch { detail = null; }

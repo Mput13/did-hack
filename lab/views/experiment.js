@@ -125,6 +125,7 @@ function rerun(m, ctx) {
 function head(m, ctx) {
   const { data, spec } = m;
   const meta = [];
+  if (data.status === 'own' && data.generated) meta.push(`пересчитан ${when(data.generated)}`);
   if (data.runs && data.runs.length) {
     meta.push(count(data.runs.length, 'прогон', 'прогона', 'прогонов'));
     if (data.seeds && !spec.manual) meta.push(`${count(data.seeds, 'сценарий', 'сценария', 'сценариев')} на уровень`);
@@ -184,8 +185,10 @@ function science(m) {
   const part = (title, text) => (text ? h('div', { class: 'lb-science__part' }, h('div', { class: 'lb-eyebrow', text: title }), h('p', { text: ruLevels(text) })) : null);
   const seeds = m.data.seeds || spec.seeds;
   const setup = [];
-  setup.push(h('div', { class: 'lb-setup__row' }, h('span', { class: 'lb-setup__name', text: 'Варианты агента' }),
-    h('span', { class: 'lb-setup__chips' }, m.arms.map((a) => h('span', { class: 'lb-chip' }, dot(m.colors.get(a.id)), a.label)))));
+  if (m.arms.length) {
+    setup.push(h('div', { class: 'lb-setup__row' }, h('span', { class: 'lb-setup__name', text: 'Варианты агента' }),
+      h('span', { class: 'lb-setup__chips' }, m.arms.map((a) => h('span', { class: 'lb-chip' }, dot(m.colors.get(a.id)), a.label)))));
+  }
   if (m.byCond) {
     setup.push(h('div', { class: 'lb-setup__row' }, h('span', { class: 'lb-setup__name', text: 'Условия' }),
       h('span', { class: 'lb-setup__chips' }, m.conds.map((c) => h('span', { class: 'lb-chip lb-chip--plain', text: c.label })))));
@@ -589,7 +592,8 @@ export async function render(root, ctx) {
     head(m, ctx),
     ...alerts(m),
     science(m),
-    hasRuns ? null : emptyBox(
+    hasRuns ? null : data.status === 'own' ? emptyBox('Итоги этого опыта — в отчёте',
+      `Опыт считает своя программа, поэтому графиков сравнения здесь нет. Таблицы и выводы: ${data.report || 'research/findings'}; числа: ${data.summary}.`) : emptyBox(
       data.status === 'not_run' ? 'Серию ещё не запускали' : 'В серии нет ни одного удачного прогона',
       data.spec.manual
         ? 'Этот опыт запускается командой из терминала — она показана вверху страницы.'

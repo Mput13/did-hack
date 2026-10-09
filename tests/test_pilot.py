@@ -55,8 +55,13 @@ def test_drive_route_then_home(arena):
     goal = (0.55, 0.55)
     assert pilot.command({'cmd': 'route', 'points': [[-1.6, 0.6], [-0.55, 1.6], list(goal)]})['ok']
     st = pilot.state()
-    assert len(st['route']) == 3 and st['path_len'] > 3.0 and st['mode'] == 'idle'
+    assert len(st['route']) == 3 and st['mode'] == 'idle'
+    assert st['path'] == [] and st['path_len'] == 0.0          # до запуска точки — только метки: путь не показан
+    assert pilot.command({'cmd': 'zones', 'zones': [{'kind': 'yellow', 'x': -1.4, 'y': -0.5, 'r': 0.2}]})['ok']
+    assert pilot.state()['path'] == []                         # и зона до запуска ничего на карте не перестраивает
     assert pilot.command({'cmd': 'go'})['ok']
+    st = pilot.state()
+    assert st['mode'] == 'drive' and st['path_len'] > 3.0 and len(st['path']) > 3
     _run(world, pilot, lambda: pilot.mode == 'idle')
     assert math.dist((world.sim.x, world.sim.y), goal) < 0.08       # по истинной позе, а не по своей оценке
     assert all(p['done'] for p in pilot.route)

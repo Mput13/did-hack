@@ -169,4 +169,23 @@ def test_index_survives_summary_written_by_own_tool(tmp_path, monkeypatch):
     (tmp_path / 'L5' / 'summary.json').write_text(json.dumps({'experiment': 'L5', 'generated': '2026-10-09T05:00:00'}))
     item = next(i for i in experiments.build_index()['experiments'] if i['id'] == 'L5')
     assert item['generated'] == '2026-10-09T05:00:00' and item['runs'] == 0 and item['claims'] == []
+    assert item['status'] == 'own'
+
+
+def test_experiment_page_survives_summary_written_by_own_tool(tmp_path, monkeypatch):
+    """Страница такого опыта получает его описание и путь к отчёту, а не сводку, в которой нет ни spec, ни прогонов."""
+    import json
+
+    from did.lab import server
+    monkeypatch.setattr(server, 'RUNS', tmp_path)
+    assert server.experiment('L5')['status'] == 'not_run'
+    (tmp_path / 'L5').mkdir()
+    (tmp_path / 'L5' / 'summary.json').write_text(json.dumps({'experiment': 'L5', 'generated': '2026-10-09T05:00:00'}))
+    page = server.experiment('L5')
+    assert page['status'] == 'own' and page['spec']['id'] == 'L5' and page['spec']['question']
+    assert page['runs'] == [] and page['claims'] == [] and page['report'] == 'research/findings/L5.md'
+    (tmp_path / 'E1').mkdir()
+    usual = json.dumps({'spec': {'id': 'E1'}, 'status': 'partial', 'runs': []}).encode()
+    (tmp_path / 'E1' / 'summary.json').write_bytes(usual)
+    assert server.experiment('E1') == usual                 # обычная сводка уходит на страницу как есть
 

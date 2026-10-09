@@ -349,6 +349,9 @@ export const KINDS = {
   adaptation: 'Адаптивность',
   sensitivity: 'Устойчивость к условиям',
   llm: 'Языковая модель',
+  orchestration: 'Языковая модель',
+  waiting: 'Ожидание ответа модели',
+  team: 'Два робота',
   transfer: 'Проверка в Gazebo',
   robustness: 'Устойчивость к сбоям',
   search: 'Стратегии поиска',
@@ -487,6 +490,7 @@ export const STATUS = {
   no_data: { word: 'нет данных', tone: 'none', icon: 'dash' },
   not_run: { word: 'ещё не запускали', tone: 'none', icon: 'ring' },
   descriptive: { word: 'описательный опыт', tone: 'info', icon: 'info' },
+  own: { word: 'итоги в отчёте', tone: 'info', icon: 'info' },
   running: { word: 'считается', tone: 'info', icon: 'spin' },
   failed: { word: 'серия упала', tone: 'bad', icon: 'cross' },
 };
@@ -501,6 +505,7 @@ export function hypothesisWord(status) {
     inconclusive: 'Данных мало для вывода',
     not_run: 'Серию ещё не запускали',
     descriptive: 'Описательный опыт: без проверки утверждений',
+    own: 'Считает своя программа: итоги в отчёте',
   }[status] || null;
 }
 

@@ -958,7 +958,7 @@ class Pilot:
             raise
         self.route = route
         self.follower.set_path([])
-        self._say('info', 'Зоны сохранены, маршрут перестроен' if zones else 'Зоны убраны')
+        self._say('info', 'Зоны сохранены' if zones else 'Зоны убраны')
         return self.note['text']
 
     def _cmd_go(self, cmd):
@@ -1226,7 +1226,8 @@ class Pilot:
         path = []
         if self.mode == 'mission' and self.bot:
             path = list(self.bot.follower.pts[self.bot.follower.i:])
-        elif todo:
+        elif todo and self.mode in ('drive', 'home'):
+            # Путь виден, только пока робот по нему едет: до запуска точки и зоны — просто метки на карте.
             first = self.follower.pts[self.follower.i:] if self.follower.active else todo[0]['pts']
             path = [(x, y)] + list(first) + [q for p in todo[1:] for q in p['pts']]
         if self._map_cache[0] != self.mapper.version:

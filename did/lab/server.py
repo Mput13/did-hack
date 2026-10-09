@@ -34,6 +34,7 @@ import threading
 import time
 from dataclasses import fields
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from string import ascii_lowercase
 from urllib.parse import parse_qs, urlparse
 
 from .. import ROOT
@@ -50,6 +51,7 @@ from .demonstration import comparison_catalog
 STATIC = ROOT / 'lab'
 LIVE = RUNS / '_live' / 'state.json'
 KNOWLEDGE = RUNS / '_knowledge' / 'kb.json'
+FINDINGS = ROOT / 'research' / 'findings'
 JOBS = {}
 _run_lock = threading.Lock()
 
@@ -91,6 +93,24 @@ def _baseline_agents():
         return []
     return [{'id': k, 'label': AGENT_LABELS.get(k, k), 'search': cfg.search, 'planner': cfg.planner, 'flags': {}}
             for k, (_, cfg) in BASELINES.items() if k not in PRESETS]
+
+
+def experiment(exp_id):
+    """Сводка опыта для его страницы. Опыт, который считает своя программа, хранит сводку в своём виде:
+    страница получает его описание и путь к отчёту с итогами."""
+    path = RUNS / exp_id / 'summary.json'
+    empty = {'spec': load_spec(exp_id), 'status': 'not_run', 'runs': [], 'groups': [], 'claims': [], 'errors': []}
+    if not path.exists():
+        return empty
+    raw = path.read_bytes()
+    summary = json.loads(raw)
+    if 'spec' in summary:
+        return raw
+    report = next((f for f in (FINDINGS / f'{exp_id}.md', FINDINGS / f'{exp_id.rstrip(ascii_lowercase)}.md')
+                   if f.is_file()), None)
+    return {**empty, 'status': 'own', 'generated': summary.get('generated'),
+            'report': report.relative_to(ROOT).as_posix() if report else None,
+            'summary': f'runs/{exp_id}/summary.json'}
 
 
 def knowledge():
@@ -185,11 +205,7 @@ class Handler(BaseHTTPRequestHandler):
                 exp_id = path.split('/')[3]
                 if exp_id not in list_specs():
                     return self._error(404, f'нет опыта {exp_id}')
-                summary = RUNS / exp_id / 'summary.json'
-                if summary.exists():
-                    return self._send(200, summary.read_bytes())
-                return self._send(200, {'spec': load_spec(exp_id), 'status': 'not_run', 'runs': [], 'groups': [],
-                                        'claims': [], 'errors': []})
+                return self._send(200, experiment(exp_id))
             if path == '/api/trace':
                 file = (RUNS / q.get('file', '')).resolve()
                 if RUNS.resolve() not in file.parents or not file.is_file():

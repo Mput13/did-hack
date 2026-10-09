@@ -21,6 +21,7 @@
 .dm-tool--danger[aria-pressed="true"] { background:#fbe4e4; color:#b12d2d; border-color:#d45959; }
 .dm-radius { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--ink-2); }
 .dm-radius input { width:100px; accent-color:var(--ink); }
+.dm-radius .lb-select { flex:1; min-width:0; font-size:14px; text-overflow:ellipsis; }
 .dm-map-footer { display:flex; width:100%; justify-content:space-between; align-items:start; flex-wrap:wrap; gap:10px; }
 .dm-map-details { font-size:13px; color:var(--ink-2); max-width:100%; }
 .dm-map-details summary { cursor:pointer; padding:2px; }
@@ -30,7 +31,7 @@
 .dm-controls { display:flex; flex-direction:column; gap:14px; min-width:0; }
 .dm-card { padding:18px; display:flex; flex-direction:column; gap:12px; }
 .pl-h { font-size:12px; font-weight:650; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-2); margin:0; }
-.dm-scenario { display:grid; grid-template-columns:minmax(0,1fr) 65px; gap:8px; }
+.dm-scenario { display:grid; grid-template-columns:minmax(0,1fr) 92px; gap:8px; }
 .dm-scenario .lb-select { min-width:0; width:100%; font-size:14px; }
 .dm-scenario .lb-input { width:100%; min-width:0; font-size:14px; }
 .dm-scenario .lb-btn { grid-column:1/-1; }

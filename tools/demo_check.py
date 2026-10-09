@@ -243,13 +243,17 @@ def main():
     if tour:
         step(f'1. Объезд по {len(tour)} точкам')
         facts['tour'] = {'points': len(tour), 'coverage_min': COVERAGE_MIN[args.tour]}
-        refused = command(cmd='route', points=tour)
-        if not refused:
-            print(f"   путь {state().get('path_len', 0.0):.1f} м")
-            refused = command(cmd='go')
+        refused = command(cmd='route', points=tour) or command(cmd='go')
         if refused:
             facts['tour'].update(refused=refused, state=state())
         else:
+            length = 0.0                    # путь пульт показывает только с началом езды
+            for _ in range(10):
+                length = state().get('path_len', 0.0)
+                if length:
+                    break
+                time.sleep(0.2)
+            print(f"   путь {length:.1f} м")
             idle = [0]                      # сколько опросов подряд пульт стоит, а маршрут не пройден
 
             def stalled(s):
