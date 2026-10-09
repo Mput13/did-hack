@@ -39,7 +39,7 @@ def make_planner(cfg, llm=None, seed=0):
         big = {k: v for k, v in (llm or {}).items() if k != 'jev'} or None
         return make_guarded(cfg, llm, lambda: make_planner(replace(cfg, mission_guard='', planner='llm'), big, seed))
     if cfg.planner != 'llm':
-        return HeuristicPlanner()
+        return HeuristicPlanner(getattr(cfg, 'plan_home_weight', 0.0), getattr(cfg, 'plan_conf_power', 1.0))
     from .llm import load_system_prompt, make_client
     opts = dict(llm or {'kind': 'mock'})
     prompt = opts.pop('prompt', None)
@@ -90,7 +90,7 @@ def _soil_truth(judge, arena):
 
 def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, scenario=None,
                 scenario_args=None, config=None, rules=None, agent_rules=None, llm=None, sim=None, save=True, quiet=True,
-                knowledge=None, study=None, truth=False, soil_probe=False, roles=None, lab=None):
+                knowledge=None, study=None, truth=False, soil_probe=False, roles=None, lab=None, planner=None):
     """Прогон целиком. Возвращает сводку: идентификаторы, метрики, путь к записи.
 
     study — задание исследования (словарь did.study.StudySpec) для агента 'study'.
@@ -104,6 +104,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     опции did.llm.make_client или {'client': готовый клиент}. None — как раньше: роли ведёт модель
     планировщика, если он llm, иначе расследования идут без модели.
     lab — память о лаборатории для вариантов с lab_memory: то, что вернул did.labmemory.LabMemory.priors().
+    planner — готовый планировщик вместо собранного по настройкам агента (мерило L5, did/hindsight.py); если у него
+    есть bind_run(world, bot), он вызывается до первого такта. None — как раньше.
     """
     arena = load_arena()
     if rules == 'science':                 # набор правил с несколькими причинами расхода и сбоями
@@ -135,7 +137,9 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     arm = arm or cfg.name
     world = FastSim(arena, scenario, rules, seed=seed, **(sim or {}))
     rec = Recorder()
-    planner = make_planner(cfg, llm, seed)
+    custom = planner is not None
+    if not custom:
+        planner = make_planner(cfg, llm, seed)
     extra = {'knowledge': knowledge} if getattr(cfg, 'science', False) else {}
     if getattr(cfg, 'lab_memory', False):           # L4b: что робот узнал об этой арене в прошлых прогонах
         extra['lab'] = lab
@@ -152,6 +156,8 @@ def run_episode(level, seed, agent='adaptive', *, experiment='adhoc', arm=None, 
     if agent in ORACLES:
         extra['truth'] = make_truth(world.judge, scenario, arena, **ORACLES[agent][2])
     bot = cls(arena, cfg, n_samples=len(scenario.samples), rules=bot_rules, planner=planner, recorder=rec, **extra)
+    if custom and hasattr(planner, 'bind_run'):
+        planner.bind_run(world, bot)
 
     probe = SoilProbe(scenario, rules) if soil_probe else None
     soil, detector = getattr(bot, 'soil', None), getattr(bot, 'change', None)

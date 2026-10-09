@@ -1,0 +1,35 @@
+title: Результативность — агент v5 (правка правила выбора цели по банку L5) против v2
+kind: main
+question: Даёт ли правка правила выбора цели, найденная по банку состояний L5, — цель, от которой дорога домой длиннее, чем от робота сейчас, стоит дороже — прибавку счёта на новых сценариях трудного уровня, не ухудшая возврат?
+hypothesis: >-
+  H4 из experiments/L5.yaml. По банку L5 (сценарии 16001–16040) правило теряет относительно лучшего варианта около
+  1,4 очка на решение (перекрёстная оценка), и из простых правок больше всего в банке дала правка «цель дальше от
+  базы дороже»: +0,4 очка на решение при весе 0,5. Но на отладочных сценариях 1–80 парно с adaptive_v2 выигрыша не
+  видно ни при каком весе: +0,65 [−1,47; +2,85] при весе 0,25 (он и взят в adaptive_v6), −0,61 при 0,5, −2,62 при
+  1,0. Ожидание, записанное до запуска: приёмка в +1,5 очка пройдена не будет, различие не будет показано.
+method: >-
+  adaptive_v2 и adaptive_v6 (adaptive_v2 с plan_home_weight = 0,25) проходят одни и те же сценарии 16041–16080
+  уровней hard и medium при базовых правилах. Сценарии до этого опыта не запускались; вес подобран на сценариях
+  1–80; код заморожен коммитом до запуска, запуск один. Сравнивается парная разность «v6 − v2».
+expect: >-
+  Критерий приёмки (задан ведущим до работы): трудный уровень, базовые правила — счёт adaptive_v6 выше adaptive_v2
+  на 1,5 очка и больше, интервал выше нуля; возврат не ниже.
+refute: >-
+  Приёмка не пройдена, если на hard парная разность счёта adaptive_v6 − adaptive_v2 меньше 1,5 очка, или её 95 %
+  интервал включает ноль, или возвратов меньше.
+arms:
+  - {id: adaptive_v2, label: Адаптивный v2, agent: adaptive_v2}
+  - {id: adaptive_v6, label: Адаптивный v6, agent: adaptive_v6}
+levels: [medium, hard]
+seeds: 40
+seed_start: 16041
+conditions:
+  - {id: base, label: Базовые правила}
+metrics: [score, samples_share, returned, penalties, hazard_hits, false_collects, time, distance, battery_used]
+claims:
+  - {metric: score, a: adaptive_v6, b: adaptive_v2, focus: hard, conditions: [base],
+     text: Адаптивный v6 набирает больше v2 на трудном уровне}
+  - {metric: returned, a: adaptive_v6, b: adaptive_v2, focus: hard, better: higher, kind: noninferiority, margin: 0.05,
+     conditions: [base], text: Адаптивный v6 возвращается не реже v2}
+  - {metric: score, a: adaptive_v6, b: adaptive_v2, focus: medium, kind: noninferiority, margin: 1.0,
+     conditions: [base], text: Адаптивный v6 не теряет очков на среднем уровне}

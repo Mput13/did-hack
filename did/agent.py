@@ -111,6 +111,9 @@ class AgentConfig:
     # по умолчанию выключена; включена в пресетах *_lab
     lab_memory: bool = False          # начинать прогон с того, что робот узнал об этой арене раньше: зоны и грунт
     lab_opts: dict = field(default_factory=dict)      # настройки: поля did.labmemory.Settings
+    # --- правка L5 (research/findings/L5.md): по умолчанию выключена; включена в adaptive_v6
+    plan_home_weight: float = 0.0     # правило выбора цели: вес удлинения дороги домой в цене цели (0 — прежнее правило)
+    plan_conf_power: float = 1.0      # правило выбора кандидата: степень уверенности в «уверенность / цена» (1 — прежнее)
     # --- абляция R12 (research/findings/R12.md): как исследователь выбирает опыт; gain — прежнее поведение
     inquiry_choice: str = 'gain'      # gain | bits | random | cheapest | fixed | worst | blind (did.science.CHOICES)
     inquiry_seed: int = 0             # зерно случайного выбора; прогон подставляет номер сценария (did/runner.py)
@@ -191,6 +194,9 @@ PRESETS = {
     'adaptive_v2_lab': AgentConfig(name='adaptive_v2_lab', fault_wait=True, lab_memory=True),
     'scientist_v2_lab': AgentConfig(name='scientist_v2_lab', science=True, fault_wait=True, lab_memory=True),
     'adaptive_llm_lab': AgentConfig(name='adaptive_llm_lab', planner='llm', lab_memory=True),
+    # Версия 6 (research/findings/L5.md): версия 2 плюс правка правила выбора цели — цель, от которой дорога домой
+    # длиннее, чем от робота сейчас, стоит дороже. Вес подобран на отладочных сценариях 1–80. Приёмку не прошла.
+    'adaptive_v6': AgentConfig(name='adaptive_v6', fault_wait=True, plan_home_weight=0.25),
     # Только поиск по карте вероятностей, остальная адаптация выключена.
     'belief_only': AgentConfig(name='belief_only', learn_soil=False, detect_change=False,
                                avoid_hazards=False, sensor_health=False, dynamic_reserve=False),
