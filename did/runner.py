@@ -43,6 +43,8 @@ def make_planner(cfg, llm=None, seed=0):
     from .llm import load_system_prompt, make_client
     opts = dict(llm or {'kind': 'mock'})
     prompt = opts.pop('prompt', None)
+    if prompt is None and getattr(cfg, 'planner_memory', '') == 'on':      # L4a: новые поля объясняет своя подсказка
+        from .plan_memory import PROMPT as prompt
     client = opts.pop('client', None)
     if client is None:
         if opts.get('kind', 'mock') == 'mock':
