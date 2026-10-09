@@ -266,8 +266,8 @@ def research_runs():
         if num and int(num.group(1)) <= 14:
             continue
         s = json.loads(path.read_text(encoding='utf-8'))
-        runs += len(s['runs'])
-        errors += len(s['errors'])
+        runs += len(s.get('runs', []))               # сводку своей программы опыта (L5) считаем серией без прогонов
+        errors += len(s.get('errors', []))
     return {'runs': runs, 'errors': errors, 'series': len(specs), 'computed': computed}
 
 
