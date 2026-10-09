@@ -405,16 +405,26 @@ def shadow_summary(out, data):
     return res
 
 
-def missions_summary(out):
+def missions_summary(out, overlay=None):
+    """Миссии N1–N3 по записям runs/<out>. overlay — папка досчёта: её прогоны заменяют одноимённые (прогоны,
+    где сервер не ответил и решало запасное правило, посчитанные заново с --retry-failed)."""
     table = {}
     seeds = mission_seeds(out)
     for m_id, own in seeds.items():
         data = load_group(out, m_id, own)
+        replaced = []
+        for arm in ARMS if overlay else ():
+            for seed in own:
+                if record(overlay, m_id, arm, seed).is_file():
+                    data[arm][f'{LEVEL}-{seed}'] = read_run(record(overlay, m_id, arm, seed))
+                    replaced.append(f'{arm} {LEVEL}-{seed}')
         if not data['rule']:
             # Правило миссию не читает: его прогоны для миссии — те же, по которым отбирались сценарии.
             data['rule'] = {f'{LEVEL}-{s}': read_run(record(out, 'pool', 'rule', s)) for s in own
                             if record(out, 'pool', 'rule', s).is_file()}
         cell = {'text': MISSIONS[m_id]['text'], 'scenarios': own, 'arms': {}}
+        if overlay:
+            cell['replaced'] = replaced
         verdicts = {}
         for arm, runs in data.items():
             if not runs:
@@ -476,6 +486,10 @@ def summarize(out, seeds):
             s['prompt_tokens_ratio'] = round(x['llm']['tokens']['prompt'] / y['llm']['tokens']['prompt'], 3)
     s['shadow'] = shadow_summary(out, data)
     s['missions'] = missions_summary(out)
+    if (RUNS / f'{out}_redo').is_dir():
+        # Проверка чувствительности: то же, но прогоны с обрывами сервера взяты из досчёта. Строгий повтор из
+        # кэша даёт именно эти числа: на месте сохранённого обрыва в кэше теперь лежит ответ модели.
+        s['missions_redo'] = missions_summary(out, overlay=f'{out}_redo')
     # Цена памяти по всем прогонам с моделью (основная пара и миссии): больше запросов — уже интервал.
     every = {arm: [] for arm in ('nomem', 'mem')}
     for group, own in [('main', seeds)] + list(mission_seeds(out).items()):
@@ -534,6 +548,12 @@ def report(s):
         lines.append(f"{m_id}: mem − nomem {cell.get('mem_minus_nomem')}, Фишер p={cell.get('fisher_p')}; парно "
                      f"{cell.get('paired')}; счёт {_ci(cell.get('score_mem_minus_nomem'))}, образцы "
                      f"{_ci(cell.get('collected_mem_minus_nomem'))}")
+    for m_id, cell in (s.get('missions_redo') or {}).items():
+        if cell['replaced']:
+            lines.append(f"{m_id} после досчёта ({', '.join(cell['replaced'])}): " + '; '.join(
+                f"{arm} {fmt_share(e['success'])}, без повода {e['no_occasion']}, счёт {e['score']}, собрано {e['collected']}"
+                for arm, e in cell['arms'].items()) + f"; mem − nomem {cell.get('mem_minus_nomem')}, Фишер "
+                f"p={cell.get('fisher_p')}; счёт {_ci(cell.get('score_mem_minus_nomem'))}")
     lines.append(f"настоящих обращений к серверу: {s['network_calls']}")
     return '\n'.join(lines)
 

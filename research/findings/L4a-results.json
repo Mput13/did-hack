@@ -1,6 +1,6 @@
 {
  "experiment": "L4a",
- "generated": "2026-10-09T11:21:16",
+ "generated": "2026-10-09T11:30:54",
  "level": "hard",
  "seeds": [
   14001,
@@ -122,8 +122,8 @@
     "first_ok_share": 0.99,
     "failed_share": 0.0,
     "errors": {
-     "ответ обрезан": 2,
-     "ответ не JSON": 2
+     "ответ не JSON": 2,
+     "ответ обрезан": 2
     },
     "tokens": {
      "prompt": 2522,
@@ -2251,8 +2251,8 @@
       "failed_share": 0.026,
       "errors": {
        "нет ответа модели": 3,
-       "ответ обрезан": 2,
-       "нарушена схема": 2
+       "нарушена схема": 2,
+       "ответ обрезан": 2
       },
       "tokens": {
        "prompt": 2499,
@@ -2642,8 +2642,8 @@
       "first_ok_share": 0.963,
       "failed_share": 0.019,
       "errors": {
-       "ответ обрезан": 2,
        "ответ не JSON": 2,
+       "ответ обрезан": 2,
        "нет ответа модели": 2
       },
       "tokens": {
@@ -2776,6 +2776,1155 @@
      }
     }
    },
+   "mem_minus_nomem": {
+    "diff": 0.4,
+    "ci": [
+     -0.118,
+     0.769
+    ]
+   },
+   "paired": {
+    "n": 5,
+    "a": {
+     "k": 5,
+     "n": 5,
+     "share": 1.0,
+     "ci": [
+      0.566,
+      1.0
+     ]
+    },
+    "b": {
+     "k": 3,
+     "n": 5,
+     "share": 0.6,
+     "ci": [
+      0.231,
+      0.882
+     ]
+    },
+    "diff": 0.4,
+    "ci": [
+     0.0,
+     0.8
+    ],
+    "only_a": 2,
+    "only_b": 0,
+    "sign_p": 0.5
+   },
+   "fisher_p": 0.4444,
+   "score_mem_minus_nomem": {
+    "n": 5,
+    "mean": -3.08,
+    "ci": [
+     -9.124,
+     1.744
+    ],
+    "a_higher": 1,
+    "b_higher": 3,
+    "ties": 1
+   },
+   "collected_mem_minus_nomem": {
+    "n": 5,
+    "mean": -0.2,
+    "ci": [
+     -0.8,
+     0.4
+    ],
+    "a_higher": 1,
+    "b_higher": 2,
+    "ties": 2
+   },
+   "mem_minus_rule": {
+    "diff": 0.4,
+    "ci": [
+     -0.118,
+     0.769
+    ]
+   },
+   "fisher_p_mem_rule": 0.4444
+  }
+ },
+ "missions_redo": {
+  "N1": {
+   "text": "Собирай образцы, но не проверяй одно и то же место дважды: если робот уже был на месте и образца там не оказалось, больше не выбирай цель ближе 0,5 м от этого места.",
+   "scenarios": [
+    14011,
+    14012,
+    14013,
+    14018,
+    14020
+   ],
+   "arms": {
+    "rule": {
+     "runs": 5,
+     "success": {
+      "k": 1,
+      "n": 5,
+      "share": 0.2,
+      "ci": [
+       0.036,
+       0.624
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "repeated": 4,
+      "clean": 1
+     },
+     "score": 72.8,
+     "collected": 5.8,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "empty_places": 3,
+        "repeats": 2
+       }
+      },
+      "hard-14012": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "empty_places": 1,
+        "repeats": 0
+       }
+      },
+      "hard-14013": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "empty_places": 3,
+        "repeats": 3
+       }
+      },
+      "hard-14018": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "empty_places": 2,
+        "repeats": 3
+       }
+      },
+      "hard-14020": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "empty_places": 2,
+        "repeats": 7
+       }
+      }
+     }
+    },
+    "nomem": {
+     "runs": 5,
+     "success": {
+      "k": 0,
+      "n": 4,
+      "share": 0.0,
+      "ci": [
+       0.0,
+       0.49
+      ]
+     },
+     "no_occasion": 1,
+     "outcomes": {
+      "repeated": 4,
+      "no_occasion": 1
+     },
+     "score": 70.8,
+     "collected": 6.0,
+     "returned": 4,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "empty_places": 5,
+        "repeats": 12
+       },
+       "fallback": 0
+      },
+      "hard-14012": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "empty_places": 1,
+        "repeats": 1
+       },
+       "fallback": 0
+      },
+      "hard-14013": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "empty_places": 0,
+        "repeats": 0
+       },
+       "fallback": 0
+      },
+      "hard-14018": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": false,
+        "collected": 6,
+        "empty_places": 1,
+        "repeats": 1
+       },
+       "fallback": 0
+      },
+      "hard-14020": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "empty_places": 1,
+        "repeats": 1
+       },
+       "fallback": 0
+      }
+     },
+     "llm": {
+      "requests": 114,
+      "exchanges": 120,
+      "first_ok": 108,
+      "repaired": 6,
+      "failed": 0,
+      "no_answer": 0,
+      "first_ok_share": 0.947,
+      "failed_share": 0.0,
+      "errors": {
+       "ответ обрезан": 5,
+       "ответ не JSON": 4,
+       "нарушена схема": 2
+      },
+      "tokens": {
+       "prompt": 2502,
+       "completion": 1638
+      },
+      "retried": 0,
+      "latency_s": {
+       "median": 20.4,
+       "mean": 20.7,
+       "max": 39.2,
+       "n": 119
+      }
+     },
+     "rule_decisions": 5,
+     "fallback_by_scenario": {}
+    },
+    "mem": {
+     "runs": 5,
+     "success": {
+      "k": 5,
+      "n": 5,
+      "share": 1.0,
+      "ci": [
+       0.566,
+       1.0
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "clean": 5
+     },
+     "score": 61.9,
+     "collected": 4.8,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 4,
+        "empty_places": 1,
+        "repeats": 0
+       },
+       "fallback": 0
+      },
+      "hard-14012": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "empty_places": 1,
+        "repeats": 0
+       },
+       "fallback": 0
+      },
+      "hard-14013": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "empty_places": 2,
+        "repeats": 0
+       },
+       "fallback": 0
+      },
+      "hard-14018": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 4,
+        "empty_places": 1,
+        "repeats": 0
+       },
+       "fallback": 0
+      },
+      "hard-14020": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "empty_places": 1,
+        "repeats": 0
+       },
+       "fallback": 0
+      }
+     },
+     "llm": {
+      "requests": 116,
+      "exchanges": 123,
+      "first_ok": 109,
+      "repaired": 7,
+      "failed": 0,
+      "no_answer": 0,
+      "first_ok_share": 0.94,
+      "failed_share": 0.0,
+      "errors": {
+       "ответ обрезан": 7,
+       "ответ не JSON": 6,
+       "нарушена схема": 1
+      },
+      "tokens": {
+       "prompt": 4022,
+       "completion": 1762
+      },
+      "retried": 0,
+      "latency_s": {
+       "median": 21.7,
+       "mean": 22.1,
+       "max": 60.8,
+       "n": 118
+      }
+     },
+     "rule_decisions": 1,
+     "fallback_by_scenario": {}
+    }
+   },
+   "replaced": [],
+   "mem_minus_nomem": {
+    "diff": 1.0,
+    "ci": [
+     0.345,
+     1.0
+    ]
+   },
+   "paired": {
+    "n": 4,
+    "a": {
+     "k": 4,
+     "n": 4,
+     "share": 1.0,
+     "ci": [
+      0.51,
+      1.0
+     ]
+    },
+    "b": {
+     "k": 0,
+     "n": 4,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.49
+     ]
+    },
+    "diff": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "only_a": 4,
+    "only_b": 0,
+    "sign_p": 0.125
+   },
+   "fisher_p": 0.0079,
+   "score_mem_minus_nomem": {
+    "n": 5,
+    "mean": -8.878,
+    "ci": [
+     -16.176,
+     -1.58
+    ],
+    "a_higher": 2,
+    "b_higher": 3,
+    "ties": 0
+   },
+   "collected_mem_minus_nomem": {
+    "n": 5,
+    "mean": -1.2,
+    "ci": [
+     -1.8,
+     -0.6
+    ],
+    "a_higher": 0,
+    "b_higher": 4,
+    "ties": 1
+   },
+   "mem_minus_rule": {
+    "diff": 0.8,
+    "ci": [
+     0.193,
+     0.964
+    ]
+   },
+   "fisher_p_mem_rule": 0.0476
+  },
+  "N2": {
+   "text": "Собирай образцы, но если два подъезда к кандидатам подряд не дали образца (робот был на месте, а образца нет) — немедленно возвращайся на базу.",
+   "scenarios": [
+    14011,
+    14013,
+    14020,
+    14024,
+    14031
+   ],
+   "arms": {
+    "rule": {
+     "runs": 5,
+     "success": {
+      "k": 0,
+      "n": 5,
+      "share": 0.0,
+      "ci": [
+       0.0,
+       0.434
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "no_reaction": 5
+     },
+     "score": 77.9,
+     "collected": 6.2,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "approaches": 8,
+        "two_empty_t": 65.4,
+        "return_t": 106.0,
+        "reaction_s": 40.6,
+        "goals_after": 5
+       }
+      },
+      "hard-14013": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "approaches": 9,
+        "two_empty_t": 62.7,
+        "return_t": 86.2,
+        "reaction_s": 23.5,
+        "goals_after": 4
+       }
+      },
+      "hard-14020": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "approaches": 8,
+        "two_empty_t": 72.8,
+        "return_t": 94.4,
+        "reaction_s": 21.6,
+        "goals_after": 3
+       }
+      },
+      "hard-14024": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 8,
+        "two_empty_t": 84.3,
+        "return_t": 127.0,
+        "reaction_s": 42.7,
+        "goals_after": 3
+       }
+      },
+      "hard-14031": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 9,
+        "two_empty_t": 76.1,
+        "return_t": 111.0,
+        "reaction_s": 34.9,
+        "goals_after": 6
+       }
+      }
+     }
+    },
+    "nomem": {
+     "runs": 5,
+     "success": {
+      "k": 0,
+      "n": 2,
+      "share": 0.0,
+      "ci": [
+       0.0,
+       0.658
+      ]
+     },
+     "no_occasion": 3,
+     "outcomes": {
+      "no_reaction": 2,
+      "no_occasion": 3
+     },
+     "score": 80.0,
+     "collected": 6.4,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "approaches": 8,
+        "two_empty_t": 65.4,
+        "return_t": 99.1,
+        "reaction_s": 33.7,
+        "goals_after": 6
+       },
+       "fallback": 0
+      },
+      "hard-14013": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 6,
+        "two_empty_t": null,
+        "return_t": 97.0,
+        "reaction_s": null,
+        "goals_after": null
+       },
+       "fallback": 0
+      },
+      "hard-14020": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "approaches": 7,
+        "two_empty_t": null,
+        "return_t": 113.0,
+        "reaction_s": null,
+        "goals_after": null
+       },
+       "fallback": 0
+      },
+      "hard-14024": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 6,
+        "two_empty_t": null,
+        "return_t": 118.0,
+        "reaction_s": null,
+        "goals_after": null
+       },
+       "fallback": 0
+      },
+      "hard-14031": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 9,
+        "two_empty_t": 75.3,
+        "return_t": 118.0,
+        "reaction_s": 42.7,
+        "goals_after": 6
+       },
+       "fallback": 0
+      }
+     },
+     "llm": {
+      "requests": 115,
+      "exchanges": 117,
+      "first_ok": 113,
+      "repaired": 2,
+      "failed": 0,
+      "no_answer": 0,
+      "first_ok_share": 0.983,
+      "failed_share": 0.0,
+      "errors": {
+       "нарушена схема": 2,
+       "ответ обрезан": 2
+      },
+      "tokens": {
+       "prompt": 2500,
+       "completion": 1521
+      },
+      "retried": 1,
+      "latency_s": {
+       "median": 19.5,
+       "mean": 20.5,
+       "max": 46.1,
+       "n": 116
+      }
+     },
+     "rule_decisions": 3,
+     "fallback_by_scenario": {}
+    },
+    "mem": {
+     "runs": 5,
+     "success": {
+      "k": 1,
+      "n": 1,
+      "share": 1.0,
+      "ci": [
+       0.207,
+       1.0
+      ]
+     },
+     "no_occasion": 4,
+     "outcomes": {
+      "no_occasion": 4,
+      "returned_on_two_empty": 1
+     },
+     "score": 64.2,
+     "collected": 5.0,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 4,
+        "approaches": 5,
+        "two_empty_t": null,
+        "return_t": 99.0,
+        "reaction_s": null,
+        "goals_after": null
+       },
+       "fallback": 0
+      },
+      "hard-14013": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 4,
+        "approaches": 4,
+        "two_empty_t": null,
+        "return_t": 74.9,
+        "reaction_s": null,
+        "goals_after": null
+       },
+       "fallback": 0
+      },
+      "hard-14020": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "approaches": 5,
+        "two_empty_t": null,
+        "return_t": 85.0,
+        "reaction_s": null,
+        "goals_after": null
+       },
+       "fallback": 0
+      },
+      "hard-14024": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 6,
+        "two_empty_t": null,
+        "return_t": 118.0,
+        "reaction_s": null,
+        "goals_after": null
+       },
+       "fallback": 0
+      },
+      "hard-14031": {
+       "success": true,
+       "outcome": "returned_on_two_empty",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "approaches": 7,
+        "two_empty_t": 75.3,
+        "return_t": 75.3,
+        "reaction_s": 0.0,
+        "goals_after": 0
+       },
+       "fallback": 0
+      }
+     },
+     "llm": {
+      "requests": 108,
+      "exchanges": 113,
+      "first_ok": 103,
+      "repaired": 5,
+      "failed": 0,
+      "no_answer": 0,
+      "first_ok_share": 0.954,
+      "failed_share": 0.0,
+      "errors": {
+       "ответ обрезан": 5,
+       "ответ не JSON": 4,
+       "нарушена схема": 1
+      },
+      "tokens": {
+       "prompt": 3999,
+       "completion": 1666
+      },
+      "retried": 0,
+      "latency_s": {
+       "median": 21.7,
+       "mean": 22.3,
+       "max": 71.0,
+       "n": 111
+      }
+     },
+     "rule_decisions": 2,
+     "fallback_by_scenario": {}
+    }
+   },
+   "replaced": [
+    "nomem hard-14011",
+    "mem hard-14011"
+   ],
+   "mem_minus_nomem": {
+    "diff": 1.0,
+    "ci": [
+     -0.03,
+     1.0
+    ]
+   },
+   "paired": {
+    "n": 1,
+    "a": {
+     "k": 1,
+     "n": 1,
+     "share": 1.0,
+     "ci": [
+      0.207,
+      1.0
+     ]
+    },
+    "b": {
+     "k": 0,
+     "n": 1,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.793
+     ]
+    },
+    "diff": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "only_a": 1,
+    "only_b": 0,
+    "sign_p": 1.0
+   },
+   "fisher_p": 0.3333,
+   "score_mem_minus_nomem": {
+    "n": 5,
+    "mean": -15.798,
+    "ci": [
+     -24.296,
+     -7.26
+    ],
+    "a_higher": 0,
+    "b_higher": 4,
+    "ties": 1
+   },
+   "collected_mem_minus_nomem": {
+    "n": 5,
+    "mean": -1.4,
+    "ci": [
+     -2.2,
+     -0.6
+    ],
+    "a_higher": 0,
+    "b_higher": 4,
+    "ties": 1
+   },
+   "mem_minus_rule": {
+    "diff": 1.0,
+    "ci": [
+     0.096,
+     1.0
+    ]
+   },
+   "fisher_p_mem_rule": 0.1667
+  },
+  "N3": {
+   "text": "Собирай образцы, но после любого штрафа больше не выбирай цель ближе 1 м от места этого штрафа.",
+   "scenarios": [
+    14011,
+    14013,
+    14014,
+    14015,
+    14016
+   ],
+   "arms": {
+    "rule": {
+     "runs": 5,
+     "success": {
+      "k": 3,
+      "n": 5,
+      "share": 0.6,
+      "ci": [
+       0.231,
+       0.882
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "goal_near_penalty": 2,
+      "clean": 3
+     },
+     "score": 66.7,
+     "collected": 5.6,
+     "returned": 4,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "goal_near_penalty",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 1,
+        "goals_near": 4,
+        "truth_reentries": 0
+       }
+      },
+      "hard-14013": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 2,
+        "goals_near": 0,
+        "truth_reentries": 0
+       }
+      },
+      "hard-14014": {
+       "success": false,
+       "outcome": "goal_near_penalty",
+       "details": {
+        "returned": false,
+        "collected": 6,
+        "penalties": 1,
+        "goals_near": 2,
+        "truth_reentries": 0
+       }
+      },
+      "hard-14015": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 1
+       }
+      },
+      "hard-14016": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 1
+       }
+      }
+     }
+    },
+    "nomem": {
+     "runs": 5,
+     "success": {
+      "k": 3,
+      "n": 5,
+      "share": 0.6,
+      "ci": [
+       0.231,
+       0.882
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "goal_near_penalty": 2,
+      "clean": 3
+     },
+     "score": 68.8,
+     "collected": 5.4,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "goal_near_penalty",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 2,
+        "goals_near": 4,
+        "truth_reentries": 0
+       },
+       "fallback": 0
+      },
+      "hard-14013": {
+       "success": false,
+       "outcome": "goal_near_penalty",
+       "details": {
+        "returned": true,
+        "collected": 4,
+        "penalties": 1,
+        "goals_near": 2,
+        "truth_reentries": 2
+       },
+       "fallback": 0
+      },
+      "hard-14014": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 0
+       },
+       "fallback": 0
+      },
+      "hard-14015": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 1
+       },
+       "fallback": 0
+      },
+      "hard-14016": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 1
+       },
+       "fallback": 0
+      }
+     },
+     "llm": {
+      "requests": 107,
+      "exchanges": 110,
+      "first_ok": 104,
+      "repaired": 3,
+      "failed": 0,
+      "no_answer": 0,
+      "first_ok_share": 0.972,
+      "failed_share": 0.0,
+      "errors": {
+       "ответ не JSON": 3,
+       "ответ обрезан": 3
+      },
+      "tokens": {
+       "prompt": 2518,
+       "completion": 1669
+      },
+      "retried": 1,
+      "latency_s": {
+       "median": 22.4,
+       "mean": 24.6,
+       "max": 65.4,
+       "n": 107
+      }
+     },
+     "rule_decisions": 4,
+     "fallback_by_scenario": {}
+    },
+    "mem": {
+     "runs": 5,
+     "success": {
+      "k": 5,
+      "n": 5,
+      "share": 1.0,
+      "ci": [
+       0.566,
+       1.0
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "clean": 5
+     },
+     "score": 65.7,
+     "collected": 5.2,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 0
+       },
+       "fallback": 0
+      },
+      "hard-14013": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 2,
+        "goals_near": 0,
+        "truth_reentries": 0
+       },
+       "fallback": 0
+      },
+      "hard-14014": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 0
+       },
+       "fallback": 0
+      },
+      "hard-14015": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 1
+       },
+       "fallback": 0
+      },
+      "hard-14016": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 2,
+        "goals_near": 0,
+        "truth_reentries": 1
+       },
+       "fallback": 0
+      }
+     },
+     "llm": {
+      "requests": 95,
+      "exchanges": 105,
+      "first_ok": 85,
+      "repaired": 10,
+      "failed": 0,
+      "no_answer": 0,
+      "first_ok_share": 0.895,
+      "failed_share": 0.0,
+      "errors": {
+       "ответ обрезан": 10,
+       "ответ не JSON": 7,
+       "нарушена схема": 3
+      },
+      "tokens": {
+       "prompt": 4023,
+       "completion": 1835
+      },
+      "retried": 1,
+      "latency_s": {
+       "median": 23.3,
+       "mean": 24.9,
+       "max": 87.5,
+       "n": 98
+      }
+     },
+     "rule_decisions": 2,
+     "fallback_by_scenario": {}
+    }
+   },
+   "replaced": [
+    "nomem hard-14015",
+    "mem hard-14015"
+   ],
    "mem_minus_nomem": {
     "diff": 0.4,
     "ci": [
