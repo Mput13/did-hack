@@ -171,16 +171,24 @@ const ciText = ([m, lo, hi], d = 1) => `${sgn(m, d)} [${sgn(lo, d)}; ${sgn(hi, d
 // =====================================================================================================
 if (ALL) pres.addSection({ title: SECTION });
 
+// Титул — по образцу организаторов (логотипы МАИ и ТОП ИТ, состязание, направление, состав с группами, строка о поддержке),
+// в оформлении колоды команды. Логотип — из образца, перекрашен в светлый под тёмный фон (data/logo_mai_topit_light.png).
+const PROGRAM = "«Программирование и технология разработки программных систем» (02.03.02)";
+const MEMBERS = [["Ефремова Анастасия", "М8О-205БВ-25"], ["Путиловский Михаил", "М8О-205БВ-25"], ["Журавлева Полина", "М8О-206БВ-25"]];
+const SUPPORT = "При поддержке АНО «Аналитический центр при Правительстве Российской Федерации» по договору № 70-2025-000814 от 04.06.2025 о реализации программ топ-уровня в сфере информационных технологий";
 function slideTitle(withMap) {
   const s = pres.addSlide(ALL ? { masterName: "TITLE", sectionTitle: SECTION } : { masterName: "TITLE" });
-  oval(s, 5.72, 4.0, 1.2, C.accent2, "circle-lavender");
+  oval(s, 5.75, 3.72, 1.1, C.accent2, "circle-lavender");
   oval(s, 8.72, 0.5, 0.8, C.accent3, "circle-mint");
   oval(s, 6.2, 1.1, 3.3, C.accent1, "circle-blue");
   if (withMap) img(s, "title_map.png", 6.72, 1.67, 2.26, "Карта арены с путём робота: семь образцов собраны, робот вернулся на базу", "title-map");
-  T(s, "Автономный ИИ-исследователь", { x: 0.9, y: 1.15, w: 5.2, h: 1.3, fontSize: 34, color: C.background1, valign: "middle", objectName: "title" });
-  T(s, "Поиск образцов и исследование среды с ограниченным запасом энергии", { x: 0.9, y: 2.72, w: 4.6, h: 0.6, fontSize: 14, color: HEX.pale, objectName: "subtitle" });
-  T(s, "Ефремова Анастасия · Путиловский Михаил · Журавлева Полина", { x: 0.9, y: 4.42, w: 5.0, h: 0.22, fontSize: 10.5, color: HEX.pale, objectName: "team" });
-  T(s, "DID Hack 2026", { x: 0.9, y: 4.78, w: 3.0, h: 0.2, fontSize: 10.5, color: HEX.pale, objectName: "event" });
+  img(s, path.join(__dirname, "data", "logo_mai_topit_light.png"), 0.9, 0.42, 1.7, "Логотипы МАИ и программы ТОП ИТ", "logos");
+  T(s, "Интеллектуальное состязание DID-HACK · ТОП ИТ МАИ", { x: 0.9, y: 1.22, w: 5.0, h: 0.24, fontSize: 10.5, color: HEX.pale, valign: "middle", objectName: "event" });
+  T(s, "Автономный ИИ-исследователь на роботе-платформе", { x: 0.9, y: 1.5, w: 5.0, h: 1.5, fontSize: 28, color: C.background1, valign: "middle", objectName: "title" });
+  T(s, PROGRAM, { x: 0.9, y: 3.08, w: 4.7, h: 0.42, fontSize: 10.5, color: HEX.pale, objectName: "program" });
+  T(s, MEMBERS.map(([name, group], i) => ({ text: `${name} · ${group}`, options: { breakLine: i < MEMBERS.length - 1 } })),
+    { x: 0.9, y: 3.68, w: 4.7, h: 0.72, fontSize: 10.5, color: C.background1, objectName: "team", paraSpaceAfter: 3 });
+  T(s, SUPPORT, { x: 0.9, y: 5.0, w: 8.3, h: 0.34, fontSize: 7, color: HEX.pale, valign: "middle", objectName: "support" });
   const notes = "Мы сделали робота, который ищет скрытые образцы, сам замечает, что среда изменилась, и возвращается на базу до разрядки.";
   s.addNotes(`≈ 10 с. ${notes}`);
   SPEECH_PARTS.push({ section: SECTION, title: withMap ? "Титул" : "Титул (без карты)", notes, seconds: 10 });
