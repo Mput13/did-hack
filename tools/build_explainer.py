@@ -234,7 +234,8 @@ def research():
     path = ROOT / 'research' / 'agenda.yaml'
     if not path.exists():
         return None
-    studies = yaml.safe_load(path.read_text(encoding='utf-8')).get('studies', [])
+    studies = [st for st in yaml.safe_load(path.read_text(encoding='utf-8')).get('studies', [])
+               if not st.get('hidden')]                       # hidden: true — работа есть в плане, но на страницу не выводится
     for st in studies:
         report = ROOT / 'research' / 'findings' / f"{st['id']}.md"
         if report.exists():
@@ -284,7 +285,8 @@ def code_size():
         return sum(1 for _ in path.open(encoding='utf-8', errors='ignore'))
     py = [p for pat in ('did/**/*.py', 'tools/*.py', 'tests/*.py', 'ws/src/**/*.py') for p in ROOT.glob(pat)]
     js = [p for pat in ('lab/*.js', 'lab/views/*.js', 'docs/explainer/*.js') for p in ROOT.glob(pat)]
-    files = {str(p.relative_to(ROOT)): lines(p) for p in py + js}
+    files = {str(p.relative_to(ROOT)): lines(p) for p in py + js
+             if 'jev' not in p.name}        # работа J1 на страницу не выводится (hidden в плане)
     return {'files': files, 'py': sum(lines(p) for p in py), 'js': sum(lines(p) for p in js)}
 
 
