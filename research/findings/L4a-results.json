@@ -1,6 +1,6 @@
 {
  "experiment": "L4a",
- "generated": "2026-10-09T05:52:43",
+ "generated": "2026-10-09T11:21:16",
  "level": "hard",
  "seeds": [
   14001,
@@ -53,7 +53,11 @@
    "to_empty_collected": {
     "total": 1,
     "per_run": 0.1
-   }
+   },
+   "runs_with_empty_place": 4,
+   "runs_with_to_empty": 2,
+   "collected": 53,
+   "penalties": 7
   },
   "nomem": {
    "runs": 10,
@@ -94,6 +98,10 @@
     "total": 2,
     "per_run": 0.2
    },
+   "runs_with_empty_place": 2,
+   "runs_with_to_empty": 2,
+   "collected": 53,
+   "penalties": 8,
    "asked": 204,
    "same_as_rule": {
     "k": 179,
@@ -114,8 +122,8 @@
     "first_ok_share": 0.99,
     "failed_share": 0.0,
     "errors": {
-     "ответ не JSON": 2,
-     "ответ обрезан": 2
+     "ответ обрезан": 2,
+     "ответ не JSON": 2
     },
     "tokens": {
      "prompt": 2522,
@@ -129,7 +137,9 @@
      "n": 206
     }
    },
-   "prompt_tokens_per_run_mean": 2505
+   "prompt_tokens_per_run_mean": 2505,
+   "to_empty_by_memory": 10,
+   "fallback": 0
   },
   "mem": {
    "runs": 10,
@@ -170,6 +180,10 @@
     "total": 0,
     "per_run": 0.0
    },
+   "runs_with_empty_place": 1,
+   "runs_with_to_empty": 0,
+   "collected": 53,
+   "penalties": 6,
    "asked": 185,
    "same_as_rule": {
     "k": 159,
@@ -206,7 +220,9 @@
      "n": 187
     }
    },
-   "prompt_tokens_per_run_mean": 3918
+   "prompt_tokens_per_run_mean": 3918,
+   "to_empty_by_memory": 0,
+   "fallback": 0
   }
  },
  "diffs": {
@@ -993,6 +1009,687 @@
      "nomem_reasoning": "Собрано 4 из 7, заряд 25.6, возврат 8.6. Датчик degraded, confidence C1=0.48 и C2=0.41 оба <0.5 — по правилу пропускаю кандидатов. Разведка: E1 (unseen 0.6, путь 1.6, возврат 9.7) выгоднее E3 (0.38/2.8=0.14) и E2 (0.43/3.4=0.13). После E1 запас 25.6−1.6−9.7=14.3, хватит на E3 (путь 1.8, возврат 10.4). Время 66/600 — запас большой."
     }
    ]
+  },
+  "B": {
+   "states": 19,
+   "mem_differs_from_nomem": {
+    "k": 16,
+    "n": 19,
+    "share": 0.842,
+    "ci": [
+     0.624,
+     0.945
+    ]
+   },
+   "states_near_empty": 11,
+   "choose_checked_empty": {
+    "n": 11,
+    "a": {
+     "k": 0,
+     "n": 11,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.259
+     ]
+    },
+    "b": {
+     "k": 10,
+     "n": 11,
+     "share": 0.909,
+     "ci": [
+      0.623,
+      0.984
+     ]
+    },
+    "diff": -0.909,
+    "ci": [
+     -1.0,
+     -0.727
+    ],
+    "only_a": 0,
+    "only_b": 10,
+    "sign_p": 0.002
+   },
+   "states_near_penalty": 12,
+   "choose_near_penalty": {
+    "n": 12,
+    "a": {
+     "k": 3,
+     "n": 12,
+     "share": 0.25,
+     "ci": [
+      0.089,
+      0.532
+     ]
+    },
+    "b": {
+     "k": 7,
+     "n": 12,
+     "share": 0.583,
+     "ci": [
+      0.32,
+      0.807
+     ]
+    },
+    "diff": -0.333,
+    "ci": [
+     -0.75,
+     0.083
+    ],
+    "only_a": 2,
+    "only_b": 6,
+    "sign_p": 0.2891
+   },
+   "rows": [
+    {
+     "key": "hard-14002#18",
+     "t": 51.6,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.55,
+      "y": -1.75
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": 0.25,
+      "y": -1.75
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1"
+     ],
+     "mem_reasoning": "Собрано 5 из 7, заряд 29.0, возврат 8.8. C1 (0.55;-1.75) в прошлом плане прервана hazard — зона Z1 ещё активна, не переназначаю. E1 в near penalty_places (штраф в 1.24;-0.55). E2: unseen 0.79, путь 4.1, возврат 7.7 — лучший из допустимых. E3: unseen 0.61, путь 3.5, возврат 10.1 — вторая цель. Запас после E2: 29−4.1−7.7=17.2, достаточно.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 29.0, возврат 8.8. C1 — единственный кандидат (conf 0.54, путь 3.8, возврат 8.5, итого 12.3 < 29). После C1 — E1: не проверено 83%, путь 2.3, возврат 8.4. Тревога подтверждает H10: робот в Z1 (центр 1.07;−0.71, r≈0.45), исполнитель объедет. Грунт S2 (×2.69) подтверждён, в оценках учтён."
+    },
+    {
+     "key": "hard-14002#23",
+     "t": 60.3,
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 0.75,
+      "y": -1.25
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": 0.25,
+      "y": -1.75
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1"
+     ],
+     "mem_reasoning": "Заряд 25.7, возврат 8.3, собрано 5 из 7. Датчик degraded, confidence C1=0.38<0.5 — кандидат пропускаю. Разведка: E1 (0.78/2.1=0.37) лучший, но в near penalty_places (hazard_hit 1.24;-0.55). Беру E2 (0.56/2.1=0.27) первым, затем E1 — исполнитель объедет Z1. Запас после E2+E1+возврат ~15, достаточно для 2 оставшихся образцов.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 25.7, возврат 8.3. C1 (conf 0.38) пропущен: датчик degraded и confidence < 0.5 — подъезд не даст надёжной проверки. Разведка: E1 (unseen 0.78, путь 1.1, возврат 8.4) выгоднее E2 (0.56, 1.1, 7.7). После E1 — E2. Время 60.3 из 600, запас заряда большой, на базу рано: 2 образца ещё не найдены."
+    },
+    {
+     "key": "hard-14002#26",
+     "t": 69.9,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.35,
+      "y": -1.55
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": 0.25,
+      "y": -0.75
+     },
+     "near_empty": [
+      "C1",
+      "E1"
+     ],
+     "near_penalty": [],
+     "mem_reasoning": "Собрано 5 из 7, заряд 24.1, возврат 7.9. C1 (conf 0.45) в checked_empty (t=69.8, 0.1 с назад) — исключена. C2 не feasible. Кандидатов нет → разведка. E2: unseen 0.48, путь 2.3, возврат 6.6 — лучший балл 0.145. E3: unseen 0.31, путь 1.8, возврат 7.0 — балл 0.111. E1 в near checked_empty (0.41 м) — пропускаю. Заряд позволяет оба: 24.1−2.3−6.6=15.2 после E2.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 24.1, возврат 7.9. C1 в 0.1 м, confidence 0.45, датчик 0.76 (ok) — подъезд подтвердит образец. C2 не feasible (cost_to 4.3 + back 7.7 > 24.1). После C1 — E1: unseen 36%, путь 1.1, возврат 9.8; суммарно ~11 < 24.1. S1 (×1.68, suspected) рядом с маршрутом к E1."
+    },
+    {
+     "key": "hard-14002#27",
+     "t": 70.0,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.35,
+      "y": -1.55
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E3",
+      "x": -0.25,
+      "y": -1.75
+     },
+     "near_empty": [
+      "C1",
+      "E1"
+     ],
+     "near_penalty": [],
+     "mem_reasoning": "C1 (conf 0.61) в near checked_empty (t=69.9, прошло 0.1 с < 60 с) — не беру. E1 тоже в near — пропускаю. Разведка: E3 score 0.45/(1.8+1)=0.161, E2 score 0.46/(1.9+1)=0.159, E4 score 0.46/(2.3+1)=0.139. E3 лучший. Заряд 24.1, возврат 7.9: E3 туда-обратно 8.8, остаток 15.3 — запас есть. Собрано 5 из 7, 2 образца ещё искать.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 24.1, возврат 7.9. Триггер candidate_lost, но C1 на месте: confidence 0.61, путь 0.1 м, возврат 7.8 — запас 24.1−7.9=16.2. Датчик 0.8 подтверждает образец рядом. После C1 — E1: unseen 52%, путь 1.1, возврат 9.8; суммарно 0.1+1.1+9.8=11.0 < 24.1. Время 70/600 — запас большой."
+    },
+    {
+     "key": "hard-14002#28",
+     "t": 70.1,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.35,
+      "y": -1.55
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E3",
+      "x": -0.25,
+      "y": -1.75
+     },
+     "near_empty": [
+      "C1",
+      "E1"
+     ],
+     "near_penalty": [],
+     "mem_reasoning": "Заряд 24.1, возврат 7.9, собрано 5 из 7. C1 и E1 в near у checked_empty (t=70.0, 0.1 с назад) — исключены. Три подряд empty в истории на (0.35;-1.55) — цикл, нужно уходить. Разведка: E3 score 0.45/2.8=0.161, E2 0.46/2.9=0.159, E4 0.46/3.3=0.139. E3 лучший, feasible, возврат 7.0. E2 второй. Датчик 0.8 при пустом месте — образец, вероятно, смещён.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 24.1, возврат 7.9. Триггер candidate_lost, но C1 на расстоянии 0.1 м, confidence 0.61, sensor 0.8 — образец рядом, подъезд подтвердит. После C1: E1 (unseen 52%, путь 1.1, возврат 9.8) — лучший разведочный пункт. Запас после C1+E1: 24.1−0.1−1.1−9.8≈13.1, до базы хватит."
+    },
+    {
+     "key": "hard-14002#29",
+     "t": 70.2,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.35,
+      "y": -1.55
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E3",
+      "x": -0.25,
+      "y": -1.75
+     },
+     "near_empty": [
+      "C1",
+      "E1"
+     ],
+     "near_penalty": [],
+     "mem_reasoning": "Собрано 5 из 7, заряд 24.1, возврат 7.9. C1 и E1 в near у checked_empty (t=70.1, 0.1 с назад) — исключены. В history 4 подряд empty на (0.35;−1.55) — не возвращаюсь. Разведка: E3 ratio 0.57/2.8=0.204, E2 ratio 0.59/2.9=0.203. E3 чуть лучше и cost_back 7.0 безопаснее. Датчик ok, reading 0.85 — образец рядом, но не в проверенной точке.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 24.1, возврат 7.9. Триггер candidate_lost, но C1 на месте: confidence 0.7, путь 0.1, возврат 7.8 — запас 24.1−0.1−7.8=16.2. Датчик 0.85 подтверждает образец рядом. После C1 — E1: unseen 0.65, путь 1.1, возврат 9.8; суммарно 0.1+1.1+9.8=11.0 < 24.1. До лимита 530 с — рано домой."
+    },
+    {
+     "key": "hard-14002#30",
+     "t": 71.8,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.35,
+      "y": -1.55
+     },
+     "mem": {
+      "type": "investigate",
+      "target": "C2",
+      "x": 0.65,
+      "y": -0.45
+     },
+     "near_empty": [
+      "C1",
+      "E1"
+     ],
+     "near_penalty": [
+      "C2"
+     ],
+     "mem_reasoning": "Собрано 5 из 7, заряд 24.1. C1 исключена: checked_empty (0.42;-1.5) 0.1 с назад, confidence 0.45<0.6, в history 5× empty. C2 — единственный feasible кандидат (score 0.34/3.8=0.09), рядом с penalty (hazard_hit 1.24;-0.55), но правило 1 требует investigate первым. E2: unseen 0.45, score 0.45/3.3=0.14 — лучшая разведка. E1 рядом с checked_empty — пропускаю. Заряд после C2 (3.3+7.2=10.5) остаётся 13.6, хватит на E2 и возврат.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 24.1, возврат 7.9 — запас большой. Триггер candidate_lost, но C1 на месте: confidence 0.45, путь 0.1, возврат 7.8, ratio 0.45/0.6=0.75. Датчик 0.83 подтверждает образец рядом. После C1 — E1: unseen 34%, путь 1.1, возврат 9.8, ratio 0.34/2.1=0.162, лучше C2 (0.34/3.8=0.089). Время 71.8 из 600 — рано домой."
+    },
+    {
+     "key": "hard-14002#31",
+     "t": 71.9,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.35,
+      "y": -1.55
+     },
+     "mem": {
+      "type": "investigate",
+      "target": "C2",
+      "x": 0.65,
+      "y": -0.45
+     },
+     "near_empty": [
+      "C1",
+      "E1"
+     ],
+     "near_penalty": [
+      "C2"
+     ],
+     "mem_reasoning": "Собрано 5 из 7, заряд 24.1, возврат 7.9. C1 в near checked_empty (t=71.8, <60 с, conf 0.45<0.6) — пропущен. C2 (conf 0.34, cost_to 3.3) — единственный кандидат, рядом с penalty_places (0.6 м), но альтернативы нет. После C2 — E2: unseen 0.45, cost_to 2.3, лучший ratio среди разведки. Запас: 24.1−3.3−7.2=13.6 после C2, хватит на E2 и возврат.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 24.1, возврат 7.9. Триггер candidate_lost, но C1 в 0.1 м от робота (0.35;-1.55), confidence 0.45, а датчик показывает 0.83 — образец почти наверняка рядом. C1: 0.45/(0.1+0.5)=0.75 — лучший кандидат. После C1 разведка E1: unseen 0.34, путь 1.1, возврат 9.8 — лучший explore-скор 0.16. Запас заряда позволяет оба действия."
+    },
+    {
+     "key": "hard-14002#32",
+     "t": 72.0,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.45,
+      "y": -0.45
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 0.25,
+      "y": -0.75
+     },
+     "near_empty": [
+      "E4"
+     ],
+     "near_penalty": [
+      "C1",
+      "E2"
+     ],
+     "mem_reasoning": "Собрано 5/7, заряд 24.1, возврат 7.9. C1 (conf 0.42) и E2 в near penalty_places (hazard_hit 1.24;-0.55) — при прочих равных беру другие. E4 в near checked_empty (0.42;-1.5, t=71.9) — исключаю. E1: unseen 0.56/(2.3+1)=0.17 — лучший explore. C1: 0.42/(2.9+0.5)=0.12 — единственный кандидат, нужен для 2-го образца. История: 6× empty в (0.35;-1.55) — туда не возвращаюсь, C1 в 1 м оттуда.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 24.1, возврат 7.9. Кандидат C1 (conf 0.42, путь 2.9, возврат 6.7) — feasible, датчик показывает 0.78 (высокое), значит образец рядом. После C1 — E1: unseen 56%, путь 2.3, возврат 6.6. Зона S3 (×2.69, confirmed) в расчётах учтена. Времени много: 72 из 600 с."
+    },
+    {
+     "key": "hard-14002#33",
+     "t": 73.8,
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 0.25,
+      "y": -1.75
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": -0.25,
+      "y": -1.25
+     },
+     "near_empty": [
+      "C1",
+      "E1"
+     ],
+     "near_penalty": [],
+     "mem_reasoning": "Собрано 5 из 7, заряд 23.9, возврат 8.5. Датчик degraded (шум 0.17), C1 confidence 0.46 < 0.5 — пропускаю. C1 и E1 в near checked_empty (0.42;-1.5, t=71.9) — история показывает 5× empty в этой точке. Беру E2: unseen 0.37, путь 2.1, возврат 5.7, запас 23.9−7.8=16.1. Затем E3: unseen 0.32, путь 2.0, возврат 6.6. Время 73.8 из 600 — рано домой.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 23.9, возврат 8.5. Датчик degraded (шум 0.17), C1 confidence 0.46 < 0.5 — пропускаю по правилу. Разведка: E1 unseen 41%, путь 0.9, возврат 7.7; E2 unseen 37%, путь 2.1, возврат 5.7. Запас после E1+E2: 23.9−0.9−2.1−5.7=15.2, достаточно для поиска оставшихся 2 образцов."
+    },
+    {
+     "key": "hard-14002#34",
+     "t": 79.8,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.45,
+      "y": -1.45
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E4",
+      "x": 0.25,
+      "y": -2.25
+     },
+     "near_empty": [
+      "C1",
+      "E2"
+     ],
+     "near_penalty": [
+      "C1",
+      "E1",
+      "E3"
+     ],
+     "mem_reasoning": "Заряд 18.8, возврат 6.2. C1 исключён: near checked_empty (0.42;-1.5), запись 8 с назад (<60 с). E1,E3 near penalty_places (штраф 79.8 с). E2 near checked_empty. E4 чист: unseen 0.38, путь 2.6, возврат 8.8, запас 18.8-11.4=7.4. Потом E1 (unseen 0.63, путь 0.9) — исполнитель объедет Z2.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 18.8, возврат 6.2. C1: confidence 0.69 > 0.5 (деградация не блокирует), путь 1.8, возврат 7.9 — запас 18.8−9.7=9.1. Потом E1: unseen 63%, путь 0.9, возврат 7.0. Робот в Z2 — исполнитель объедет."
+    },
+    {
+     "key": "hard-14002#35",
+     "t": 86.8,
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": -0.75,
+      "y": -1.75
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E1",
+      "x": -0.75,
+      "y": -1.75
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1"
+     ],
+     "mem_reasoning": "Собрано 6 из 7, кандидатов нет, датчик degraded. E1: unseen 0.47, путь 3.5, возврат 4.8 — лучший балл (0.47/4.5=0.104 против 0.059 у E2). E1 рядом со штрафом (-0.19;-1.35), но балл заметно выше, а сам E1 вне Z2. Заряд 17.4, возврат 8.8 — запас на оба explore. В истории battery_used 5.1 при cost_est 0.9 (объезд Z2), учтено в cost_back.",
+     "nomem_reasoning": "Собрано 6 из 7, кандидатов нет, датчик degraded (reading 0.25, noise 0.097). E1: unseen 47%, путь 3.5, возврат 4.8, запас 17.4−8.3=9.1. E2: unseen 36%, путь 5.1, возврат 3.1, запас 17.4−8.2=9.2. Тревога в (−0.19;−1.35) — внутри Z2 (r≈0.45). Ищу последний образец разведкой."
+    },
+    {
+     "key": "hard-14002#36",
+     "t": 87.4,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": -1.15,
+      "y": -1.85
+     },
+     "mem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": -1.15,
+      "y": -1.85
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1",
+      "E3"
+     ],
+     "mem_reasoning": "Собрано 6 из 7, остался 1 образец. C1: conf 0.38, score 0.38/(4.3+0.5)=0.079, feasible, round-trip 8.6 при заряде 17.4 — запас 8.8. E1 (score 0.198) рядом со штрафом hazard_hit (-0.19;-1.35) и была прервана в history — пропускаю. E2: score 0.54/(5.1+1)=0.089, запасная цель разведки. Тревога: штраф Z2 в (-0.19;-1.35) — исполнитель объезжает, путь к C1 не пересекает Z2 напрямую.",
+     "nomem_reasoning": "Собрано 6 из 7, заряд 17.4, возврат 8.8. C1 (confidence 0.38, путь 4.3, возврат 4.3) — единственный кандидат, подъезд и есть проверка. Потом E1 (unseen 89%, путь 3.5, возврат 4.8) — лучшая разведка при запасе 17.4−4.3−4.8=8.3. Тревога о Z2 в (−0.19;−1.35) согласуется с H18."
+    },
+    {
+     "key": "hard-14008#13",
+     "t": 51.6,
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 0.75,
+      "y": -0.75
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": 0.25,
+      "y": -0.25
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1"
+     ],
+     "mem_reasoning": "Заряд 20.1, возврат 9.2, запас 10.9. Собрано 5 из 7. Датчик degraded, C1 confidence 0.49 < 0.5 — пропускаю. E1 в near penalty_places (штраф Z1 в 1.61;-0.62) — беру другую. E2: unseen 0.48→0.45, score 0.45/4.8=0.094 — лучший. E3: 0.42/5.7=0.074 — второй. Последняя подцель (0.25;-0.45) прервана sensor_degraded; E2 (0.25;-0.25) — explore, не investigate, и датчик влияет на сбор, не на разведку. Робот в зоне Z1 — E2 уводит на 1.5 м прочь.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 20.1, возврат 9.2. Датчик degraded (шум 0.13), C1 confidence 0.49 < 0.5 — пропускаю по правилу. Робот внутри Z1 (штраф). E1: unseen 48%, путь 2.2, возврат 7.1, балл 0.48/3.2=0.15 — лучший. E2: unseen 45%, путь 3.8, балл 0.45/4.8=0.094. Зоны S1–S4 подтверждены, в оценках учтены."
+    },
+    {
+     "key": "hard-14009#12",
+     "t": 59.2,
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 2.25,
+      "y": -0.25
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E3",
+      "x": 1.75,
+      "y": 0.25
+     },
+     "near_empty": [
+      "C2",
+      "E1",
+      "E2"
+     ],
+     "near_penalty": [],
+     "mem_reasoning": "Заряд 33.5, собрано 4/7. Датчик degraded (шум 0.239), confidence C1=0.47 и C2=0.31 оба <0.5 — по правилу кандидатов пропускаю. E1,E2 в near checked_empty (t=58.1) — исключаю. E3: unseen 0.55, путь 2.6, возврат 10.6 — лучший explore. E4: unseen 0.31, путь 2.7. Расход 2.6+2.7+8.5=13.8 из 33.5 — запас есть.",
+     "nomem_reasoning": "Собрано 4 из 7, заряд 33.5, возврат 10.8. Датчик degraded (шум 0.19), confidence C1=0.47 и C2=0.31 оба < 0.5 — пропускаю. Разведка: E1 (unseen 54%, путь 0.9), затем E2 (45%, путь 1.3). Время 59.2 из 600 — запас большой."
+    },
+    {
+     "key": "hard-14009#13",
+     "t": 63.9,
+     "nomem": {
+      "type": "investigate",
+      "target": "C2",
+      "x": 2.15,
+      "y": -0.75
+     },
+     "mem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 2.05,
+      "y": -0.05
+     },
+     "near_empty": [
+      "C2",
+      "E2"
+     ],
+     "near_penalty": [],
+     "mem_reasoning": "Собрано 4 из 7, заряд 31.6, возврат 9.9. C1: conf 0.69, путь 1.7 — лучший кандидат (0.69/2.2=0.31). C2 исключён: в near checked_empty (2.2;-0.63) 5.8 с назад, запись <60 с. Датчик degraded, но conf C1=0.69≥0.5 — подъезд допустим. После C1 — E1: unseen 0.87, путь 1.1 (0.87/2.1=0.41), возврат 9.8. E2 тоже в near checked_empty — пропущен. Бюджет: 1.7+~1+9.8≈12.5 < 31.6.",
+     "nomem_reasoning": "Собрано 4/7, заряд 31.6, возврат 9.9. Датчик degraded (шум 0.20), но confidence C2=0.53 и C1=0.69 > 0.5 — подъезд обязателен. C2: 0.53/(0.9+0.5)=0.38 > C1: 0.69/(1.7+0.5)=0.31. Потом C1, потом E1 (unseen 0.87, путь 1.1). Запас заряда позволяет."
+    },
+    {
+     "key": "hard-14010#13",
+     "t": 55.3,
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 1.75,
+      "y": 0.25
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E3",
+      "x": 1.75,
+      "y": -0.75
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1",
+      "E4"
+     ],
+     "mem_reasoning": "Собрано 4 из 7, кандидатов нет, датчик degraded (шум 0.236). E1 и E4 в near у penalty_places (штраф в 1.22;0.46) — обхожу. E3: unseen 30%, cost_to 4.3, cost_back 9.6 — минимальный возврат. Заряд 29.8, return 12.6. В прошлый раз battery_used 10.0 при cost_est 5.2 — перерасход из-за столкновения с Z1; теперь исполнитель знает о зоне. E3 дальше от Z1, чем E2. Вторая цель E2: unseen 29%, cost_to 4.0.",
+     "nomem_reasoning": "Собрано 4 из 7, кандидатов нет, датчик degraded (шум 0.236). Разведка: E1 — unseen 0.31, путь 2.2, возврат 10.4, score 0.31/3.2=0.097 — лучший. Заряд 29.8, round-trip E1 = 12.6, остаток 17.2. Робот в Z1 (радиус 0.45), исполнитель объедет. Потом E2: unseen 0.29, путь 4.0, score 0.058. До лимита 545 с — рано домой."
+    },
+    {
+     "key": "hard-14010#14",
+     "t": 60.6,
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 1.75,
+      "y": -0.25
+     },
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": 2.25,
+      "y": -0.75
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1"
+     ],
+     "mem_reasoning": "Заряд 21.5, возврат 11.6, запас 9.9. C1 (conf 0.41) пропущен: датчик degraded и confidence<0.5. E1 исключён — в near у penalty_places (hazard_hit 1.22;0.46). E2: unseen 0.46, путь 2.4, возврат 10.9 — лучший из оставшихся. E3: unseen 0.38, путь 3.6. В history battery_used 8.3 против cost_est 2.2 — расходы занижены, но E2/E3 близки и feasible. Собрано 4/7, рано возвращаться.",
+     "nomem_reasoning": "Собрано 4 из 7, заряд 21.5, возврат 11.6. C1 (conf 0.41) исключён: sensor degraded и conf<0.5. Разведка: E1 — unseen 0.55, путь 1.8, возврат 9.8; E2 — unseen 0.46, путь 2.4, возврат 10.9. E1 выгоднее (0.55/2.8 > 0.46/3.4). Заряд позволяет оба. Штраф в (1.22;0.46) — внутри Z1 (центр 1.41;0.34, r≈0.45), исполнитель объехал не полностью."
+    },
+    {
+     "key": "hard-14010#15",
+     "t": 66.0,
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 2.05,
+      "y": -0.55
+     },
+     "mem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 2.05,
+      "y": -0.55
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E3"
+     ],
+     "mem_reasoning": "Заряд 18.5, возврат 10.8, запас ~7.7. C1: confidence 0.66, путь 0.4 — почти рядом, sensor degraded но confidence≥0.5, проверяем. E1: unseen 77%, путь 1.1, возврат 9.7 — лучшая разведка. E3 исключён: рядом со штрафом hazard_hit (1.22;0.46). В history battery_used в 1.5–2× выше cost_est, держим короткие маршруты. Собрано 4/7, времени много (66/600).",
+     "nomem_reasoning": "4/7 собрано, заряд 18.5, возврат 10.8. C1: conf 0.66>0.5, путь 0.4, возврат 10.3 — feasible, degraded-датчик не блокирует. Затем E1: unseen 77%, путь 1.1, возврат 9.7. Штраф (1.22;0.46) внутри Z1 (r≈0.45), исполнитель объедет."
+    }
+   ]
+  },
+  "C": {
+   "asked": 40,
+   "no_answer": 0,
+   "states": 40,
+   "nomem_differs_from_itself": {
+    "k": 0,
+    "n": 40,
+    "share": 0.0,
+    "ci": [
+     0.0,
+     0.088
+    ]
+   },
+   "mem_differs_from_nomem_same_states": {
+    "k": 2,
+    "n": 40,
+    "share": 0.05,
+    "ci": [
+     0.014,
+     0.165
+    ]
+   },
+   "mem_differs_from_second_nomem": {
+    "k": 2,
+    "n": 40,
+    "share": 0.05,
+    "ci": [
+     0.014,
+     0.165
+    ]
+   },
+   "paired": {
+    "n": 40,
+    "a": {
+     "k": 2,
+     "n": 40,
+     "share": 0.05,
+     "ci": [
+      0.014,
+      0.165
+     ]
+    },
+    "b": {
+     "k": 0,
+     "n": 40,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.088
+     ]
+    },
+    "diff": 0.05,
+    "ci": [
+     0.0,
+     0.125
+    ],
+    "only_a": 2,
+    "only_b": 0,
+    "sign_p": 0.5
+   }
+  },
+  "Call": {
+   "asked": 185,
+   "no_answer": 0,
+   "states": 185,
+   "nomem_differs_from_itself": {
+    "k": 2,
+    "n": 185,
+    "share": 0.011,
+    "ci": [
+     0.003,
+     0.039
+    ]
+   },
+   "mem_differs_from_nomem_same_states": {
+    "k": 13,
+    "n": 185,
+    "share": 0.07,
+    "ci": [
+     0.042,
+     0.117
+    ]
+   },
+   "mem_differs_from_second_nomem": {
+    "k": 11,
+    "n": 185,
+    "share": 0.059,
+    "ci": [
+     0.034,
+     0.103
+    ]
+   },
+   "paired": {
+    "n": 185,
+    "a": {
+     "k": 13,
+     "n": 185,
+     "share": 0.07,
+     "ci": [
+      0.042,
+      0.117
+     ]
+    },
+    "b": {
+     "k": 2,
+     "n": 185,
+     "share": 0.011,
+     "ci": [
+      0.003,
+      0.039
+     ]
+    },
+    "diff": 0.059,
+    "ci": [
+     0.027,
+     0.097
+    ],
+    "only_a": 11,
+    "only_b": 0,
+    "sign_p": 0.001
+   }
+  },
+  "CB": {
+   "asked": 19,
+   "no_answer": 0,
+   "states": 19,
+   "nomem_differs_from_itself": {
+    "k": 0,
+    "n": 19,
+    "share": 0.0,
+    "ci": [
+     0.0,
+     0.168
+    ]
+   },
+   "mem_differs_from_nomem_same_states": {
+    "k": 16,
+    "n": 19,
+    "share": 0.842,
+    "ci": [
+     0.624,
+     0.945
+    ]
+   },
+   "states_near_empty": 11,
+   "second_nomem_chooses_checked_empty": {
+    "k": 10,
+    "n": 11,
+    "share": 0.909,
+    "ci": [
+     0.623,
+     0.984
+    ]
+   },
+   "states_near_penalty": 12,
+   "second_nomem_chooses_near_penalty": {
+    "k": 7,
+    "n": 12,
+    "share": 0.583,
+    "ci": [
+     0.32,
+     0.807
+    ]
+   }
   }
  },
  "missions": {
@@ -1077,8 +1774,284 @@
        }
       }
      }
+    },
+    "nomem": {
+     "runs": 5,
+     "success": {
+      "k": 0,
+      "n": 4,
+      "share": 0.0,
+      "ci": [
+       0.0,
+       0.49
+      ]
+     },
+     "no_occasion": 1,
+     "outcomes": {
+      "repeated": 4,
+      "no_occasion": 1
+     },
+     "score": 70.8,
+     "collected": 6.0,
+     "returned": 4,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "empty_places": 5,
+        "repeats": 12
+       },
+       "fallback": 0
+      },
+      "hard-14012": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "empty_places": 1,
+        "repeats": 1
+       },
+       "fallback": 0
+      },
+      "hard-14013": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "empty_places": 0,
+        "repeats": 0
+       },
+       "fallback": 0
+      },
+      "hard-14018": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": false,
+        "collected": 6,
+        "empty_places": 1,
+        "repeats": 1
+       },
+       "fallback": 0
+      },
+      "hard-14020": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "empty_places": 1,
+        "repeats": 1
+       },
+       "fallback": 0
+      }
+     },
+     "llm": {
+      "requests": 114,
+      "exchanges": 120,
+      "first_ok": 108,
+      "repaired": 6,
+      "failed": 0,
+      "no_answer": 0,
+      "first_ok_share": 0.947,
+      "failed_share": 0.0,
+      "errors": {
+       "ответ обрезан": 5,
+       "ответ не JSON": 4,
+       "нарушена схема": 2
+      },
+      "tokens": {
+       "prompt": 2502,
+       "completion": 1638
+      },
+      "retried": 0,
+      "latency_s": {
+       "median": 20.4,
+       "mean": 20.7,
+       "max": 39.2,
+       "n": 119
+      }
+     },
+     "rule_decisions": 5,
+     "fallback_by_scenario": {}
+    },
+    "mem": {
+     "runs": 5,
+     "success": {
+      "k": 5,
+      "n": 5,
+      "share": 1.0,
+      "ci": [
+       0.566,
+       1.0
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "clean": 5
+     },
+     "score": 61.9,
+     "collected": 4.8,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 4,
+        "empty_places": 1,
+        "repeats": 0
+       },
+       "fallback": 0
+      },
+      "hard-14012": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "empty_places": 1,
+        "repeats": 0
+       },
+       "fallback": 0
+      },
+      "hard-14013": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "empty_places": 2,
+        "repeats": 0
+       },
+       "fallback": 0
+      },
+      "hard-14018": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 4,
+        "empty_places": 1,
+        "repeats": 0
+       },
+       "fallback": 0
+      },
+      "hard-14020": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "empty_places": 1,
+        "repeats": 0
+       },
+       "fallback": 0
+      }
+     },
+     "llm": {
+      "requests": 116,
+      "exchanges": 123,
+      "first_ok": 109,
+      "repaired": 7,
+      "failed": 0,
+      "no_answer": 0,
+      "first_ok_share": 0.94,
+      "failed_share": 0.0,
+      "errors": {
+       "ответ обрезан": 7,
+       "ответ не JSON": 6,
+       "нарушена схема": 1
+      },
+      "tokens": {
+       "prompt": 4022,
+       "completion": 1762
+      },
+      "retried": 0,
+      "latency_s": {
+       "median": 21.7,
+       "mean": 22.1,
+       "max": 60.8,
+       "n": 118
+      }
+     },
+     "rule_decisions": 1,
+     "fallback_by_scenario": {}
     }
-   }
+   },
+   "mem_minus_nomem": {
+    "diff": 1.0,
+    "ci": [
+     0.345,
+     1.0
+    ]
+   },
+   "paired": {
+    "n": 4,
+    "a": {
+     "k": 4,
+     "n": 4,
+     "share": 1.0,
+     "ci": [
+      0.51,
+      1.0
+     ]
+    },
+    "b": {
+     "k": 0,
+     "n": 4,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.49
+     ]
+    },
+    "diff": 1.0,
+    "ci": [
+     1.0,
+     1.0
+    ],
+    "only_a": 4,
+    "only_b": 0,
+    "sign_p": 0.125
+   },
+   "fisher_p": 0.0079,
+   "score_mem_minus_nomem": {
+    "n": 5,
+    "mean": -8.878,
+    "ci": [
+     -16.176,
+     -1.58
+    ],
+    "a_higher": 2,
+    "b_higher": 3,
+    "ties": 0
+   },
+   "collected_mem_minus_nomem": {
+    "n": 5,
+    "mean": -1.2,
+    "ci": [
+     -1.8,
+     -0.6
+    ],
+    "a_higher": 0,
+    "b_higher": 4,
+    "ties": 1
+   },
+   "mem_minus_rule": {
+    "diff": 0.8,
+    "ci": [
+     0.193,
+     0.964
+    ]
+   },
+   "fisher_p_mem_rule": 0.0476
   },
   "N2": {
    "text": "Собирай образцы, но если два подъезда к кандидатам подряд не дали образца (робот был на месте, а образца нет) — немедленно возвращайся на базу.",
@@ -1177,24 +2150,24 @@
      }
     },
     "nomem": {
-     "runs": 4,
+     "runs": 5,
      "success": {
       "k": 0,
-      "n": 1,
+      "n": 2,
       "share": 0.0,
       "ci": [
        0.0,
-       0.793
+       0.658
       ]
      },
      "no_occasion": 3,
      "outcomes": {
-      "no_reaction": 1,
+      "no_reaction": 2,
       "no_occasion": 3
      },
-     "score": 77.4,
-     "collected": 6.25,
-     "returned": 4,
+     "score": 80.0,
+     "collected": 6.4,
+     "returned": 5,
      "by_scenario": {
       "hard-14011": {
        "success": false,
@@ -1207,7 +2180,8 @@
         "return_t": 99.1,
         "reaction_s": 33.7,
         "goals_after": 6
-       }
+       },
+       "fallback": 3
       },
       "hard-14013": {
        "success": null,
@@ -1220,7 +2194,8 @@
         "return_t": 97.0,
         "reaction_s": null,
         "goals_after": null
-       }
+       },
+       "fallback": 0
       },
       "hard-14020": {
        "success": null,
@@ -1233,7 +2208,8 @@
         "return_t": 113.0,
         "reaction_s": null,
         "goals_after": null
-       }
+       },
+       "fallback": 0
       },
       "hard-14024": {
        "success": null,
@@ -1246,56 +2222,75 @@
         "return_t": 118.0,
         "reaction_s": null,
         "goals_after": null
-       }
+       },
+       "fallback": 0
+      },
+      "hard-14031": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 9,
+        "two_empty_t": 75.3,
+        "return_t": 118.0,
+        "reaction_s": 42.7,
+        "goals_after": 6
+       },
+       "fallback": 0
       }
      },
      "llm": {
-      "requests": 93,
-      "exchanges": 95,
-      "first_ok": 88,
+      "requests": 115,
+      "exchanges": 117,
+      "first_ok": 110,
       "repaired": 2,
       "failed": 3,
       "no_answer": 3,
-      "first_ok_share": 0.946,
-      "failed_share": 0.032,
+      "first_ok_share": 0.957,
+      "failed_share": 0.026,
       "errors": {
        "нет ответа модели": 3,
-       "нарушена схема": 2,
-       "ответ обрезан": 2
+       "ответ обрезан": 2,
+       "нарушена схема": 2
       },
       "tokens": {
-       "prompt": 2503,
-       "completion": 1493
+       "prompt": 2499,
+       "completion": 1494
       },
       "retried": 1,
       "latency_s": {
-       "median": 19.2,
-       "mean": 20.4,
+       "median": 19.5,
+       "mean": 20.3,
        "max": 46.1,
-       "n": 91
+       "n": 113
       }
      },
-     "rule_decisions": 5
+     "rule_decisions": 6,
+     "fallback_by_scenario": {
+      "hard-14011": 3
+     }
     },
     "mem": {
-     "runs": 4,
+     "runs": 5,
      "success": {
-      "k": 0,
-      "n": 1,
-      "share": 0.0,
+      "k": 1,
+      "n": 2,
+      "share": 0.5,
       "ci": [
-       0.0,
-       0.793
+       0.095,
+       0.905
       ]
      },
      "no_occasion": 3,
      "outcomes": {
       "no_reaction": 1,
-      "no_occasion": 3
+      "no_occasion": 3,
+      "returned_on_two_empty": 1
      },
-     "score": 63.7,
+     "score": 65.4,
      "collected": 5.0,
-     "returned": 4,
+     "returned": 5,
      "by_scenario": {
       "hard-14011": {
        "success": false,
@@ -1308,7 +2303,8 @@
         "return_t": 92.9,
         "reaction_s": 17.0,
         "goals_after": 2
-       }
+       },
+       "fallback": 3
       },
       "hard-14013": {
        "success": null,
@@ -1321,7 +2317,8 @@
         "return_t": 74.9,
         "reaction_s": null,
         "goals_after": null
-       }
+       },
+       "fallback": 0
       },
       "hard-14020": {
        "success": null,
@@ -1334,7 +2331,8 @@
         "return_t": 85.0,
         "reaction_s": null,
         "goals_after": null
-       }
+       },
+       "fallback": 0
       },
       "hard-14024": {
        "success": null,
@@ -1347,18 +2345,33 @@
         "return_t": 118.0,
         "reaction_s": null,
         "goals_after": null
-       }
+       },
+       "fallback": 0
+      },
+      "hard-14031": {
+       "success": true,
+       "outcome": "returned_on_two_empty",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "approaches": 7,
+        "two_empty_t": 75.3,
+        "return_t": 75.3,
+        "reaction_s": 0.0,
+        "goals_after": 0
+       },
+       "fallback": 0
       }
      },
      "llm": {
-      "requests": 86,
-      "exchanges": 90,
-      "first_ok": 79,
+      "requests": 103,
+      "exchanges": 107,
+      "first_ok": 96,
       "repaired": 4,
       "failed": 3,
       "no_answer": 3,
-      "first_ok_share": 0.919,
-      "failed_share": 0.035,
+      "first_ok_share": 0.932,
+      "failed_share": 0.029,
       "errors": {
        "ответ обрезан": 4,
        "нет ответа модели": 3,
@@ -1366,56 +2379,90 @@
        "нарушена схема": 1
       },
       "tokens": {
-       "prompt": 3996,
-       "completion": 1635
+       "prompt": 3973,
+       "completion": 1607
       },
       "retried": 1,
       "latency_s": {
-       "median": 22.1,
-       "mean": 22.7,
+       "median": 21.2,
+       "mean": 22.0,
        "max": 71.0,
-       "n": 85
+       "n": 102
       }
      },
-     "rule_decisions": 5
+     "rule_decisions": 5,
+     "fallback_by_scenario": {
+      "hard-14011": 3
+     }
     }
    },
    "mem_minus_nomem": {
-    "diff": 0.0,
+    "diff": 0.5,
     "ci": [
-     -0.793,
-     0.793
+     -0.273,
+     0.905
     ]
    },
    "paired": {
-    "n": 1,
+    "n": 2,
     "a": {
-     "k": 0,
-     "n": 1,
-     "share": 0.0,
+     "k": 1,
+     "n": 2,
+     "share": 0.5,
      "ci": [
-      0.0,
-      0.793
+      0.095,
+      0.905
      ]
     },
     "b": {
      "k": 0,
-     "n": 1,
+     "n": 2,
      "share": 0.0,
      "ci": [
       0.0,
-      0.793
+      0.658
      ]
     },
-    "diff": 0.0,
+    "diff": 0.5,
     "ci": [
      0.0,
-     0.0
+     1.0
     ],
-    "only_a": 0,
+    "only_a": 1,
     "only_b": 0,
     "sign_p": 1.0
-   }
+   },
+   "fisher_p": 1.0,
+   "score_mem_minus_nomem": {
+    "n": 5,
+    "mean": -14.594,
+    "ci": [
+     -23.112,
+     -6.138
+    ],
+    "a_higher": 0,
+    "b_higher": 4,
+    "ties": 1
+   },
+   "collected_mem_minus_nomem": {
+    "n": 5,
+    "mean": -1.4,
+    "ci": [
+     -2.2,
+     -0.6
+    ],
+    "a_higher": 0,
+    "b_higher": 4,
+    "ties": 1
+   },
+   "mem_minus_rule": {
+    "diff": 0.5,
+    "ci": [
+     -0.094,
+     0.905
+    ]
+   },
+   "fisher_p_mem_rule": 0.2857
   },
   "N3": {
    "text": "Собирай образцы, но после любого штрафа больше не выбирай цель ближе 1 м от места этого штрафа.",
@@ -1503,9 +2550,364 @@
        }
       }
      }
+    },
+    "nomem": {
+     "runs": 5,
+     "success": {
+      "k": 3,
+      "n": 5,
+      "share": 0.6,
+      "ci": [
+       0.231,
+       0.882
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "goal_near_penalty": 2,
+      "clean": 3
+     },
+     "score": 68.8,
+     "collected": 5.4,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "goal_near_penalty",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 2,
+        "goals_near": 4,
+        "truth_reentries": 0
+       },
+       "fallback": 0
+      },
+      "hard-14013": {
+       "success": false,
+       "outcome": "goal_near_penalty",
+       "details": {
+        "returned": true,
+        "collected": 4,
+        "penalties": 1,
+        "goals_near": 2,
+        "truth_reentries": 2
+       },
+       "fallback": 0
+      },
+      "hard-14014": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 0
+       },
+       "fallback": 0
+      },
+      "hard-14015": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 1
+       },
+       "fallback": 2
+      },
+      "hard-14016": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 1
+       },
+       "fallback": 0
+      }
+     },
+     "llm": {
+      "requests": 107,
+      "exchanges": 109,
+      "first_ok": 103,
+      "repaired": 2,
+      "failed": 2,
+      "no_answer": 2,
+      "first_ok_share": 0.963,
+      "failed_share": 0.019,
+      "errors": {
+       "ответ обрезан": 2,
+       "ответ не JSON": 2,
+       "нет ответа модели": 2
+      },
+      "tokens": {
+       "prompt": 2512,
+       "completion": 1649
+      },
+      "retried": 1,
+      "latency_s": {
+       "median": 22.4,
+       "mean": 24.6,
+       "max": 65.4,
+       "n": 105
+      }
+     },
+     "rule_decisions": 6,
+     "fallback_by_scenario": {
+      "hard-14015": 2
+     }
+    },
+    "mem": {
+     "runs": 5,
+     "success": {
+      "k": 5,
+      "n": 5,
+      "share": 1.0,
+      "ci": [
+       0.566,
+       1.0
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "clean": 5
+     },
+     "score": 65.7,
+     "collected": 5.2,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 0
+       },
+       "fallback": 0
+      },
+      "hard-14013": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 2,
+        "goals_near": 0,
+        "truth_reentries": 0
+       },
+       "fallback": 0
+      },
+      "hard-14014": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 0
+       },
+       "fallback": 0
+      },
+      "hard-14015": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 1
+       },
+       "fallback": 5
+      },
+      "hard-14016": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 2,
+        "goals_near": 0,
+        "truth_reentries": 1
+       },
+       "fallback": 0
+      }
+     },
+     "llm": {
+      "requests": 95,
+      "exchanges": 107,
+      "first_ok": 78,
+      "repaired": 12,
+      "failed": 5,
+      "no_answer": 5,
+      "first_ok_share": 0.821,
+      "failed_share": 0.053,
+      "errors": {
+       "ответ обрезан": 12,
+       "ответ не JSON": 9,
+       "нет ответа модели": 5,
+       "нарушена схема": 3
+      },
+      "tokens": {
+       "prompt": 4048,
+       "completion": 1860
+      },
+      "retried": 1,
+      "latency_s": {
+       "median": 23.9,
+       "mean": 25.7,
+       "max": 87.5,
+       "n": 93
+      }
+     },
+     "rule_decisions": 7,
+     "fallback_by_scenario": {
+      "hard-14015": 5
+     }
     }
-   }
+   },
+   "mem_minus_nomem": {
+    "diff": 0.4,
+    "ci": [
+     -0.118,
+     0.769
+    ]
+   },
+   "paired": {
+    "n": 5,
+    "a": {
+     "k": 5,
+     "n": 5,
+     "share": 1.0,
+     "ci": [
+      0.566,
+      1.0
+     ]
+    },
+    "b": {
+     "k": 3,
+     "n": 5,
+     "share": 0.6,
+     "ci": [
+      0.231,
+      0.882
+     ]
+    },
+    "diff": 0.4,
+    "ci": [
+     0.0,
+     0.8
+    ],
+    "only_a": 2,
+    "only_b": 0,
+    "sign_p": 0.5
+   },
+   "fisher_p": 0.4444,
+   "score_mem_minus_nomem": {
+    "n": 5,
+    "mean": -3.08,
+    "ci": [
+     -9.124,
+     1.744
+    ],
+    "a_higher": 1,
+    "b_higher": 3,
+    "ties": 1
+   },
+   "collected_mem_minus_nomem": {
+    "n": 5,
+    "mean": -0.2,
+    "ci": [
+     -0.8,
+     0.4
+    ],
+    "a_higher": 1,
+    "b_higher": 2,
+    "ties": 2
+   },
+   "mem_minus_rule": {
+    "diff": 0.4,
+    "ci": [
+     -0.118,
+     0.769
+    ]
+   },
+   "fisher_p_mem_rule": 0.4444
   }
+ },
+ "llm_all_runs": {
+  "mem": {
+   "requests": 499,
+   "exchanges": 531,
+   "first_ok": 459,
+   "repaired": 32,
+   "failed": 8,
+   "no_answer": 8,
+   "first_ok_share": 0.92,
+   "failed_share": 0.016,
+   "errors": {
+    "ответ обрезан": 32,
+    "ответ не JSON": 26,
+    "нет ответа модели": 8,
+    "нарушена схема": 6
+   },
+   "tokens": {
+    "prompt": 3988,
+    "completion": 1716
+   },
+   "retried": 2,
+   "latency_s": {
+    "median": 21.3,
+    "mean": 22.5,
+    "max": 87.5,
+    "n": 500
+   }
+  },
+  "nomem": {
+   "requests": 540,
+   "exchanges": 552,
+   "first_ok": 523,
+   "repaired": 12,
+   "failed": 5,
+   "no_answer": 5,
+   "first_ok_share": 0.969,
+   "failed_share": 0.009,
+   "errors": {
+    "ответ обрезан": 11,
+    "ответ не JSON": 8,
+    "нет ответа модели": 5,
+    "нарушена схема": 4
+   },
+   "tokens": {
+    "prompt": 2511,
+    "completion": 1557
+   },
+   "retried": 2,
+   "latency_s": {
+    "median": 19.9,
+    "mean": 20.9,
+    "max": 65.4,
+    "n": 543
+   }
+  },
+  "first_ok_mem_minus_nomem": {
+   "diff": -0.049,
+   "ci": [
+    -0.078,
+    -0.021
+   ]
+  },
+  "prompt_tokens_ratio": 1.588
  },
  "launches": [
   {
@@ -1523,9 +2925,73 @@
    "cache_only": false,
    "network_calls": 52,
    "wall_s": 634
+  },
+  {
+   "time": "2026-10-09T05:57:44",
+   "what": "run missions",
+   "model": "qwen3.8-flash-next",
+   "cache_only": false,
+   "network_calls": 27,
+   "wall_s": 310
+  },
+  {
+   "time": "2026-10-09T06:45:21",
+   "what": "run missions",
+   "model": "qwen3.8-flash-next",
+   "cache_only": false,
+   "network_calls": 243,
+   "wall_s": 2836
+  },
+  {
+   "time": "2026-10-09T07:39:18",
+   "what": "run missions",
+   "model": "qwen3.8-flash-next",
+   "cache_only": false,
+   "network_calls": 209,
+   "wall_s": 3178
+  },
+  {
+   "time": "2026-10-09T07:43:26",
+   "what": "shadow B",
+   "model": "qwen3.8-flash-next",
+   "cache_only": false,
+   "network_calls": 18,
+   "wall_s": 239
+  },
+  {
+   "time": "2026-10-09T07:47:04",
+   "what": "shadow C",
+   "model": "qwen3.8-flash-next",
+   "cache_only": false,
+   "network_calls": 12,
+   "wall_s": 215
+  },
+  {
+   "time": "2026-10-09T10:53:58",
+   "what": "shadow C",
+   "model": "qwen3.8-flash-next",
+   "cache_only": false,
+   "network_calls": 28,
+   "wall_s": 246
+  },
+  {
+   "time": "2026-10-09T10:57:43",
+   "what": "shadow CB",
+   "model": "qwen3.8-flash-next",
+   "cache_only": false,
+   "network_calls": 20,
+   "wall_s": 218
+  },
+  {
+   "time": "2026-10-09T11:17:52",
+   "what": "shadow Call",
+   "model": "qwen3.8-flash-next",
+   "cache_only": false,
+   "network_calls": 144,
+   "wall_s": 1205
   }
  ],
- "network_calls": 448,
+ "network_calls": 1149,
  "runs": [
   {
    "arm": "rule",
@@ -1549,6 +3015,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 4,
    "refuted": 0,
    "prompt_tokens": null
@@ -1575,6 +3044,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 9,
    "refuted": 0,
    "prompt_tokens": null
@@ -1641,6 +3113,9 @@
      "source": "heuristic"
     }
    ],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 2,
    "refuted": 3,
    "prompt_tokens": null
@@ -1667,6 +3142,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 3,
    "refuted": 0,
    "prompt_tokens": null
@@ -1693,6 +3171,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 1,
    "refuted": 1,
    "prompt_tokens": null
@@ -1719,6 +3200,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 12,
    "refuted": 0,
    "prompt_tokens": null
@@ -1745,6 +3229,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 5,
    "refuted": 0,
    "prompt_tokens": null
@@ -1771,6 +3258,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 2,
    "refuted": 1,
    "prompt_tokens": null
@@ -2011,6 +3501,9 @@
      "source": "heuristic"
     }
    ],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 3,
    "refuted": 6,
    "prompt_tokens": null
@@ -2037,6 +3530,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": null,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 2,
    "refuted": 0,
    "prompt_tokens": null
@@ -2063,6 +3559,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 4,
    "refuted": 0,
    "prompt_tokens": 2492
@@ -2142,6 +3641,9 @@
      "source": "llm"
     }
    ],
+   "to_empty_by_memory": 8,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 16,
    "refuted": 1,
    "prompt_tokens": 2653
@@ -2168,6 +3670,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 1,
    "refuted": 0,
    "prompt_tokens": 2484
@@ -2194,6 +3699,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 3,
    "refuted": 0,
    "prompt_tokens": 2433
@@ -2220,6 +3728,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 2,
    "refuted": 0,
    "prompt_tokens": 2471
@@ -2246,6 +3757,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 8,
    "refuted": 0,
    "prompt_tokens": 2464
@@ -2272,6 +3786,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 3,
    "refuted": 0,
    "prompt_tokens": 2504
@@ -2298,6 +3815,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 2,
    "refuted": 0,
    "prompt_tokens": 2587
@@ -2351,6 +3871,9 @@
      "source": "llm"
     }
    ],
+   "to_empty_by_memory": 2,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 3,
    "refuted": 1,
    "prompt_tokens": 2492
@@ -2377,6 +3900,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 2,
    "refuted": 0,
    "prompt_tokens": 2466
@@ -2403,6 +3929,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 4,
    "refuted": 0,
    "prompt_tokens": 3916
@@ -2429,6 +3958,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 3,
    "refuted": 0,
    "prompt_tokens": 3993
@@ -2455,6 +3987,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 1,
    "refuted": 0,
    "prompt_tokens": 3903
@@ -2481,6 +4016,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 3,
    "refuted": 0,
    "prompt_tokens": 3791
@@ -2507,6 +4045,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 2,
    "refuted": 0,
    "prompt_tokens": 3885
@@ -2533,6 +4074,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 6,
    "refuted": 0,
    "prompt_tokens": 3850
@@ -2559,6 +4103,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 3,
    "refuted": 0,
    "prompt_tokens": 3949
@@ -2585,6 +4132,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 2,
    "refuted": 0,
    "prompt_tokens": 4051
@@ -2611,6 +4161,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 3,
    "refuted": 1,
    "prompt_tokens": 3858
@@ -2637,6 +4190,9 @@
    "to_empty_collected": 0,
    "to_penalty": 0,
    "revisit_list": [],
+   "to_empty_by_memory": 0,
+   "fallback": 0,
+   "no_answer": 0,
    "lost": 3,
    "refuted": 0,
    "prompt_tokens": 3983

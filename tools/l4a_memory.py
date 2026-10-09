@@ -8,6 +8,7 @@
     ./px python tools/l4a_memory.py shadow C --retry-failed     # досчёт: сохранённые обрывы связи спросить заново
     ./px python tools/l4a_memory.py shadow Call                 # контроль шума на всех состояниях руки mem (сверх плана)
     ./px python tools/l4a_memory.py shadow CB                   # контроль шума на состояниях тени B (сверх плана)
+    ./px python tools/l4a_memory.py run missions --retry-failed --out L4a_redo   # прогоны с обрывами — заново
     ./px python tools/l4a_memory.py select                      # сценарии миссий N1–N3 по прогонам правила
     ./px python tools/l4a_memory.py run missions --missions N2  # миссии словами: правило, без памяти, с памятью
     ./px python tools/l4a_memory.py report                      # сводка runs/<--out>/summary.json и снимок чисел
@@ -56,12 +57,16 @@ def record(out, group, arm, seed):
     return RUNS / out / arm_dir(group, arm) / f'{LEVEL}-{seed}.json.gz'
 
 
-def make_llm(model, cache_only):
-    """Клиент модели: строгий повтор — только кэш; иначе что есть в кэше, повторяется как было, остальное — по сети."""
-    return llm_opts(model, True) if cache_only else {'client': CacheFirst(model)}
+def make_llm(model, cache_only, retry=False):
+    """Клиент модели: строгий повтор — только кэш; иначе что есть в кэше, повторяется как было, остальное — по сети.
+    retry — досчёт после обрывов связи: сохранённые отказы сервера спрашиваются заново (прогон с этого места
+    идёт своей дорогой, поэтому пишется в отдельную папку --out)."""
+    if cache_only:
+        return llm_opts(model, True)
+    return {'client': plain_client(model) if retry else CacheFirst(model)}
 
 
-def run_cell(cell, out, model, cache_only):
+def run_cell(cell, out, model, cache_only, retry=False):
     group, arm, seed = cell
     path = record(out, group, arm, seed)
     if path.is_file():
@@ -73,10 +78,11 @@ def run_cell(cell, out, model, cache_only):
     elif arm == 'nomem':
         # Память ведётся и пишется в запись (для тени B), но в запрос не попадает: запросы — как у adaptive_llm.
         run_episode(LEVEL, seed, 'adaptive_llm', experiment=out, arm=arm_dir(group, arm), truth=True,
-                    config={**EVERY, **mission, **asks, 'planner_memory': 'track'}, llm=make_llm(model, cache_only))
+                    config={**EVERY, **mission, **asks, 'planner_memory': 'track'},
+                    llm=make_llm(model, cache_only, retry))
     else:
         run_episode(LEVEL, seed, 'adaptive_llm_mem', experiment=out, arm=arm_dir(group, arm), truth=True,
-                    config={**EVERY, **mission, **asks}, llm=make_llm(model, cache_only))
+                    config={**EVERY, **mission, **asks}, llm=make_llm(model, cache_only, retry))
     return 'ok'
 
 
@@ -559,7 +565,8 @@ def cmd_run(args, seeds):
         cells = [(m, arm, seed) for m in args.missions for seed in own[m] for arm in args.arms if arm != 'rule']
     print(f'Прогонов: {len(cells)}, одновременно {args.jobs}, runs/{args.out}', flush=True)
     done = with_calls(args.out, f'run {args.what}', args.model, args.cache_only,
-                      lambda: run_cells(cells, lambda c: run_cell(c, args.out, args.model, args.cache_only), args.jobs,
+                      lambda: run_cells(cells, lambda c: run_cell(c, args.out, args.model, args.cache_only,
+                                                                    args.retry_failed), args.jobs,
                                         label=lambda c: f'{c[0]} {c[1]} {c[2]}'))
     print(f'Без результата: {sum(v is None for v in done.values())} из {len(cells)}')
 
@@ -606,7 +613,8 @@ def main():
     ap.add_argument('--jobs', type=int, choices=(1, 2), default=2, help='к серверу — не больше двух запросов сразу')
     ap.add_argument('--cache-only', action='store_true')
     ap.add_argument('--retry-failed', action='store_true',
-                    help='shadow: сохранённые в кэше обрывы связи спросить заново (ответы из кэша не трогаются)')
+                    help='сохранённые в кэше обрывы связи спросить заново (ответы из кэша не трогаются); для run — в '
+                         'отдельную папку --out с её mission_scenarios.json')
     args = ap.parse_args()
     args.out = args.out or ('L4a_dev' if args.dev else EXPERIMENT)
     seeds = parse_seeds(args.seeds) if args.seeds else (DEV if args.dev else FINAL)
