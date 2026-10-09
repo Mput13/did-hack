@@ -1,0 +1,2645 @@
+{
+ "experiment": "L4a",
+ "generated": "2026-10-09T05:52:43",
+ "level": "hard",
+ "seeds": [
+  14001,
+  14002,
+  14003,
+  14004,
+  14005,
+  14006,
+  14007,
+  14008,
+  14009,
+  14010
+ ],
+ "arms": {
+  "rule": {
+   "runs": 10,
+   "score": {
+    "n": 10,
+    "mean": 68.478,
+    "ci": [
+     59.175,
+     76.218
+    ]
+   },
+   "collected_share": 0.757,
+   "returned": 9,
+   "hazard_hits": 6,
+   "false_collects": 1,
+   "collisions": 0,
+   "decisions": {
+    "total": 200,
+    "per_run": 20.0
+   },
+   "to_empty": {
+    "total": 12,
+    "per_run": 1.2
+   },
+   "to_penalty": {
+    "total": 8,
+    "per_run": 0.8
+   },
+   "empty_places": {
+    "total": 12,
+    "per_run": 1.2
+   },
+   "lost": {
+    "total": 43,
+    "per_run": 4.3
+   },
+   "to_empty_collected": {
+    "total": 1,
+    "per_run": 0.1
+   }
+  },
+  "nomem": {
+   "runs": 10,
+   "score": {
+    "n": 10,
+    "mean": 67.619,
+    "ci": [
+     60.229,
+     73.379
+    ]
+   },
+   "collected_share": 0.757,
+   "returned": 9,
+   "hazard_hits": 8,
+   "false_collects": 0,
+   "collisions": 0,
+   "decisions": {
+    "total": 207,
+    "per_run": 20.7
+   },
+   "to_empty": {
+    "total": 6,
+    "per_run": 0.6
+   },
+   "to_penalty": {
+    "total": 0,
+    "per_run": 0.0
+   },
+   "empty_places": {
+    "total": 2,
+    "per_run": 0.2
+   },
+   "lost": {
+    "total": 44,
+    "per_run": 4.4
+   },
+   "to_empty_collected": {
+    "total": 2,
+    "per_run": 0.2
+   },
+   "asked": 204,
+   "same_as_rule": {
+    "k": 179,
+    "n": 204,
+    "share": 0.877,
+    "ci": [
+     0.825,
+     0.916
+    ]
+   },
+   "llm": {
+    "requests": 204,
+    "exchanges": 206,
+    "first_ok": 202,
+    "repaired": 2,
+    "failed": 0,
+    "no_answer": 0,
+    "first_ok_share": 0.99,
+    "failed_share": 0.0,
+    "errors": {
+     "ответ не JSON": 2,
+     "ответ обрезан": 2
+    },
+    "tokens": {
+     "prompt": 2522,
+     "completion": 1496
+    },
+    "retried": 0,
+    "latency_s": {
+     "median": 18.9,
+     "mean": 19.5,
+     "max": 59.3,
+     "n": 206
+    }
+   },
+   "prompt_tokens_per_run_mean": 2505
+  },
+  "mem": {
+   "runs": 10,
+   "score": {
+    "n": 10,
+    "mean": 68.566,
+    "ci": [
+     61.013,
+     76.727
+    ]
+   },
+   "collected_share": 0.757,
+   "returned": 9,
+   "hazard_hits": 6,
+   "false_collects": 0,
+   "collisions": 0,
+   "decisions": {
+    "total": 191,
+    "per_run": 19.1
+   },
+   "to_empty": {
+    "total": 0,
+    "per_run": 0.0
+   },
+   "to_penalty": {
+    "total": 0,
+    "per_run": 0.0
+   },
+   "empty_places": {
+    "total": 1,
+    "per_run": 0.1
+   },
+   "lost": {
+    "total": 30,
+    "per_run": 3.0
+   },
+   "to_empty_collected": {
+    "total": 0,
+    "per_run": 0.0
+   },
+   "asked": 185,
+   "same_as_rule": {
+    "k": 159,
+    "n": 185,
+    "share": 0.859,
+    "ci": [
+     0.802,
+     0.902
+    ]
+   },
+   "llm": {
+    "requests": 185,
+    "exchanges": 194,
+    "first_ok": 176,
+    "repaired": 9,
+    "failed": 0,
+    "no_answer": 0,
+    "first_ok_share": 0.951,
+    "failed_share": 0.0,
+    "errors": {
+     "ответ обрезан": 9,
+     "ответ не JSON": 8,
+     "нарушена схема": 1
+    },
+    "tokens": {
+     "prompt": 3944,
+     "completion": 1669
+    },
+    "retried": 0,
+    "latency_s": {
+     "median": 20.4,
+     "mean": 21.3,
+     "max": 53.8,
+     "n": 187
+    }
+   },
+   "prompt_tokens_per_run_mean": 3918
+  }
+ },
+ "diffs": {
+  "mem-nomem": {
+   "score": {
+    "n": 10,
+    "mean": 0.947,
+    "ci": [
+     -4.19,
+     5.54
+    ],
+    "a_higher": 3,
+    "b_higher": 5,
+    "ties": 2
+   },
+   "collected": {
+    "n": 10,
+    "mean": 0.0,
+    "ci": [
+     -0.4,
+     0.4
+    ],
+    "a_higher": 2,
+    "b_higher": 2,
+    "ties": 6
+   },
+   "penalties": {
+    "n": 10,
+    "mean": -0.2,
+    "ci": [
+     -0.7,
+     0.2
+    ],
+    "a_higher": 1,
+    "b_higher": 2,
+    "ties": 7
+   },
+   "decisions": {
+    "n": 10,
+    "mean": -1.6,
+    "ci": [
+     -5.1,
+     0.9
+    ],
+    "a_higher": 3,
+    "b_higher": 4,
+    "ties": 3
+   },
+   "to_empty": {
+    "n": 10,
+    "mean": -0.6,
+    "ci": [
+     -1.6,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 2,
+    "ties": 8
+   },
+   "to_penalty": {
+    "n": 10,
+    "mean": 0.0,
+    "ci": [
+     0.0,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 0,
+    "ties": 10
+   },
+   "empty_places": {
+    "n": 10,
+    "mean": -0.1,
+    "ci": [
+     -0.3,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 1,
+    "ties": 9
+   },
+   "lost": {
+    "n": 10,
+    "mean": -1.4,
+    "ci": [
+     -4.1,
+     0.2
+    ],
+    "a_higher": 1,
+    "b_higher": 2,
+    "ties": 7
+   }
+  },
+  "mem-rule": {
+   "score": {
+    "n": 10,
+    "mean": 0.088,
+    "ci": [
+     -5.252,
+     5.135
+    ],
+    "a_higher": 3,
+    "b_higher": 7,
+    "ties": 0
+   },
+   "collected": {
+    "n": 10,
+    "mean": 0.0,
+    "ci": [
+     -0.4,
+     0.503
+    ],
+    "a_higher": 1,
+    "b_higher": 2,
+    "ties": 7
+   },
+   "penalties": {
+    "n": 10,
+    "mean": -0.1,
+    "ci": [
+     -0.6,
+     0.4
+    ],
+    "a_higher": 2,
+    "b_higher": 2,
+    "ties": 6
+   },
+   "decisions": {
+    "n": 10,
+    "mean": -0.9,
+    "ci": [
+     -4.0,
+     2.0
+    ],
+    "a_higher": 4,
+    "b_higher": 5,
+    "ties": 1
+   },
+   "to_empty": {
+    "n": 10,
+    "mean": -1.2,
+    "ci": [
+     -3.0,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 2,
+    "ties": 8
+   },
+   "to_penalty": {
+    "n": 10,
+    "mean": -0.8,
+    "ci": [
+     -2.4,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 1,
+    "ties": 9
+   },
+   "empty_places": {
+    "n": 10,
+    "mean": -1.1,
+    "ci": [
+     -2.4,
+     -0.1
+    ],
+    "a_higher": 0,
+    "b_higher": 4,
+    "ties": 6
+   },
+   "lost": {
+    "n": 10,
+    "mean": -1.3,
+    "ci": [
+     -3.1,
+     0.1
+    ],
+    "a_higher": 2,
+    "b_higher": 4,
+    "ties": 4
+   }
+  },
+  "nomem-rule": {
+   "score": {
+    "n": 10,
+    "mean": -0.859,
+    "ci": [
+     -3.709,
+     1.777
+    ],
+    "a_higher": 3,
+    "b_higher": 6,
+    "ties": 1
+   },
+   "collected": {
+    "n": 10,
+    "mean": 0.0,
+    "ci": [
+     -0.4,
+     0.4
+    ],
+    "a_higher": 2,
+    "b_higher": 2,
+    "ties": 6
+   },
+   "penalties": {
+    "n": 10,
+    "mean": 0.1,
+    "ci": [
+     -0.2,
+     0.4
+    ],
+    "a_higher": 2,
+    "b_higher": 1,
+    "ties": 7
+   },
+   "decisions": {
+    "n": 10,
+    "mean": 0.7,
+    "ci": [
+     -0.8,
+     2.0
+    ],
+    "a_higher": 4,
+    "b_higher": 2,
+    "ties": 4
+   },
+   "to_empty": {
+    "n": 10,
+    "mean": -0.6,
+    "ci": [
+     -2.4,
+     0.9
+    ],
+    "a_higher": 1,
+    "b_higher": 2,
+    "ties": 7
+   },
+   "to_penalty": {
+    "n": 10,
+    "mean": -0.8,
+    "ci": [
+     -2.4,
+     0.0
+    ],
+    "a_higher": 0,
+    "b_higher": 1,
+    "ties": 9
+   },
+   "empty_places": {
+    "n": 10,
+    "mean": -1.0,
+    "ci": [
+     -2.3,
+     0.0
+    ],
+    "a_higher": 1,
+    "b_higher": 4,
+    "ties": 5
+   },
+   "lost": {
+    "n": 10,
+    "mean": 0.1,
+    "ci": [
+     -1.4,
+     2.0
+    ],
+    "a_higher": 2,
+    "b_higher": 3,
+    "ties": 5
+   }
+  }
+ },
+ "same_as_rule_mem_minus_nomem": {
+  "diff": -0.018,
+  "ci": [
+   -0.087,
+   0.049
+  ]
+ },
+ "first_ok_mem_minus_nomem": {
+  "diff": -0.039,
+  "ci": [
+   -0.081,
+   -0.005
+  ]
+ },
+ "prompt_tokens_ratio": 1.564,
+ "shadow": {
+  "A": {
+   "states": 185,
+   "both_answered": 185,
+   "mem_differs_from_nomem": {
+    "k": 13,
+    "n": 185,
+    "share": 0.07,
+    "ci": [
+     0.042,
+     0.117
+    ]
+   },
+   "mem_differs_from_rule": {
+    "k": 26,
+    "n": 185,
+    "share": 0.141,
+    "ci": [
+     0.098,
+     0.198
+    ]
+   },
+   "nomem_differs_from_rule": {
+    "k": 20,
+    "n": 185,
+    "share": 0.108,
+    "ci": [
+     0.071,
+     0.161
+    ]
+   },
+   "diff_kinds": {
+    "explore вместо investigate": 2,
+    "investigate вместо investigate": 1,
+    "explore вместо goto": 1,
+    "explore вместо explore": 9
+   },
+   "states_memory_points_to_goal": 2,
+   "choose_checked_empty": {
+    "n": 2,
+    "a": {
+     "k": 0,
+     "n": 2,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.658
+     ]
+    },
+    "b": {
+     "k": 1,
+     "n": 2,
+     "share": 0.5,
+     "ci": [
+      0.095,
+      0.905
+     ]
+    },
+    "diff": -0.5,
+    "ci": [
+     -1.0,
+     0.0
+    ],
+    "only_a": 0,
+    "only_b": 1,
+    "sign_p": 1.0
+   },
+   "rule_chooses_checked_empty": {
+    "k": 1,
+    "n": 2,
+    "share": 0.5,
+    "ci": [
+     0.095,
+     0.905
+    ]
+   },
+   "states_near_penalty": 11,
+   "choose_near_penalty": {
+    "n": 11,
+    "a": {
+     "k": 2,
+     "n": 11,
+     "share": 0.182,
+     "ci": [
+      0.051,
+      0.477
+     ]
+    },
+    "b": {
+     "k": 6,
+     "n": 11,
+     "share": 0.545,
+     "ci": [
+      0.28,
+      0.787
+     ]
+    },
+    "diff": -0.364,
+    "ci": [
+     -0.636,
+     -0.091
+    ],
+    "only_a": 0,
+    "only_b": 4,
+    "sign_p": 0.125
+   },
+   "differing": [
+    {
+     "key": "hard-14001#13",
+     "t": 57.6,
+     "trigger": "sensor_degraded",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 1.75,
+      "y": -0.75
+     },
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 1.85,
+      "y": -1.25
+     },
+     "rule": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 1.85,
+      "y": -1.25
+     },
+     "near_empty": [],
+     "near_penalty": [],
+     "mem_reasoning": "Заряд 25.9, возврат 10.6. C1 (conf 0.61) прервана sensor_degraded в history, датчик всё ещё degraded — не повторяю. E1: unseen 0.33, путь 1.9, возврат 9.9 — лучший explore. 3 образца ещё не найдены, запас позволяет разведку.",
+     "nomem_reasoning": "4/7 образцов, заряд 25.9, возврат 10.6. C1: conf 0.61 ≥ 0.5 при degraded-датчике — подъезжаем. Путь 3.1, возврат 10.7, запас 12.1. Затем E1: unseen 0.33, путь 1.9, возврат 9.9. Скачок расхода 1.3 на 7 см: робот в S2 (1.9;0.05,r=0.2), расстояние ~0.14 м — внутри зоны."
+    },
+    {
+     "key": "hard-14002#4",
+     "t": 8.7,
+     "trigger": "candidate_lost",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "investigate",
+      "target": "C2",
+      "x": 0.25,
+      "y": -0.45
+     },
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": -0.55,
+      "y": 0.65
+     },
+     "rule": {
+      "type": "investigate",
+      "target": "C1",
+      "x": -0.55,
+      "y": 0.65
+     },
+     "near_empty": [],
+     "near_penalty": [],
+     "mem_reasoning": "Кандидат C1 (-0.55;0.65) только что lost (t=8.6), через 0.1 с вернулся с conf 0.4 — мигание датчика, не беру. C2: conf 0.32, путь 3.0, возврат 6.6, feasible. Заряд 55.9, запас большой. После C2 — E1: unseen 25%, путь 1.5, возврат 4.2. Собрано 1 из 7, время 8.7/600 — рано домой.",
+     "nomem_reasoning": "Собрано 1 из 7, заряд 55.9, возврат 3.6 — запас большой. Кандидат потерян, но C1 (conf 0.4, путь 2.8, возврат 5.0) и C2 (conf 0.32, путь 3.0, возврат 6.6) оба feasible. C1 выгоднее: 0.4/3.3=0.12 против 0.32/3.5=0.09. Датчик ok, reading 0.47. После C1 — E1 (unseen 0.25, путь 1.5, возврат 4.2), затем C2. S1 (×1.93) suspected, учтена в cost."
+    },
+    {
+     "key": "hard-14003#11",
+     "t": 69.2,
+     "trigger": "sensor_degraded",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E1",
+      "x": -1.25,
+      "y": 1.25
+     },
+     "nomem": {
+      "type": "goto",
+      "x": -2.1,
+      "y": 1.0
+     },
+     "rule": {
+      "type": "explore",
+      "target": "E1",
+      "x": -1.25,
+      "y": 1.25
+     },
+     "near_empty": [],
+     "near_penalty": [],
+     "mem_reasoning": "Собрано 6 из 7, остался 1 образец. Датчик деградировал (шум 0.163 вместо 0.05), кандидатов нет. Заряд 26.0, возврат 8.3 — запас есть. E1: unseen 0.28, путь 1.7, возврат 5.4 — лучший по unseen/(cost+1)=0.104. E3: unseen 0.28, путь 3.7, возврат 3.4 — покрывает район H10 (-2.1;1.0), куда последняя подцель не доехала (interrupted by sensor_degraded). Не повторяю ту же точку, иду через разведку.",
+     "nomem_reasoning": "Собрано 6 из 7, нужен ещё 1 образец. Датчик деградирован (шум 0.163), кандидатов нет. Чтение 0.44 при шуме 0.163 — сигнал выше шума, возможно реальный образец. Гипотеза H10 указывает на (-2.1; 1.0), в списках такой точки нет — еду туда через goto. Заряд 26.0, возврат 8.3, запас достаточен. После проверки H10 — разведка E1 (unseen 0.28, путь 1.7, возврат 5.4)."
+    },
+    {
+     "key": "hard-14006#16",
+     "t": 55.6,
+     "trigger": "sensor_degraded",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E1",
+      "x": -0.25,
+      "y": 1.75
+     },
+     "nomem": {
+      "type": "explore",
+      "target": "E2",
+      "x": -0.25,
+      "y": -1.75
+     },
+     "rule": {
+      "type": "explore",
+      "target": "E2",
+      "x": -0.25,
+      "y": -1.75
+     },
+     "near_empty": [],
+     "near_penalty": [],
+     "mem_reasoning": "Сенсор деградировал, кандидатов нет. E2 дважды прерывалась (model_mismatch, sensor_degraded) — сенсор всё ещё degraded, не беру. Среди оставшихся: E1 unseen 0.3, score 0.3/10.2=0.029; E3 0.28/10.7=0.026; E4 0.2/7.8=0.026. E1 лучший. Заряд 31.9, E1: 9.2+7.9=17.1, остаток 14.8 — запас есть. Потом E4 (6.8+5.7=12.5). 4 из 7 собрано, 3 ещё нужны — на базу рано.",
+     "nomem_reasoning": "Собрано 4 из 7, заряд 31.9, возврат 8.7. Кандидатов нет: датчик degraded (reading 0.12, noise 0.149). Разведка: E2 — unseen 18%, путь 5.0, возврат 6.2, баланс 0.18/6.0=0.03; E1 — unseen 30%, путь 9.2, возврат 7.9, баланс 0.3/10.2=0.029. Время 55.6 из 600, запас заряда после E2+E1 ≈ 31.9−11.2−17.1=3.6 — на грани, но исполнитель пересчитает. S1 (×3.72) подтверждён, в оценках учтён."
+    },
+    {
+     "key": "hard-14006#5",
+     "t": 13.5,
+     "trigger": "candidate_lost",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": -0.25,
+      "y": 1.25
+     },
+     "nomem": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.25,
+      "y": -0.55
+     },
+     "rule": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.25,
+      "y": -0.55
+     },
+     "near_empty": [],
+     "near_penalty": [],
+     "mem_reasoning": "Собрано 1 из 7, заряд 54.2, возврат 4.7 — запас большой. Кандидат C1 (0.25;-0.55) confidence 0.3 — то же место, где последняя подцель кончилась lost (history t=13.4), не беру. E1 (0.25;0.25) была interrupted по candidate_found, но кандидат уже lost — причина ушла, можно вернуться. E2: unseen 0.19, путь 2.5, ratio 0.054 — лучший из свежих. E1 ratio 0.058, но после E2. Грунтов и опасностей нет, датчик ok (reading 0.39).",
+     "nomem_reasoning": "Собрано 1 из 7, заряд 54.2, возврат 4.7 — запас большой. Триггер candidate_lost: C1 упал до 0.3, но sensor ok и feasible true — подъезд уточнит. C1: 0.3/(3.7+0.5)=0.071 — лучший балл. Затем E1: unseen 0.19, путь 2.3, возврат 6.9, балл 0.058. Грунтов и опасностей нет, время 13.5 из 600 — рано возвращаться."
+    },
+    {
+     "key": "hard-14007#12",
+     "t": 47.8,
+     "trigger": "model_mismatch",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": 1.75,
+      "y": -0.75
+     },
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 0.25,
+      "y": -1.75
+     },
+     "rule": {
+      "type": "explore",
+      "target": "E1",
+      "x": 0.25,
+      "y": -1.75
+     },
+     "near_empty": [],
+     "near_penalty": [],
+     "mem_reasoning": "Собрано 4 из 7, заряд 32.4, возврат 12.3. Кандидатов нет — разведка. E1 и E2 дают равный балл (0.33/11.1≈0.22/7.4), но E1 (0.25;−1.75) был прерван model_mismatch 2.4 с назад, а путь к нему проходит через S1 (×4.0, подтверждён) и зону расхождения (0.8;0.9). E2 (1.75;−0.75): путь 6.4, возврат 9.6, обходит S1. В history t=39.6 battery_used 9.3 при cost_est 2.7 — расходы у S1 занижены, но у текущей позиции (1.3;1.6) расход ×1.0, дешевле прогноза. E4 как вторая: unseen 0.30, возврат 5.0.",
+     "nomem_reasoning": "Собрано 4 из 7, кандидатов нет — разведка. E1: unseen 0.33, путь 10.1, возврат 6.9; E2: unseen 0.22, путь 6.4, возврат 9.6 — выгода равна (0.33/11.1 ≈ 0.22/7.4), E1 даёт больше информации. Заряд 32.4, после E1 и возврата: 32.4−10.1−6.9=15.4, запас есть. Тревоги: у S1 (×4.0) расход выше прогноза ×1.8; у (1.3;1.6) расход ×1.0 вместо ×2.2 — модель завышает."
+    },
+    {
+     "key": "hard-14007#16",
+     "t": 58.4,
+     "trigger": "candidate_found",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": 1.25,
+      "y": -0.25
+     },
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 1.75,
+      "y": -0.75
+     },
+     "rule": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 1.65,
+      "y": -1.15
+     },
+     "near_empty": [],
+     "near_penalty": [],
+     "mem_reasoning": "Заряд 20.9, возврат 12.5, запас 8.4. Собрано 4 из 7. C1 (conf 0.32) пропущен: датчик degraded и conf<0.5 — правило исключения. E1 (1.75;-0.75) дважды прерван candidate_found в history (t=58.2, 58.3) — причина не ушла, не беру. E2: unseen 0.19/(1.2+1)=0.086, путь 1.2, возврат 8.5 — лучший из оставшихся. E4: 0.17/(2.8+1)=0.045 — второй. В history t=39.6 расход 9.3 при оценке 2.7 — осторожничаю с дальними целями.",
+     "nomem_reasoning": "Заряд 20.9, возврат 12.5, запас 8.4. Собрано 4 из 7. C1 пропущен: sensor degraded и confidence 0.32 < 0.5. Разведка: E1 (unseen 0.41, путь 1.5, возврат 9.7) — лучший балл 0.164. Затем E2 (unseen 0.19, путь 1.2, возврат 8.5) — балл 0.086. Робот сейчас в 0.175 м от центра S1 (радиус 0.2), что объясняет шум датчика."
+    },
+    {
+     "key": "hard-14008#13",
+     "t": 51.6,
+     "trigger": "sensor_degraded",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": 0.25,
+      "y": -0.25
+     },
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 0.75,
+      "y": -0.75
+     },
+     "rule": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 0.25,
+      "y": -0.45
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1"
+     ],
+     "mem_reasoning": "Заряд 20.1, возврат 9.2, запас 10.9. Собрано 5 из 7. Датчик degraded, C1 confidence 0.49 < 0.5 — пропускаю. E1 в near penalty_places (штраф Z1 в 1.61;-0.62) — беру другую. E2: unseen 0.48→0.45, score 0.45/4.8=0.094 — лучший. E3: 0.42/5.7=0.074 — второй. Последняя подцель (0.25;-0.45) прервана sensor_degraded; E2 (0.25;-0.25) — explore, не investigate, и датчик влияет на сбор, не на разведку. Робот в зоне Z1 — E2 уводит на 1.5 м прочь.",
+     "nomem_reasoning": "Собрано 5 из 7, заряд 20.1, возврат 9.2. Датчик degraded (шум 0.13), C1 confidence 0.49 < 0.5 — пропускаю по правилу. Робот внутри Z1 (штраф). E1: unseen 48%, путь 2.2, возврат 7.1, балл 0.48/3.2=0.15 — лучший. E2: unseen 45%, путь 3.8, балл 0.45/4.8=0.094. Зоны S1–S4 подтверждены, в оценках учтены."
+    },
+    {
+     "key": "hard-14009#12",
+     "t": 59.2,
+     "trigger": "candidate_found",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E3",
+      "x": 1.75,
+      "y": 0.25
+     },
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 2.25,
+      "y": -0.25
+     },
+     "rule": {
+      "type": "investigate",
+      "target": "C2",
+      "x": 2.35,
+      "y": -0.75
+     },
+     "near_empty": [
+      "C2",
+      "E1",
+      "E2"
+     ],
+     "near_penalty": [],
+     "mem_reasoning": "Заряд 33.5, собрано 4/7. Датчик degraded (шум 0.239), confidence C1=0.47 и C2=0.31 оба <0.5 — по правилу кандидатов пропускаю. E1,E2 в near checked_empty (t=58.1) — исключаю. E3: unseen 0.55, путь 2.6, возврат 10.6 — лучший explore. E4: unseen 0.31, путь 2.7. Расход 2.6+2.7+8.5=13.8 из 33.5 — запас есть.",
+     "nomem_reasoning": "Собрано 4 из 7, заряд 33.5, возврат 10.8. Датчик degraded (шум 0.19), confidence C1=0.47 и C2=0.31 оба < 0.5 — пропускаю. Разведка: E1 (unseen 54%, путь 0.9), затем E2 (45%, путь 1.3). Время 59.2 из 600 — запас большой."
+    },
+    {
+     "key": "hard-14010#11",
+     "t": 46.8,
+     "trigger": "sensor_degraded",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": 1.75,
+      "y": -0.75
+     },
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 1.75,
+      "y": 0.25
+     },
+     "rule": {
+      "type": "explore",
+      "target": "E1",
+      "x": 1.75,
+      "y": 0.25
+     },
+     "near_empty": [],
+     "near_penalty": [],
+     "mem_reasoning": "Датчик деградировал (шум 0.14), кандидатов нет. Собрано 4 из 7. Последняя цель E1 (1.75;0.25) прервана именно из-за sensor_degraded — пока датчик не восстановился, не повторяю. E2: unseen 25%, путь 7.3, возврат 9.6, feasible. Заряд 41.6, возврат с базы 4.9 — запас большой. Вторая цель E3: unseen 19%, путь 5.6, ближе к E2.",
+     "nomem_reasoning": "Собрано 4 из 7, кандидатов нет — датчик degraded (шум 0.14), образцы не детектируются. Разведка: E1 unseen 0.25, путь 6.2, возврат 10.8; E2 unseen 0.25, путь 7.3, возврат 9.6. E1 выгоднее: 0.25/7.2 > 0.25/8.3. Заряд 41.6, запас после E1 и E2 остаётся >18. Время 46.8 из 600 — рано возвращаться."
+    },
+    {
+     "key": "hard-14010#13",
+     "t": 55.8,
+     "trigger": "hazard",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E4",
+      "x": 1.25,
+      "y": -0.75
+     },
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 1.75,
+      "y": -0.25
+     },
+     "rule": {
+      "type": "explore",
+      "target": "E1",
+      "x": 1.75,
+      "y": -0.25
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1",
+      "E2"
+     ],
+     "mem_reasoning": "Штраф hazard_hit в (1.23;0.42) — робот в центре Z1. E1,E2 в near у penalty_places — исключаю. E4: unseen 0.26, путь 3.9, возврат 8.4, направление на юг — прочь от Z1 и S1. E3: unseen 0.23, путь 3.2, возврат 11.4. Заряд 29.8, возврат 12.4 — запас есть. В прошлой поездке battery_used 10.1 при cost_est 5.2 (×2), но путь шёл через Z1; E4 ведёт на юг, мимо S1 и Z1, расход должен быть ближе к оценке. Датчик degraded — кандидатов нет, разведка.",
+     "nomem_reasoning": "Собрано 4 из 7, кандидатов нет, датчик degraded (шум 0.329, разброс 0.14). Робот в Z1 — исполнитель объедет. E1: unseen 33%, путь 2.8, возврат 9.6, заряд 29.8, запас 17.4. E2: unseen 27%, путь 2.3, возврат 14.6. Время 55.8 из 600 — рано возвращаться."
+    },
+    {
+     "key": "hard-14010#16",
+     "t": 65.6,
+     "trigger": "candidate_found",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E2",
+      "x": 2.25,
+      "y": -0.75
+     },
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 1.75,
+      "y": -0.25
+     },
+     "rule": {
+      "type": "investigate",
+      "target": "C1",
+      "x": 1.85,
+      "y": -0.55
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1"
+     ],
+     "mem_reasoning": "Сенсор degraded, C1 confidence 0.42<0.5 — пропускаю. E1 в near у penalty_places (hazard_hit 1.23;0.42), беру E2: unseen 40%, путь 2.4, возврат 11.0, заряд 25.6 — запас 12.2. Затем E3: unseen 30%, путь 1.8, возврат 10.4. Собрано 4 из 7, времени много (65/600).",
+     "nomem_reasoning": "Собрано 4 из 7, заряд 25.6, возврат 8.6 — запас 17.0. C1 пропущен: sensor degraded и confidence 0.42 < 0.5. Разведка: E1 (unseen 0.51, путь 1.6, возврат 9.7) — лучший балл 0.51/2.6=0.20. Затем E2 (0.4/3.4=0.12). Время 65.6 из 600 — рано домой."
+    },
+    {
+     "key": "hard-14010#17",
+     "t": 66.1,
+     "trigger": "candidate_found",
+     "mem_ok": true,
+     "nomem_ok": true,
+     "mem": {
+      "type": "explore",
+      "target": "E3",
+      "x": 1.75,
+      "y": -1.25
+     },
+     "nomem": {
+      "type": "explore",
+      "target": "E1",
+      "x": 1.75,
+      "y": -0.25
+     },
+     "rule": {
+      "type": "investigate",
+      "target": "C2",
+      "x": 1.15,
+      "y": -0.75
+     },
+     "near_empty": [],
+     "near_penalty": [
+      "E1"
+     ],
+     "mem_reasoning": "Заряд 25.6, возврат 8.6, собрано 4/7. Датчик degraded, confidence C1=0.48 и C2=0.41 оба <0.5 — кандидатов пропускаю. E1 рядом со штрафом hazard_hit (penalty_places near E1) — беру E3: unseen 0.38/(1.8+1)=0.136, лучший из оставшихся. Затем E2: 0.43/(2.4+1)=0.126. E3 не проверялся ранее, E2 был прерван candidate_found, но теперь кандидатов не берём из-за датчика.",
+     "nomem_reasoning": "Собрано 4 из 7, заряд 25.6, возврат 8.6. Датчик degraded, confidence C1=0.48 и C2=0.41 оба <0.5 — по правилу пропускаю кандидатов. Разведка: E1 (unseen 0.6, путь 1.6, возврат 9.7) выгоднее E3 (0.38/2.8=0.14) и E2 (0.43/3.4=0.13). После E1 запас 25.6−1.6−9.7=14.3, хватит на E3 (путь 1.8, возврат 10.4). Время 66/600 — запас большой."
+    }
+   ]
+  }
+ },
+ "missions": {
+  "N1": {
+   "text": "Собирай образцы, но не проверяй одно и то же место дважды: если робот уже был на месте и образца там не оказалось, больше не выбирай цель ближе 0,5 м от этого места.",
+   "scenarios": [
+    14011,
+    14012,
+    14013,
+    14018,
+    14020
+   ],
+   "arms": {
+    "rule": {
+     "runs": 5,
+     "success": {
+      "k": 1,
+      "n": 5,
+      "share": 0.2,
+      "ci": [
+       0.036,
+       0.624
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "repeated": 4,
+      "clean": 1
+     },
+     "score": 72.8,
+     "collected": 5.8,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "empty_places": 3,
+        "repeats": 2
+       }
+      },
+      "hard-14012": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "empty_places": 1,
+        "repeats": 0
+       }
+      },
+      "hard-14013": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "empty_places": 3,
+        "repeats": 3
+       }
+      },
+      "hard-14018": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "empty_places": 2,
+        "repeats": 3
+       }
+      },
+      "hard-14020": {
+       "success": false,
+       "outcome": "repeated",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "empty_places": 2,
+        "repeats": 7
+       }
+      }
+     }
+    }
+   }
+  },
+  "N2": {
+   "text": "Собирай образцы, но если два подъезда к кандидатам подряд не дали образца (робот был на месте, а образца нет) — немедленно возвращайся на базу.",
+   "scenarios": [
+    14011,
+    14013,
+    14020,
+    14024,
+    14031
+   ],
+   "arms": {
+    "rule": {
+     "runs": 5,
+     "success": {
+      "k": 0,
+      "n": 5,
+      "share": 0.0,
+      "ci": [
+       0.0,
+       0.434
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "no_reaction": 5
+     },
+     "score": 77.9,
+     "collected": 6.2,
+     "returned": 5,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "approaches": 8,
+        "two_empty_t": 65.4,
+        "return_t": 106.0,
+        "reaction_s": 40.6,
+        "goals_after": 5
+       }
+      },
+      "hard-14013": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "approaches": 9,
+        "two_empty_t": 62.7,
+        "return_t": 86.2,
+        "reaction_s": 23.5,
+        "goals_after": 4
+       }
+      },
+      "hard-14020": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "approaches": 8,
+        "two_empty_t": 72.8,
+        "return_t": 94.4,
+        "reaction_s": 21.6,
+        "goals_after": 3
+       }
+      },
+      "hard-14024": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 8,
+        "two_empty_t": 84.3,
+        "return_t": 127.0,
+        "reaction_s": 42.7,
+        "goals_after": 3
+       }
+      },
+      "hard-14031": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 9,
+        "two_empty_t": 76.1,
+        "return_t": 111.0,
+        "reaction_s": 34.9,
+        "goals_after": 6
+       }
+      }
+     }
+    },
+    "nomem": {
+     "runs": 4,
+     "success": {
+      "k": 0,
+      "n": 1,
+      "share": 0.0,
+      "ci": [
+       0.0,
+       0.793
+      ]
+     },
+     "no_occasion": 3,
+     "outcomes": {
+      "no_reaction": 1,
+      "no_occasion": 3
+     },
+     "score": 77.4,
+     "collected": 6.25,
+     "returned": 4,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "approaches": 8,
+        "two_empty_t": 65.4,
+        "return_t": 99.1,
+        "reaction_s": 33.7,
+        "goals_after": 6
+       }
+      },
+      "hard-14013": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 6,
+        "two_empty_t": null,
+        "return_t": 97.0,
+        "reaction_s": null,
+        "goals_after": null
+       }
+      },
+      "hard-14020": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "approaches": 7,
+        "two_empty_t": null,
+        "return_t": 113.0,
+        "reaction_s": null,
+        "goals_after": null
+       }
+      },
+      "hard-14024": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 6,
+        "two_empty_t": null,
+        "return_t": 118.0,
+        "reaction_s": null,
+        "goals_after": null
+       }
+      }
+     },
+     "llm": {
+      "requests": 93,
+      "exchanges": 95,
+      "first_ok": 88,
+      "repaired": 2,
+      "failed": 3,
+      "no_answer": 3,
+      "first_ok_share": 0.946,
+      "failed_share": 0.032,
+      "errors": {
+       "нет ответа модели": 3,
+       "нарушена схема": 2,
+       "ответ обрезан": 2
+      },
+      "tokens": {
+       "prompt": 2503,
+       "completion": 1493
+      },
+      "retried": 1,
+      "latency_s": {
+       "median": 19.2,
+       "mean": 20.4,
+       "max": 46.1,
+       "n": 91
+      }
+     },
+     "rule_decisions": 5
+    },
+    "mem": {
+     "runs": 4,
+     "success": {
+      "k": 0,
+      "n": 1,
+      "share": 0.0,
+      "ci": [
+       0.0,
+       0.793
+      ]
+     },
+     "no_occasion": 3,
+     "outcomes": {
+      "no_reaction": 1,
+      "no_occasion": 3
+     },
+     "score": 63.7,
+     "collected": 5.0,
+     "returned": 4,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "no_reaction",
+       "details": {
+        "returned": true,
+        "collected": 4,
+        "approaches": 7,
+        "two_empty_t": 75.9,
+        "return_t": 92.9,
+        "reaction_s": 17.0,
+        "goals_after": 2
+       }
+      },
+      "hard-14013": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 4,
+        "approaches": 4,
+        "two_empty_t": null,
+        "return_t": 74.9,
+        "reaction_s": null,
+        "goals_after": null
+       }
+      },
+      "hard-14020": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "approaches": 5,
+        "two_empty_t": null,
+        "return_t": 85.0,
+        "reaction_s": null,
+        "goals_after": null
+       }
+      },
+      "hard-14024": {
+       "success": null,
+       "outcome": "no_occasion",
+       "details": {
+        "returned": true,
+        "collected": 7,
+        "approaches": 6,
+        "two_empty_t": null,
+        "return_t": 118.0,
+        "reaction_s": null,
+        "goals_after": null
+       }
+      }
+     },
+     "llm": {
+      "requests": 86,
+      "exchanges": 90,
+      "first_ok": 79,
+      "repaired": 4,
+      "failed": 3,
+      "no_answer": 3,
+      "first_ok_share": 0.919,
+      "failed_share": 0.035,
+      "errors": {
+       "ответ обрезан": 4,
+       "нет ответа модели": 3,
+       "ответ не JSON": 3,
+       "нарушена схема": 1
+      },
+      "tokens": {
+       "prompt": 3996,
+       "completion": 1635
+      },
+      "retried": 1,
+      "latency_s": {
+       "median": 22.1,
+       "mean": 22.7,
+       "max": 71.0,
+       "n": 85
+      }
+     },
+     "rule_decisions": 5
+    }
+   },
+   "mem_minus_nomem": {
+    "diff": 0.0,
+    "ci": [
+     -0.793,
+     0.793
+    ]
+   },
+   "paired": {
+    "n": 1,
+    "a": {
+     "k": 0,
+     "n": 1,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.793
+     ]
+    },
+    "b": {
+     "k": 0,
+     "n": 1,
+     "share": 0.0,
+     "ci": [
+      0.0,
+      0.793
+     ]
+    },
+    "diff": 0.0,
+    "ci": [
+     0.0,
+     0.0
+    ],
+    "only_a": 0,
+    "only_b": 0,
+    "sign_p": 1.0
+   }
+  },
+  "N3": {
+   "text": "Собирай образцы, но после любого штрафа больше не выбирай цель ближе 1 м от места этого штрафа.",
+   "scenarios": [
+    14011,
+    14013,
+    14014,
+    14015,
+    14016
+   ],
+   "arms": {
+    "rule": {
+     "runs": 5,
+     "success": {
+      "k": 3,
+      "n": 5,
+      "share": 0.6,
+      "ci": [
+       0.231,
+       0.882
+      ]
+     },
+     "no_occasion": 0,
+     "outcomes": {
+      "goal_near_penalty": 2,
+      "clean": 3
+     },
+     "score": 66.7,
+     "collected": 5.6,
+     "returned": 4,
+     "by_scenario": {
+      "hard-14011": {
+       "success": false,
+       "outcome": "goal_near_penalty",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 1,
+        "goals_near": 4,
+        "truth_reentries": 0
+       }
+      },
+      "hard-14013": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 2,
+        "goals_near": 0,
+        "truth_reentries": 0
+       }
+      },
+      "hard-14014": {
+       "success": false,
+       "outcome": "goal_near_penalty",
+       "details": {
+        "returned": false,
+        "collected": 6,
+        "penalties": 1,
+        "goals_near": 2,
+        "truth_reentries": 0
+       }
+      },
+      "hard-14015": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 5,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 1
+       }
+      },
+      "hard-14016": {
+       "success": true,
+       "outcome": "clean",
+       "details": {
+        "returned": true,
+        "collected": 6,
+        "penalties": 1,
+        "goals_near": 0,
+        "truth_reentries": 1
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "launches": [
+  {
+   "time": "2026-10-09T05:03:32",
+   "what": "run main",
+   "model": "qwen3.8-flash-next",
+   "cache_only": false,
+   "network_calls": 396,
+   "wall_s": 4293
+  },
+  {
+   "time": "2026-10-09T05:14:07",
+   "what": "shadow A",
+   "model": "qwen3.8-flash-next",
+   "cache_only": false,
+   "network_calls": 52,
+   "wall_s": 634
+  }
+ ],
+ "network_calls": 448,
+ "runs": [
+  {
+   "arm": "rule",
+   "scenario": "hard-14001",
+   "score": 66.06,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 10.6,
+   "time_s": 82.9,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 15,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 4,
+   "refuted": 0,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14002",
+   "score": 81.23,
+   "collected": 7,
+   "total": 7,
+   "returned": true,
+   "battery": 12.3,
+   "time_s": 98.7,
+   "hazard_hits": 2,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 2,
+   "decisions": 34,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 9,
+   "refuted": 0,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14003",
+   "score": 90.78,
+   "collected": 7,
+   "total": 7,
+   "returned": true,
+   "battery": 7.8,
+   "time_s": 115.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 19,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 3,
+   "to_empty": 3,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [
+    {
+     "t": 89.9,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": -1.85,
+      "y": 1.15
+     },
+     "checked_t": 80.9,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 90.9,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": -1.05,
+      "y": 0.75
+     },
+     "checked_t": 89.9,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 93.9,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": -1.55,
+      "y": 0.85
+     },
+     "checked_t": 89.9,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    }
+   ],
+   "lost": 2,
+   "refuted": 3,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14004",
+   "score": 70.26,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 2.6,
+   "time_s": 84.3,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 16,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14005",
+   "score": 72.04,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 20.4,
+   "time_s": 73.1,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 14,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 1,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 1,
+   "refuted": 1,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14006",
+   "score": 71.1,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 11.0,
+   "time_s": 90.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 26,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 12,
+   "refuted": 0,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14007",
+   "score": 60.38,
+   "collected": 4,
+   "total": 7,
+   "returned": true,
+   "battery": 3.8,
+   "time_s": 83.8,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 19,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 5,
+   "refuted": 0,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14008",
+   "score": 65.47,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 4.7,
+   "time_s": 89.0,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 17,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 1,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 2,
+   "refuted": 1,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14009",
+   "score": 72.46,
+   "collected": 6,
+   "total": 7,
+   "returned": true,
+   "battery": 4.7,
+   "time_s": 132.4,
+   "hazard_hits": 1,
+   "false_collects": 1,
+   "collisions": 0,
+   "penalties": 2,
+   "decisions": 23,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 7,
+   "to_empty": 9,
+   "to_empty_collected": 1,
+   "to_penalty": 8,
+   "revisit_list": [
+    {
+     "t": 67.7,
+     "kind": "empty",
+     "goal": {
+      "type": "explore",
+      "x": 1.75,
+      "y": -0.25
+     },
+     "checked_t": 67.6,
+     "why": "false_collect",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 67.7,
+     "kind": "penalty",
+     "goal": {
+      "type": "explore",
+      "x": 1.75,
+      "y": -0.25
+     },
+     "penalty_t": 67.6,
+     "penalty": "false_collect",
+     "source": "heuristic"
+    },
+    {
+     "t": 68.3,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.35,
+      "y": -0.75
+     },
+     "checked_t": 58.2,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 85.1,
+     "kind": "empty",
+     "goal": {
+      "type": "explore",
+      "x": 2.25,
+      "y": -0.25
+     },
+     "checked_t": 85.1,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 85.1,
+     "kind": "penalty",
+     "goal": {
+      "type": "explore",
+      "x": 2.25,
+      "y": -0.25
+     },
+     "penalty_t": 67.6,
+     "penalty": "false_collect",
+     "source": "heuristic"
+    },
+    {
+     "t": 85.2,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.15,
+      "y": -0.25
+     },
+     "checked_t": 85.1,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 85.2,
+     "kind": "penalty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.15,
+      "y": -0.25
+     },
+     "penalty_t": 67.6,
+     "penalty": "false_collect",
+     "source": "heuristic"
+    },
+    {
+     "t": 87.7,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.25,
+      "y": -0.15
+     },
+     "checked_t": 87.7,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 87.7,
+     "kind": "penalty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.25,
+      "y": -0.15
+     },
+     "penalty_t": 67.6,
+     "penalty": "false_collect",
+     "source": "heuristic"
+    },
+    {
+     "t": 89.5,
+     "kind": "empty",
+     "goal": {
+      "type": "explore",
+      "x": 2.25,
+      "y": -0.25
+     },
+     "checked_t": 89.5,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 89.5,
+     "kind": "penalty",
+     "goal": {
+      "type": "explore",
+      "x": 2.25,
+      "y": -0.25
+     },
+     "penalty_t": 67.6,
+     "penalty": "false_collect",
+     "source": "heuristic"
+    },
+    {
+     "t": 89.6,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.05,
+      "y": 0.15
+     },
+     "checked_t": 89.5,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 89.6,
+     "kind": "penalty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.05,
+      "y": 0.15
+     },
+     "penalty_t": 67.6,
+     "penalty": "false_collect",
+     "source": "heuristic"
+    },
+    {
+     "t": 94.1,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.25,
+      "y": -0.05
+     },
+     "checked_t": 94.1,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "heuristic"
+    },
+    {
+     "t": 94.1,
+     "kind": "penalty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.25,
+      "y": -0.05
+     },
+     "penalty_t": 67.6,
+     "penalty": "false_collect",
+     "source": "heuristic"
+    },
+    {
+     "t": 96.7,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.15,
+      "y": -0.35
+     },
+     "checked_t": 96.7,
+     "why": "candidate_refuted",
+     "collected": true,
+     "source": "heuristic"
+    },
+    {
+     "t": 96.7,
+     "kind": "penalty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.15,
+      "y": -0.35
+     },
+     "penalty_t": 67.6,
+     "penalty": "false_collect",
+     "source": "heuristic"
+    }
+   ],
+   "lost": 3,
+   "refuted": 6,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "rule",
+   "scenario": "hard-14010",
+   "score": 35.0,
+   "collected": 4,
+   "total": 7,
+   "returned": false,
+   "battery": 0.0,
+   "time_s": 75.9,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 17,
+   "asked": 0,
+   "by_model": 0,
+   "same_as_rule": 0,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 2,
+   "refuted": 0,
+   "prompt_tokens": null
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14001",
+   "score": 66.06,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 10.6,
+   "time_s": 82.9,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 15,
+   "asked": 15,
+   "by_model": 15,
+   "same_as_rule": 15,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 4,
+   "refuted": 0,
+   "prompt_tokens": 2492
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14002",
+   "score": 80.93,
+   "collected": 7,
+   "total": 7,
+   "returned": true,
+   "battery": 9.3,
+   "time_s": 108.2,
+   "hazard_hits": 2,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 2,
+   "decisions": 38,
+   "asked": 37,
+   "by_model": 37,
+   "same_as_rule": 35,
+   "empty_places": 1,
+   "to_empty": 4,
+   "to_empty_collected": 1,
+   "to_penalty": 0,
+   "revisit_list": [
+    {
+     "t": 71.8,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 0.35,
+      "y": -1.55
+     },
+     "checked_t": 71.8,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "llm"
+    },
+    {
+     "t": 71.9,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 0.35,
+      "y": -1.55
+     },
+     "checked_t": 71.8,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "llm"
+    },
+    {
+     "t": 73.8,
+     "kind": "empty",
+     "goal": {
+      "type": "explore",
+      "x": 0.25,
+      "y": -1.75
+     },
+     "checked_t": 71.8,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "llm"
+    },
+    {
+     "t": 79.8,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 0.45,
+      "y": -1.45
+     },
+     "checked_t": 71.8,
+     "why": "candidate_refuted",
+     "collected": true,
+     "source": "llm"
+    }
+   ],
+   "lost": 16,
+   "refuted": 1,
+   "prompt_tokens": 2653
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14003",
+   "score": 80.57,
+   "collected": 6,
+   "total": 7,
+   "returned": true,
+   "battery": 5.7,
+   "time_s": 102.9,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 19,
+   "asked": 19,
+   "by_model": 19,
+   "same_as_rule": 13,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 1,
+   "refuted": 0,
+   "prompt_tokens": 2484
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14004",
+   "score": 70.1,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 1.0,
+   "time_s": 87.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 15,
+   "asked": 15,
+   "by_model": 15,
+   "same_as_rule": 15,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": 2433
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14005",
+   "score": 71.55,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 15.5,
+   "time_s": 82.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 17,
+   "asked": 17,
+   "by_model": 17,
+   "same_as_rule": 14,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 2,
+   "refuted": 0,
+   "prompt_tokens": 2471
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14006",
+   "score": 70.76,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 7.6,
+   "time_s": 96.8,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 22,
+   "asked": 22,
+   "by_model": 22,
+   "same_as_rule": 21,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 8,
+   "refuted": 0,
+   "prompt_tokens": 2464
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14007",
+   "score": 65.38,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 3.8,
+   "time_s": 85.0,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 22,
+   "asked": 22,
+   "by_model": 22,
+   "same_as_rule": 18,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": 2504
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14008",
+   "score": 65.49,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 4.9,
+   "time_s": 89.0,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 17,
+   "asked": 16,
+   "by_model": 16,
+   "same_as_rule": 15,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 2,
+   "refuted": 0,
+   "prompt_tokens": 2587
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14009",
+   "score": 65.35,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 3.5,
+   "time_s": 102.7,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 23,
+   "asked": 23,
+   "by_model": 23,
+   "same_as_rule": 16,
+   "empty_places": 1,
+   "to_empty": 2,
+   "to_empty_collected": 1,
+   "to_penalty": 0,
+   "revisit_list": [
+    {
+     "t": 59.2,
+     "kind": "empty",
+     "goal": {
+      "type": "explore",
+      "x": 2.25,
+      "y": -0.25
+     },
+     "checked_t": 58.2,
+     "why": "candidate_refuted",
+     "collected": false,
+     "source": "llm"
+    },
+    {
+     "t": 63.9,
+     "kind": "empty",
+     "goal": {
+      "type": "investigate",
+      "x": 2.15,
+      "y": -0.75
+     },
+     "checked_t": 58.2,
+     "why": "candidate_refuted",
+     "collected": true,
+     "source": "llm"
+    }
+   ],
+   "lost": 3,
+   "refuted": 1,
+   "prompt_tokens": 2492
+  },
+  {
+   "arm": "nomem",
+   "scenario": "hard-14010",
+   "score": 40.0,
+   "collected": 5,
+   "total": 7,
+   "returned": false,
+   "battery": 0.0,
+   "time_s": 93.6,
+   "hazard_hits": 2,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 2,
+   "decisions": 19,
+   "asked": 18,
+   "by_model": 18,
+   "same_as_rule": 17,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 2,
+   "refuted": 0,
+   "prompt_tokens": 2466
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14001",
+   "score": 65.78,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 7.8,
+   "time_s": 89.8,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 16,
+   "asked": 16,
+   "by_model": 16,
+   "same_as_rule": 15,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 4,
+   "refuted": 0,
+   "prompt_tokens": 3916
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14002",
+   "score": 91.17,
+   "collected": 7,
+   "total": 7,
+   "returned": true,
+   "battery": 11.7,
+   "time_s": 113.0,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 23,
+   "asked": 22,
+   "by_model": 22,
+   "same_as_rule": 20,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": 3993
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14003",
+   "score": 90.61,
+   "collected": 7,
+   "total": 7,
+   "returned": true,
+   "battery": 6.1,
+   "time_s": 116.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 18,
+   "asked": 17,
+   "by_model": 17,
+   "same_as_rule": 14,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 1,
+   "refuted": 0,
+   "prompt_tokens": 3903
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14004",
+   "score": 70.1,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 1.0,
+   "time_s": 87.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 15,
+   "asked": 15,
+   "by_model": 15,
+   "same_as_rule": 15,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": 3791
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14005",
+   "score": 71.55,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 15.5,
+   "time_s": 82.6,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 17,
+   "asked": 17,
+   "by_model": 17,
+   "same_as_rule": 14,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 2,
+   "refuted": 0,
+   "prompt_tokens": 3885
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14006",
+   "score": 55.22,
+   "collected": 4,
+   "total": 7,
+   "returned": true,
+   "battery": 2.2,
+   "time_s": 85.9,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 21,
+   "asked": 20,
+   "by_model": 20,
+   "same_as_rule": 17,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 6,
+   "refuted": 0,
+   "prompt_tokens": 3850
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14007",
+   "score": 60.52,
+   "collected": 4,
+   "total": 7,
+   "returned": true,
+   "battery": 5.2,
+   "time_s": 93.8,
+   "hazard_hits": 0,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 0,
+   "decisions": 23,
+   "asked": 22,
+   "by_model": 22,
+   "same_as_rule": 19,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": 3949
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14008",
+   "score": 65.43,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 4.3,
+   "time_s": 89.1,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 17,
+   "asked": 16,
+   "by_model": 16,
+   "same_as_rule": 15,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 2,
+   "refuted": 0,
+   "prompt_tokens": 4051
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14009",
+   "score": 65.28,
+   "collected": 5,
+   "total": 7,
+   "returned": true,
+   "battery": 2.8,
+   "time_s": 109.7,
+   "hazard_hits": 1,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 1,
+   "decisions": 18,
+   "asked": 17,
+   "by_model": 17,
+   "same_as_rule": 13,
+   "empty_places": 1,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 3,
+   "refuted": 1,
+   "prompt_tokens": 3858
+  },
+  {
+   "arm": "mem",
+   "scenario": "hard-14010",
+   "score": 50.0,
+   "collected": 6,
+   "total": 7,
+   "returned": false,
+   "battery": 0.0,
+   "time_s": 101.8,
+   "hazard_hits": 2,
+   "false_collects": 0,
+   "collisions": 0,
+   "penalties": 2,
+   "decisions": 23,
+   "asked": 23,
+   "by_model": 23,
+   "same_as_rule": 17,
+   "empty_places": 0,
+   "to_empty": 0,
+   "to_empty_collected": 0,
+   "to_penalty": 0,
+   "revisit_list": [],
+   "lost": 3,
+   "refuted": 0,
+   "prompt_tokens": 3983
+  }
+ ]
+}

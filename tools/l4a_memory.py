@@ -62,8 +62,8 @@ def run_cell(cell, out, model, cache_only):
     path = record(out, group, arm, seed)
     if path.is_file():
         return 'kept'
-    mission = {} if group == 'main' else {'mission': MISSIONS[group]['text']}
-    asks = {} if group == 'main' else {'mission_triggers': True}
+    mission = {'mission': MISSIONS[group]['text']} if group in MISSIONS else {}
+    asks = {'mission_triggers': True} if group in MISSIONS else {}
     if arm == 'rule':
         run_episode(LEVEL, seed, 'adaptive', experiment=out, arm=arm_dir(group, arm), config=mission, truth=True)
     elif arm == 'nomem':
