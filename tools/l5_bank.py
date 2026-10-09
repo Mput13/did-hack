@@ -213,10 +213,11 @@ def crossfit_loss(table, choice):
     return float(np.mean(out))
 
 
-def load(directory):
+def load(directory, with_models=True):
+    """Банк с ценами и выборами. with_models=False — только правило (пока модели ещё отвечают)."""
     bank = read_json(directory / 'bank.json')
     values = read_json(directory / 'values.json', {})
-    answers = read_json(directory / 'answers.json', {})
+    answers = read_json(directory / 'answers.json', {}) if with_models else {}
     rows = []
     for row in bank['states']:
         state = row['state']
@@ -299,8 +300,8 @@ def _error_kind(ans):
     return error_kind('; '.join(str(e) for e in ans.get('errors') or []) or str(ans.get('error')))
 
 
-def summarize(directory):
-    bank, rows = load(directory)
+def summarize(directory, with_models=True):
+    bank, rows = load(directory, with_models)
     who_all = ['rule', *[m for m in MODELS if any(m in r['choice'] for r in rows)]]
     models = who_all[1:]
     s = {'experiment': 'L5', 'generated': time.strftime('%Y-%m-%dT%H:%M:%S'), 'agent': bank['agent'],
@@ -393,7 +394,9 @@ def print_report(s):
 
 
 def cmd_report(args):
-    s, _ = summarize(args.dir)
+    s, _ = summarize(args.dir, not args.rule_only)
+    if args.rule_only:
+        return print_report(s)
     write_json(args.dir / 'summary.json', s)
     if args.out == 'L5':
         write_json(FINDINGS / 'L5-results.json', s)
@@ -417,6 +420,7 @@ def main():
     ap.add_argument('--total', type=int, default=TOTAL)
     ap.add_argument('--models', nargs='+', default=list(MODELS))
     ap.add_argument('--cache-only', action='store_true')
+    ap.add_argument('--rule-only', action='store_true', help='report: только правило, без ответов моделей')
     args = ap.parse_args()
     args.dir = RUNS / args.out
     args.jobs = max(1, min(2, args.jobs))            # расчёты — не больше двух потоков

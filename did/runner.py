@@ -39,7 +39,7 @@ def make_planner(cfg, llm=None, seed=0):
         big = {k: v for k, v in (llm or {}).items() if k != 'jev'} or None
         return make_guarded(cfg, llm, lambda: make_planner(replace(cfg, mission_guard='', planner='llm'), big, seed))
     if cfg.planner != 'llm':
-        return HeuristicPlanner()
+        return HeuristicPlanner(getattr(cfg, 'plan_home_weight', 0.0), getattr(cfg, 'plan_conf_power', 1.0))
     from .llm import load_system_prompt, make_client
     opts = dict(llm or {'kind': 'mock'})
     prompt = opts.pop('prompt', None)
