@@ -63,6 +63,7 @@ class ForcedPlanner(HeuristicPlanner):
     """
 
     def __init__(self, at=None, subgoals=None, rep=0, keep=False):
+        super().__init__()
         self.at, self.subgoals, self.rep, self.keep = at, subgoals, int(rep), keep
         self.n = 0
         self.times, self.hashes, self.states = [], [], []
